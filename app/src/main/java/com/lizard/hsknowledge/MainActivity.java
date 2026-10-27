@@ -85,7 +85,7 @@ public class MainActivity extends Activity {
     private static final int C_HI = 0xFFFFC107;      // 重点高亮（琥珀金）
 
     // 云端更新地址：GitHub 仓库中的 cloud/update.json（raw 直链）
-    private static final String UPDATE_URL = "https://raw.githubusercontent.com/hnxy114514/HZKnowledge/main/cloud/update.json";
+    private static final String UPDATE_URL = "https://raw.githubusercontent.com/hnxy114514/WSHZKnowledge/main/cloud/update.json";
     private static final int C_TEXT = 0xFFE8E8E8;    // 正文
     private static final int C_SUB = 0xFF8A8A8A;     // 次要
 
