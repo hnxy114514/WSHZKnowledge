@@ -17,7 +17,7 @@ tools/
   gen_images.py          公式配图生成
   img_lib.py             数学公式排版库（LaTeX 结构解析 + 连续折线根号）
 cloud/
-  update.json            云端更新数据包（app 启动时检查更新）
+  update.json            完整数据包备份（构建副产品）
 build.sh                 无 Gradle 构建脚本（aapt2 + javac + d8 + apksigner）
 ```
 
@@ -29,10 +29,10 @@ build.sh                 无 Gradle 构建脚本（aapt2 + javac + d8 + apksigne
 KS_PASS=你的签名密码 ./build.sh
 ```
 
-构建产物为 `汇总知识.apk`（同时生成 `cloud/update.json`）。
+构建产物为 `汇总知识.apk`（同时生成 `cloud/update.json` 作为数据包备份）。
 
-## 云端更新
+## 更新方式
 
-- app 每次启动时读取内置 `assets/data`，并在后台检查 `UPDATE_URL`（指向 `cloud/update.json`）。
-- 若云端 `v` 版本号大于本地版本，则下载到应用私有目录，下次启动生效。
-- 数据更新只覆盖文字内容；配图更新需要发布新版 APK。
+- app 启动时后台检查 GitHub Release 最新版（按 tag 中的版本号与本地 versionCode 比较）。
+- 发现新版：先申请「安装未知应用」权限，再下载 APK 并触发覆盖安装。
+- 发布新版本：在 GitHub Releases 新建 Release，tag 用 `v<versionCode>`（如 `v16`），上传 APK 即可。

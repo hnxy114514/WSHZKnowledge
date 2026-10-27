@@ -2,6 +2,7 @@ package com.lizard.hsknowledge;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
@@ -15,7 +16,10 @@ import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.text.Editable;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
@@ -51,7 +55,6 @@ import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -63,17 +66,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 汇总知识 v14
- * 数据/UI 分离：UI 只渲染，数据来自 assets/data/<科目>.json（每科一文件）。
- * 层级：学科 → 大块(章) → 小节(节)/专题 → 具体知识点 → 详情
- * 自适应：一套系统两套参数（Metrics），运行时判断 isScreenRound——
- *  圆屏收进圆内接安全区、方屏用满宽，同一套代码自动切换。
- * 数学排版：文本/上标/下标/分数/根号统一由行内排版引擎绘制（支持互相嵌套）。
- * 每页(除主页)顶部都有“‹ 返回”（无实体返回键的设备也能返回）。
- *  - 全局搜索 + 节内搜索；列表项完整换行不截断。
- *  - 详情正文支持 ^{上标} _{下标} **重点(加粗+高亮色)**，重点色由数据层标记。
- *  - 配图：双击全屏，全屏内双指缩放、单指拖拽（圆屏可把四角内容拖到可见区）。
- *  - 设置：分「显示 / 数据 / 关于」三类，含科目顺序自定义。
+ * 腕上知识汇总：九科知识点 + 数学公式排版 + 重点高亮 + APK 自动更新。
  */
 public class MainActivity extends Activity {
 
@@ -84,8 +77,9 @@ public class MainActivity extends Activity {
     private static final int C_PRIMARY = 0xFF4FC3F7; // 主色（青蓝）
     private static final int C_HI = 0xFFFFC107;      // 重点高亮（琥珀金）
 
-    // 云端更新地址：GitHub 仓库中的 cloud/update.json（raw 直链）
-    private static final String UPDATE_URL = "https://raw.githubusercontent.com/hnxy114514/WSHZKnowledge/main/cloud/update.json";
+    private static final String RELEASES_URL = "https://api.github.com/repos/hnxy114514/WSHZKnowledge/releases/latest";
+    private static final String APK_FILE = "update.apk";
+    private static final String APK_AUTHORITY = "com.lizard.hsknowledge.fileprovider";
     private static final int C_TEXT = 0xFFE8E8E8;    // 正文
     private static final int C_SUB = 0xFF8A8A8A;     // 次要
 
@@ -168,6 +162,7 @@ public class MainActivity extends Activity {
         loadOrderKeys();
         buildUi();
         showScreen(S_SUBJECT);
+        checkUpdate(true);
     }
 
     private void loadOrderKeys() {
@@ -233,29 +228,6 @@ public class MainActivity extends Activity {
         return s;
     }
 
-    /** 尝试读取云端已下载的 update.json（filesDir），成功则返回 true。 */
-    private boolean tryLoadUpdate() {
-        try {
-            File f = new File(getFilesDir(), "update.json");
-            if (!f.exists()) return false;
-            byte[] data = new byte[(int) f.length()];
-            FileInputStream fis = new FileInputStream(f);
-            fis.read(data);
-            fis.close();
-            JSONObject obj = new JSONObject(new String(data, StandardCharsets.UTF_8));
-            JSONArray subs = obj.optJSONArray("subjects");
-            if (subs == null || subs.length() == 0) return false;
-            for (int i = 0; i < subs.length(); i++) {
-                Subject s = parseSubject(subs.getJSONObject(i));
-                subjects.add(s);
-                subjectMap.put(s.key, s);
-            }
-            return true;
-        } catch (Exception ignored) {
-            return false;
-        }
-    }
-
     private void buildHits() {
         for (Subject s : subjects) {
             for (Block b : s.blocks) {
@@ -283,10 +255,6 @@ public class MainActivity extends Activity {
     }
 
     private void loadData() {
-        if (tryLoadUpdate()) {
-            buildHits();
-            return;
-        }
         try {
             JSONObject orderObj = readJsonAsset("data/order.json");
             JSONArray orderArr = orderObj.getJSONArray("order");
@@ -311,16 +279,18 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 后台检查云端更新：有新版本则下载 update.json 到 filesDir，下次启动生效。 */
+    /** 检查 GitHub Release 最新版，有新版则先申请安装权限，再下载 APK 覆盖安装。 */
     private void checkUpdate(final boolean silent) {
         new Thread(new Runnable() {
             public void run() {
                 try {
-                    URL u = new URL(UPDATE_URL);
+                    final int local = getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
+                    URL u = new URL(RELEASES_URL);
                     HttpURLConnection cn = (HttpURLConnection) u.openConnection();
                     cn.setConnectTimeout(8000);
                     cn.setReadTimeout(10000);
                     cn.setInstanceFollowRedirects(true);
+                    cn.setRequestProperty("Accept", "application/vnd.github+json");
                     InputStream is = cn.getInputStream();
                     ByteArrayOutputStream bos = new ByteArrayOutputStream();
                     byte[] b = new byte[8192];
@@ -329,44 +299,112 @@ public class MainActivity extends Activity {
                     is.close();
                     cn.disconnect();
                     JSONObject obj = new JSONObject(new String(bos.toByteArray(), StandardCharsets.UTF_8));
-                    final int remote = obj.optInt("v", 0);
-                    int local = 0;
-                    try {
-                        local = readJsonAsset("data/order.json").optInt("v", 0);
-                    } catch (Exception e2) { }
-                    if (remote > local) {
-                        File f = new File(getFilesDir(), "update.json");
-                        FileOutputStream fos = new FileOutputStream(f);
-                        fos.write(bos.toByteArray());
-                        fos.close();
-                        final int r = remote;
-                        runOnUiThread(new Runnable() {
-                            public void run() {
-                                Toast.makeText(MainActivity.this,
-                                        "已下载数据 v" + r + "，重启后生效", Toast.LENGTH_LONG).show();
-                            }
-                        });
-                    } else if (!silent) {
-                        final int l = local;
-                        runOnUiThread(new Runnable() {
-                            public void run() {
-                                Toast.makeText(MainActivity.this,
-                                        "已是最新版本 v" + l, Toast.LENGTH_SHORT).show();
-                            }
-                        });
+                    final int remote = parseVersion(obj.optString("tag_name", ""));
+                    if (remote <= local) {
+                        if (!silent) toast("已是最新版 v" + local);
+                        return;
                     }
+                    String apkUrl = null;
+                    JSONArray assets = obj.optJSONArray("assets");
+                    if (assets != null) {
+                        for (int i = 0; i < assets.length(); i++) {
+                            JSONObject a = assets.getJSONObject(i);
+                            if (a.optString("name", "").endsWith(".apk")) {
+                                apkUrl = a.optString("browser_download_url", "");
+                                break;
+                            }
+                        }
+                    }
+                    if (apkUrl == null || apkUrl.length() == 0) {
+                        if (!silent) toast("未找到安装包");
+                        return;
+                    }
+                    final String url = apkUrl;
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+                                requestInstallPermission();
+                                return;
+                            }
+                            toast("正在下载 v" + remote + "…");
+                            new Thread(new Runnable() {
+                                public void run() {
+                                    try {
+                                        downloadApk(url);
+                                        runOnUiThread(new Runnable() {
+                                            public void run() { installApk(); }
+                                        });
+                                    } catch (final Exception e) {
+                                        if (!silent) toast("下载失败：" + e.getMessage());
+                                    }
+                                }
+                            }).start();
+                        }
+                    });
                 } catch (final Exception e) {
-                    if (!silent) {
-                        runOnUiThread(new Runnable() {
-                            public void run() {
-                                Toast.makeText(MainActivity.this,
-                                        "检查更新失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
-                            }
-                        });
-                    }
+                    if (!silent) toast("检查更新失败：" + e.getMessage());
                 }
             }
         }).start();
+    }
+
+    private void requestInstallPermission() {
+        try {
+            startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:" + getPackageName())));
+            toast("请开启「允许安装未知应用」，再回来点一次检查更新");
+        } catch (Exception e) {
+            toast("请在系统设置中开启安装未知应用权限");
+        }
+    }
+
+    private int parseVersion(String tag) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < tag.length(); i++) {
+            char c = tag.charAt(i);
+            if (c >= '0' && c <= '9') sb.append(c);
+        }
+        try { return Integer.parseInt(sb.toString()); } catch (Exception e) { return 0; }
+    }
+
+    private void downloadApk(String urlStr) throws Exception {
+        URL u = new URL(urlStr);
+        HttpURLConnection cn = (HttpURLConnection) u.openConnection();
+        cn.setConnectTimeout(15000);
+        cn.setReadTimeout(60000);
+        cn.setInstanceFollowRedirects(true);
+        InputStream is = cn.getInputStream();
+        File dir = getFilesDir();
+        File tmp = new File(dir, APK_FILE + ".tmp");
+        FileOutputStream fos = new FileOutputStream(tmp);
+        byte[] b = new byte[8192];
+        int n;
+        while ((n = is.read(b)) > 0) fos.write(b, 0, n);
+        fos.close();
+        is.close();
+        cn.disconnect();
+        File dst = new File(dir, APK_FILE);
+        if (dst.exists()) dst.delete();
+        tmp.renameTo(dst);
+    }
+
+    private void installApk() {
+        File f = new File(getFilesDir(), APK_FILE);
+        Intent i = new Intent(Intent.ACTION_VIEW);
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        if (Build.VERSION.SDK_INT >= 24) {
+            i.setDataAndType(Uri.parse("content://" + APK_AUTHORITY + "/" + APK_FILE), "application/vnd.android.package-archive");
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } else {
+            i.setDataAndType(Uri.fromFile(f), "application/vnd.android.package-archive");
+        }
+        startActivity(i);
+    }
+
+    private void toast(final String msg) {
+        runOnUiThread(new Runnable() {
+            public void run() { Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show(); }
+        });
     }
 
     private List<Section> parseSections(JSONArray arr) throws Exception {
@@ -1627,7 +1665,7 @@ public class MainActivity extends Activity {
 
         settingsInner.addView(sectionHeader("数据管理"), wrap());
         TextView upd = new TextView(this);
-        upd.setText("检查数据更新");
+        upd.setText("检查更新");
         upd.setTextSize(m.backSize);
         upd.setTextColor(C_PRIMARY);
         upd.setGravity(Gravity.CENTER);

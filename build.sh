@@ -41,7 +41,7 @@ echo "== 4. aapt2 link =="
 
 echo "== 5. javac 编译 =="
 "$JAVAC" --release 8 -nowarn -g:none -d "$BUILD/obj" -cp "$ANDROID_JAR" \
-  "$SRC/java/com/lizard/hsknowledge/MainActivity.java"
+  $(find "$SRC/java" -name '*.java')
 
 echo "== 6. 打包 class 为 jar =="
 python - "$BUILD/obj" "$BUILD/classes.jar" <<'PY'
