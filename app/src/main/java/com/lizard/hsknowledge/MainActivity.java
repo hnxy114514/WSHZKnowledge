@@ -1445,7 +1445,7 @@ public class MainActivity extends Activity {
             float[] b = measList(grp.kids.get(1), p, s2);
             float gap = s2 * 0.14f, barUp = s2 * 0.30f;
             float w = Math.max(a[0], b[0]) + s2 * 0.26f;
-            float asc = barUp + gap + a[1];
+            float asc = barUp + gap + a[1] + a[2];
             float desc = Math.max(b[1] + b[2] + gap - barUp, s2 * 0.18f);
             return new float[]{w, asc, desc};
         }
@@ -1519,7 +1519,7 @@ public class MainActivity extends Activity {
             float cx = x + w / 2f;
             float gap = s2 * 0.14f, barUp = s2 * 0.30f;
             float barY = base - barUp;
-            drawCentered(c, p, t.kids.get(0), cx, barY - gap, s2, color);
+            drawCentered(c, p, t.kids.get(0), cx, barY - gap - a[2], s2, color);
             Paint.Style oldStyle = p.getStyle();
             p.setStyle(Paint.Style.STROKE);
             p.setStrokeWidth(Math.max(1.2f, s2 * 0.07f));
@@ -1612,8 +1612,8 @@ public class MainActivity extends Activity {
                     up = Math.max(1f, up - orig * 0.18f);
                     dn += orig * 0.18f;
                 }
-                fm.ascent = -(int) up;
-                fm.descent = (int) dn;
+                fm.ascent = -(int) Math.ceil(up);
+                fm.descent = (int) Math.ceil(dn);
                 fm.top = fm.ascent;
                 fm.bottom = fm.descent;
             }
