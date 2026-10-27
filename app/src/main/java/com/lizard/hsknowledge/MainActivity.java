@@ -1107,7 +1107,7 @@ public class MainActivity extends Activity {
         };
         for (int i = 0; i + 1 < pairs.length; i += 2) LX.put(pairs[i], pairs[i + 1]);
         String[] accs = {
-            "vec","\u20D7","overrightarrow","\u20D7","overline","\u0305","bar","\u0304",
+            "overline","\u0305","bar","\u0304",
             "hat","\u0302","widehat","\u0302","tilde","\u0303","widetilde","\u0303",
             "dot","\u0307","ddot","\u0308","underline","\u0332"
         };
@@ -1174,6 +1174,13 @@ public class MainActivity extends Activity {
             while (k < n && Character.isLetter(s.charAt(k))) k++;
             String cmd = s.substring(j, k);
             int[] used = new int[1];
+
+            if ("vec".equals(cmd) || "overrightarrow".equals(cmd)) {
+                String a = latexToText(readArg(s, k, used));
+                out.append(MK_V_BEG).append(a).append(MK_V_END);
+                i = used[0];
+                continue;
+            }
 
             String acc = LX_ACC.get(cmd);
             if (acc != null) {
@@ -1245,6 +1252,8 @@ public class MainActivity extends Activity {
     private static final char MK_F_END = '\uE002';
     private static final char MK_R_BEG = '\uE003';
     private static final char MK_R_END = '\uE004';
+    private static final char MK_V_BEG = '\uE005';
+    private static final char MK_V_END = '\uE006';
     private static final float SUB_SCALE = 0.62f;    // 上下标相对字号
     private static final float FRAC_SCALE = 0.74f;   // 分子分母相对字号
 
@@ -1276,6 +1285,12 @@ public class MainActivity extends Activity {
 
         static Inl sqrt(Inl a) {
             Inl x = new Inl(4);
+            x.kids.add(a);
+            return x;
+        }
+
+        static Inl vec(Inl a) {
+            Inl x = new Inl(6);
             x.kids.add(a);
             return x;
         }
@@ -1324,6 +1339,12 @@ public class MainActivity extends Activity {
                 if (buf.length() > 0) { out.add(Inl.txt(buf.toString())); buf.setLength(0); }
                 out.add(Inl.sqrt(Inl.group(parseInl(s.substring(i + 1, b[1])))));
                 i = b[1] + 1;
+            } else if (c == MK_V_BEG) {
+                int e = s.indexOf(MK_V_END, i + 1);
+                if (e < 0) { buf.append(c); i++; continue; }
+                if (buf.length() > 0) { out.add(Inl.txt(buf.toString())); buf.setLength(0); }
+                out.add(Inl.vec(Inl.group(parseInl(s.substring(i + 1, e)))));
+                i = e + 1;
             } else if (c == '^' || c == '_') {
                 int j = i + 1;
                 if (j >= n) { buf.append(c); i++; continue; }
@@ -1398,6 +1419,10 @@ public class MainActivity extends Activity {
             float asc = in[1] + size * 0.18f;
             float desc = Math.max(in[2], size * 0.06f) + size * 0.07f;
             return new float[]{w, asc, desc};
+        }
+        if (grp.type == 6) {
+            float[] in = measList(grp.kids.get(0), p, size);
+            return new float[]{in[0], in[1] + size * 0.30f, in[2]};
         }
         float w = 0f, asc = 1f, desc = 1f;
         for (Inl k : grp.kids) {
@@ -1491,6 +1516,23 @@ public class MainActivity extends Activity {
             p.setStyle(oldStyle);
             p.setStrokeCap(oldCap);
             p.setStrokeJoin(oldJoin);
+        } else if (t.type == 6) {
+            drawList(c, p, t.kids.get(0), x, base, size, color);
+            float[] in = measList(t.kids.get(0), p, size);
+            float ay = base - in[1] - size * 0.10f;
+            float x1 = x + in[0] * 0.08f, x2 = x + in[0] * 0.88f;
+            Paint.Style oldStyle = p.getStyle();
+            Paint.Cap oldCap = p.getStrokeCap();
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeCap(Paint.Cap.ROUND);
+            p.setStrokeWidth(Math.max(1.2f, size * 0.055f));
+            p.setColor(color);
+            c.drawLine(x1, ay, x2, ay, p);
+            float h = size * 0.13f;
+            c.drawLine(x2, ay, x2 - h, ay - h * 0.75f, p);
+            c.drawLine(x2, ay, x2 - h, ay + h * 0.75f, p);
+            p.setStyle(oldStyle);
+            p.setStrokeCap(oldCap);
         } else {
             drawList(c, p, t, x, base, size, color);
         }

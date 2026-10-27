@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
-"""程序化生成「汇总知识」App 图标（免费、无 AI、可精确适配圆屏）
-设计：深蓝→紫径向渐变圆底 + 中央打开的书 + 上方金色星光，体现"汇总知识/学习"
-"""
-import os, math
+"""「腕上知识汇总」App 图标：渐变圆底 + 打开的书 + 金色根号（呼应数学公式排版）。"""
+import os
 from PIL import Image, ImageDraw
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -16,12 +14,12 @@ SIZES = {
     "mipmap-xxxhdpi": 192,
 }
 
-BG_OUT = (11, 22, 46)      # 外圈深蓝
-BG_IN = (59, 30, 110)      # 中心紫
-GOLD = (255, 213, 79)
-PAGE = (245, 247, 250)
-LINE = (176, 190, 197)
-SPINE = (40, 52, 90)
+BG_OUT = (14, 24, 48)      # 外圈深海蓝
+BG_IN = (66, 44, 122)      # 中心靛紫
+GOLD = (255, 202, 64)
+PAGE = (250, 248, 241)
+LINE = (176, 186, 206)
+SPINE = (46, 56, 88)
 
 
 def lerp(a, b, t):
@@ -34,47 +32,49 @@ def make_icon(size):
     c = size / 2.0
     r = size / 2.0
 
-    # 1. 径向渐变圆底（同心圆插值）
+    # 径向渐变圆底
     steps = int(r)
     for i in range(steps, 0, -1):
         rr = r * i / steps
-        col = lerp(BG_IN, BG_OUT, (rr / r) ** 1.2)
+        col = lerp(BG_IN, BG_OUT, (rr / r) ** 1.3)
         d.ellipse([c - rr, c - rr, c + rr, c + rr], fill=col + (255,))
 
-    # 2. 金色星光（上方散布）
+    # 金色星光
     stars = [
-        (0.30, 0.22, 0.030), (0.50, 0.15, 0.038), (0.70, 0.24, 0.028),
-        (0.20, 0.36, 0.020), (0.80, 0.38, 0.022), (0.38, 0.32, 0.016),
+        (0.28, 0.20, 0.026), (0.50, 0.13, 0.034), (0.72, 0.21, 0.024),
+        (0.19, 0.34, 0.018), (0.81, 0.36, 0.020), (0.40, 0.28, 0.013),
     ]
     for sx, sy, sr in stars:
         px, py, pr = sx * size, sy * size, sr * size
-        d.ellipse([px - pr, py - pr, px + pr, py + pr], fill=GOLD + (230,))
+        d.ellipse([px - pr, py - pr, px + pr, py + pr], fill=GOLD + (220,))
 
-    # 3. 打开的书（中心偏下）
-    bw = size * 0.50          # 书总宽
-    bh = size * 0.30          # 书高
-    cx = c
-    top = size * 0.52
+    # 打开的书
+    bw = size * 0.54
+    bh = size * 0.32
+    top = size * 0.49
     bot = top + bh
-    mid = top + bh * 0.16     # 书页顶部中间凹陷（打开效果）
-
-    left = [(cx - bw / 2, top), (cx - bw * 0.04, mid), (cx - bw * 0.04, bot), (cx - bw / 2, bot)]
-    right = [(cx + bw / 2, top), (cx + bw * 0.04, mid), (cx + bw * 0.04, bot), (cx + bw / 2, bot)]
+    mid = top + bh * 0.13
+    left = [(c - bw / 2, top), (c - bw * 0.05, mid), (c - bw * 0.05, bot), (c - bw / 2, bot)]
+    right = [(c + bw / 2, top), (c + bw * 0.05, mid), (c + bw * 0.05, bot), (c + bw / 2, bot)]
     d.polygon(left, fill=PAGE + (255,))
     d.polygon(right, fill=PAGE + (255,))
+    d.line([(c, mid), (c, bot)], fill=SPINE + (255,), width=max(1, int(size * 0.014)))
 
-    # 书脊
-    d.line([(cx, mid), (cx, bot)], fill=SPINE + (255,), width=max(1, int(size * 0.012)))
+    # 金色根号（书页中央）
+    lw = max(2, int(size * 0.036))
+    hx1, hx2, hy = c - bw * 0.28, c + bw * 0.30, top + bh * 0.24
+    d.line([(hx1, hy), (hx2, hy)], fill=GOLD + (255,), width=lw)
+    d.line([(hx1, hy), (hx1 - bw * 0.15, hy + bh * 0.58), (hx1 + bw * 0.11, hy + bh * 0.34)],
+           fill=GOLD + (255,), width=lw, joint="curve")
 
-    # 书页横线（文字行）
-    lw = max(1, int(size * 0.010))
-    for k in range(3):
-        yy = bot - bh * (0.22 + k * 0.20)
-        d.line([(cx - bw * 0.42, yy), (cx - bw * 0.10, yy)], fill=LINE + (220,), width=lw)
-        d.line([(cx + bw * 0.10, yy), (cx + bw * 0.42, yy)], fill=LINE + (220,), width=lw)
+    # 书页文字线（根号下方）
+    for k in range(2):
+        yy = top + bh * (0.74 + k * 0.15)
+        d.line([(c - bw * 0.40, yy), (c - bw * 0.08, yy)], fill=LINE + (190,), width=max(1, int(size * 0.010)))
+        d.line([(c + bw * 0.08, yy), (c + bw * 0.40, yy)], fill=LINE + (190,), width=max(1, int(size * 0.010)))
 
-    # 4. 外圈柔光描边（高级感）
-    d.ellipse([1, 1, size - 2, size - 2], outline=GOLD + (60,), width=max(1, int(size * 0.014)))
+    # 外圈柔光描边
+    d.ellipse([1, 1, size - 2, size - 2], outline=GOLD + (70,), width=max(1, int(size * 0.015)))
 
     return img
 
