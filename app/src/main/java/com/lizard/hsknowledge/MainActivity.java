@@ -110,6 +110,7 @@ public class MainActivity extends Activity {
     private LinearLayout subjectScreen, blockScreen, childScreen, listScreen, detailScreen, settingsScreen, searchScreen;
     private ListView subjectList, blockList, childList, itemList, searchList;
     private TextView listTitle, detailTitle, detailPath, searchTitle;
+    private TextView detailBackBtn, settingsBackBtn;
     private EditText itemSearchBox, gSearchBox;
     private ScrollView detailScroll, settingsScroll;
     private LinearLayout detailInner, settingsInner;
@@ -490,26 +491,28 @@ public class MainActivity extends Activity {
         subjectScreen.addView(subjectList, lw());
 
         // 章页
-        blockScreen.addView(makeBack("‹ 返回学科", new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_SUBJECT); }
-        }), wrapM());
         blockList = makeList();
+        blockList.addHeaderView(makeBackHeader("‹ 返回学科", new View.OnClickListener() {
+            public void onClick(View v) { showScreen(S_SUBJECT); }
+        }));
         blockList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                curBlock = curSubject.blocks.get(pos);
+                if (pos == 0) return;   // 返回键 header
+                curBlock = curSubject.blocks.get(pos - 1);
                 openChildren();
             }
         });
         blockScreen.addView(blockList, lw());
 
         // 节页
-        childScreen.addView(makeBack("‹ 返回上一页", new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_BLOCK); }
-        }), wrapM());
         childList = makeList();
+        childList.addHeaderView(makeBackHeader("‹ 返回上一页", new View.OnClickListener() {
+            public void onClick(View v) { showScreen(S_BLOCK); }
+        }));
         childList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                curChild = curBlock.children.get(pos);
+                if (pos == 0) return;   // 返回键 header
+                curChild = curBlock.children.get(pos - 1);
                 if ("topic".equals(curChild.type) && curChild.items.isEmpty()) {
                     openDetail(curChild.name, curChild.sec, curSubject.name + " › " + curBlock.name, S_CHILD, null);
                 } else {
@@ -520,9 +523,6 @@ public class MainActivity extends Activity {
         childScreen.addView(childList, lw());
 
         // 知识点页
-        listScreen.addView(makeBack("‹ 返回上一页", new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_CHILD); }
-        }), wrapM());
         listTitle = new TextView(this);
         listTitle.setTextSize(m.subtitleSize);
         listTitle.setTypeface(Typeface.DEFAULT_BOLD);
@@ -551,18 +551,22 @@ public class MainActivity extends Activity {
         });
 
         itemList = makeList();
+        itemList.addHeaderView(makeBackHeader("‹ 返回上一页", new View.OnClickListener() {
+            public void onClick(View v) { showScreen(S_CHILD); }
+        }));
         listScreen.addView(itemList, lw());
         itemList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                Item it = shownItems.get(pos);
+                if (pos == 0) return;   // 返回键 header
+                Item it = shownItems.get(pos - 1);
                 openDetail(it.t, it.sec, curSubject.name + " › " + curBlock.name + " › " + curChild.name, S_ITEM, it.img);
             }
         });
 
         // 详情页
-        detailScreen.addView(makeBack("‹ 返回", new View.OnClickListener() {
+        detailBackBtn = makeBack("‹ 返回", new View.OnClickListener() {
             public void onClick(View v) { showScreen(detailBack); }
-        }), wrapM());
+        });
         detailPath = new TextView(this);
         detailPath.setTextSize(m.subtitleSize - 2f);
         detailPath.setTextColor(C_SUB);
@@ -588,9 +592,9 @@ public class MainActivity extends Activity {
         detailScreen.addView(detailScroll, lw());
 
         // 设置页
-        settingsScreen.addView(makeBack("‹ 返回", new View.OnClickListener() {
+        settingsBackBtn = makeBack("‹ 返回", new View.OnClickListener() {
             public void onClick(View v) { showScreen(S_SUBJECT); }
-        }), wrapM());
+        });
         settingsScroll = new ScrollView(this);
         settingsScroll.setFillViewport(true);
         settingsInner = new LinearLayout(this);
@@ -600,9 +604,7 @@ public class MainActivity extends Activity {
         settingsScreen.addView(settingsScroll, lw());
 
         // 全局搜索页
-        searchScreen.addView(makeBack("‹ 返回", new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_SUBJECT); }
-        }), wrapM());
+        // 全局搜索页
         searchTitle = new TextView(this);
         searchTitle.setText("搜索全部知识点");
         searchTitle.setTextSize(m.titleSize);
@@ -629,10 +631,14 @@ public class MainActivity extends Activity {
             public void afterTextChanged(Editable s) { refreshGlobalSearch(); }
         });
         searchList = makeList();
+        searchList.addHeaderView(makeBackHeader("‹ 返回", new View.OnClickListener() {
+            public void onClick(View v) { showScreen(S_SUBJECT); }
+        }));
         searchScreen.addView(searchList, lw());
         searchList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                Hit h = searchHits.get(pos);
+                if (pos == 0) return;   // 返回键 header
+                Hit h = searchHits.get(pos - 1);
                 openDetail(h.item.t, h.item.sec, h.path, S_SEARCH, h.item.img);
             }
         });
@@ -687,6 +693,14 @@ public class MainActivity extends Activity {
         b.setPadding(dp(10), dp(8), dp(10), dp(8));
         b.setBackgroundDrawable(pill(C_PILL));
         b.setOnClickListener(onClick);
+        return b;
+    }
+
+    /** 作为列表/正文首项的返回键：随内容一起滚动，滚出屏幕后不再占用顶部空间。 */
+    private TextView makeBackHeader(String label, View.OnClickListener onClick) {
+        TextView b = makeBack(label, onClick);
+        b.setLayoutParams(new AbsListView.LayoutParams(
+                AbsListView.LayoutParams.MATCH_PARENT, AbsListView.LayoutParams.WRAP_CONTENT));
         return b;
     }
 
@@ -1044,6 +1058,7 @@ public class MainActivity extends Activity {
         detailTitle.setText(applyMarkup(title));
         detailPath.setText(applyMarkup(path));
         detailInner.removeAllViews();
+        detailInner.addView(detailBackBtn, wrapM());
         if (img != null && img.length() > 0) addFigure(img);
 
         if (secs == null || secs.isEmpty()) {
@@ -1717,6 +1732,7 @@ public class MainActivity extends Activity {
     // ================= 设置页（分类） =================
     private void renderSettings() {
         settingsInner.removeAllViews();
+        settingsInner.addView(settingsBackBtn, wrapM());
         settingsInner.addView(sectionHeader("显示"), wrap());
         settingsInner.addView(settingRow("正文字号", (int) fontSizeSp, new View.OnClickListener() {
             public void onClick(View v) {
