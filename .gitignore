@@ -1,0 +1,23 @@
+# 签名密钥与密码 —— 绝不上传
+release.keystore
+*.jks
+*.keystore
+
+# 构建产物
+/汇总知识.apk
+*.apk
+*.idsig
+/build/
+/tmp/
+
+# 工具中间产物
+/tools/_archive/
+/tools/gen_out/
+/tools/__pycache__/
+
+# 本地核对目录
+/配图核对/
+
+# 系统文件
+.DS_Store
+Thumbs.db

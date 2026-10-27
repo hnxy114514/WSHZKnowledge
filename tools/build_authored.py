@@ -1,0 +1,599 @@
+# -*- coding: utf-8 -*-
+"""把 tools/subjects/<科目>.py 的知识点树合成为 App 用的分科数据（assets/data/*.json）。
+源文件按科目分文件，层级就是缩进：章 → 节 → 知识点。"""
+import json, os, importlib.util, sys, re, difflib
+
+TOOLS = os.path.dirname(os.path.abspath(__file__))
+DATA_VERSION = 15
+sys.path.insert(0, TOOLS)
+
+# ---------- LaTeX 标准化（数据层，UI 只负责渲染，二者解耦） ----------
+SUP_MAP = {'⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4',
+           '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
+           '⁺': '+', '⁻': '-'}
+
+
+def latexify(s):
+    """把纯文本公式规范成 LaTeX 写法：上标字符→^{}，字母+数字→_{}。
+    幂等：已写成 _{}/^{} 的不会被二次处理。"""
+    if not s:
+        return s
+    # 1) 连续上标字符 → ^{...}
+    s = re.sub(r'[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+',
+               lambda m: '^{' + ''.join(SUP_MAP[c] for c in m.group(0)) + '}', s)
+    # 2) 字母串+数字 → 下标（化学式 H2O、物理 mv2、坐标 x1 等）
+    s = re.sub(r'(?<![A-Za-z\\_])([A-Za-z]+)(\d+)',
+               lambda m: m.group(1) + '_{' + m.group(2) + '}', s)
+    # 3) 右括号+数字 → 下标（Cu(OH)2、Ca(ClO)2、Fe(OH)3）
+    s = re.sub(r'\)(\d+)', lambda m: ')_{' + m.group(1) + '}', s)
+    return s
+
+def load_module(fname):
+    path = os.path.join(TOOLS, fname)
+    spec = importlib.util.spec_from_file_location("mod_" + fname.replace(".", "_"), path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+subjects_order = ["chinese", "math", "english", "physics", "chem", "bio", "politics", "history", "geography"]
+
+def importance(t):
+    # 重要性：3=核心必考，2=重点掌握，1=了解/拓展
+    s = t
+    if any(k in s for k in ["定义", "概念", "性质", "定理", "公式", "法则", "图象", "公理", "运算", "计算", "判定", "特征"]):
+        return 3
+    if any(k in s for k in ["应用", "技巧", "方法", "综合", "思想", "策略", "模型", "求解", "解题", "识图", "辨析"]):
+        return 2
+    if any(k in s for k in ["拓展", "探究", "创新", "常识", "了解", "史料", "意义", "背景"]):
+        return 1
+    return 2
+
+def to_item(it):
+    body = latexify(it.get("body", ""))
+    star = it.get("lvl", None)
+    if star is None:
+        star = importance(it["t"])
+    return {"t": latexify(it["t"]), "star": star,
+            "sec": [{"h": "", "c": "K", "body": body}]}
+
+def to_child(ch):
+    items = [to_item(i) for i in ch.get("items", [])]
+    return {"type": ch.get("type", "module"),
+            "name": latexify(ch.get("name", "")), "items": items}
+
+def to_block(b):
+    return {"name": latexify(b["name"]), "children": [to_child(c) for c in b.get("children", [])]}
+
+def to_subject(key, data):
+    return {"s": key, "name": data["name"], "blocks": [to_block(b) for b in data["blocks"]]}
+
+
+def load_subject(key):
+    """读取 tools/subjects/<科目>.py，缩进树即 章 → 节 → 知识点。"""
+    mod = load_module("subjects/" + key + ".py")
+    name = getattr(mod, "NAME", key)
+    tree = getattr(mod, "TREE", {})
+    blocks = []
+    for bname, secs in tree.items():
+        children = []
+        for sname, items in secs.items():
+            children.append({"type": "module", "name": sname,
+                             "items": [dict(x) for x in items]})
+        blocks.append({"name": bname, "children": children})
+    return {"name": name, "blocks": blocks}
+
+
+subjects = []
+extra_total = 0
+for key in subjects_order:
+    fp = os.path.join(TOOLS, "subjects", key + ".py")
+    if not os.path.exists(fp):
+        print("! 缺少科目文件:", fp)
+        continue
+    subjects.append(to_subject(key, load_subject(key)))
+
+# 按固定科目顺序排列
+by_key = {s["s"]: s for s in subjects}
+ordered = [by_key[k] for k in subjects_order if k in by_key]
+
+# ---------- 重复知识点合并（同科目内） ----------
+def _norm_title(t):
+    """标题归一化：去掉空白/标点/虚词，用于判断「原电池工作原理」与「原电池的工作原理」为同一条。"""
+    t = re.sub(r"[\s（）()【】\[\]“”\"'，,。、：:；;！!？?—\-·]", "", t)
+    for w in ("的", "与", "和", "及", "之", "其"):
+        t = t.replace(w, "")
+    return t
+
+
+def _plain(s):
+    return s.replace("**", "").replace("\n", "")
+
+
+def _sim(a, b):
+    if not a or not b:
+        return 0.0
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+def _cset(s):
+    """取汉字/字母/数字集合，用于判断两句话是否在讲同一件事。"""
+    return set(re.findall(r"[\u4e00-\u9fa5A-Za-z0-9]", s))
+
+
+def _jac(a, b):
+    A, B = _cset(a), _cset(b)
+    if not A or not B:
+        return 0.0
+    return len(A & B) / len(A | B)
+
+
+def _merge_items(base, other):
+    """把 other 中 base 没有的句子并入 base：序列相似或字集重叠的句子视为重复；
+    若新句明显更具体（更长）则替换旧句，最后最多保留 7 行。"""
+    bl = [x for x in base["sec"][0]["body"].split("\n") if x.strip()]
+    for line in other["sec"][0]["body"].split("\n"):
+        core = line.replace("**", "").strip()
+        if not core:
+            continue
+        newline = line.strip()
+        dup = -1
+        for k, x in enumerate(bl):
+            xc = x.replace("**", "").strip()
+            if _sim(core, xc) >= 0.68 or _jac(core, xc) >= 0.55:
+                dup = k
+                break
+        if dup >= 0:
+            oldc = bl[dup].replace("**", "").strip()
+            if len(core) > len(oldc) + 6 and _jac(core, oldc) >= 0.60:
+                bl[dup] = newline          # 用更具体的新句替换笼统旧句
+            continue
+        bl.append(newline)
+    base["sec"][0]["body"] = "\n".join(bl[:7])
+    base["star"] = max(base.get("star", 2), other.get("star", 2))
+
+
+# 人工逐对确认过的重复知识点：(科目, 保留标题, 合并掉标题)
+MANUAL_PAIRS = [
+    ("chem", "化学反应速率的计算", "化学反应速率的表示方法"),
+    ("chem", "蒸馏与分馏", "蒸馏操作"),
+    ("physics", "变压器的能量关系", "变压器的功率关系"),
+    ("politics", "社会存在与社会意识的辩证关系", "社会存在决定社会意识"),
+    ("english", "完形填空的答题策略", "完形填空的解题步骤"),
+    ("english", "读后续写的情节设计", "读后续写的情节构思"),
+    ("politics", "实践的特点", "实践的特征"),
+    ("chinese", "科普文的阅读方法", "科普文的阅读要点"),
+    ("chinese", "古代文学的高峰成就", "中国古代文学的高峰"),
+    ("english", "申请信的写法", "申请信的写作"),
+    ("english", "感谢信的写法", "感谢信的写作要点"),
+    ("geography", "自然带的判断", "自然带的判读"),
+    ("geography", "水循环的类型与意义", "水循环的类型与环节"),
+    ("chinese", "文言文翻译的方法", "文言翻译的方法"),
+    ("chinese", "论述类文本的结构分析", "论述类文本的论证结构"),
+    ("bio", "种群增长的曲线", "种群数量变化曲线"),
+    ("politics", "物质与意识的辩证关系", "物质与意识的关系"),
+    ("geography", "中国的农业分布", "中国的农业区划"),
+    ("math", "圆的方程", "圆的标准式与一般式互化"),
+    ("chinese", "古代地理常识", "古代地名常识"),
+    ("history", "明清进步思想的影响", "明清进步思想家的共同点"),
+    ("politics", "国际关系的决定因素", "国际关系的基本形式"),
+    ("english", "进行时态的用法", "现在进行时的用法"),
+]
+
+
+# 人工定稿：合并后逐条精修过的正文（避免合并拼接产生语义重复）
+BODY_OVERRIDES = {
+    ("chem", "原电池的工作原理"): (
+        "把化学能转化为电能的装置。\n"
+        "构成条件：两个活泼性不同的电极、电解质溶液、闭合回路、自发的氧化还原反应。\n"
+        "负极：失电子、发生氧化反应、电子流出。\n"
+        "正极：得电子、发生还原反应、电子流入。\n"
+        "电子由负极经外电路流向正极，电流方向相反。\n"
+        "离子在电解质溶液中定向移动，构成闭合回路。"
+    ),
+    ("english", "进行时态的用法"): (
+        "现在进行时表示说话时正在进行的动作，结构为 be + 现在分词。\n"
+        "也可表示按计划将要发生的动作，如 I am leaving tomorrow。\n"
+        "过去进行时表示过去某一时刻正在进行的动作，常与 at that time 连用。\n"
+        "现在完成进行时表示从过去持续到现在（还可能继续）的动作。\n"
+        "表示状态的动词（know、belong、like）一般不用进行时。"
+    ),
+    ("chinese", "古代地理常识"): (
+        "古代地理常识包括山河、地区称谓。\n"
+        "「江」指长江，「河」指黄河。\n"
+        "「山东」指崤山以东，不是现在的山东省。\n"
+        "「关中」指函谷关以西，「塞外」指长城以北。\n"
+        "「江表」「江东」指长江以南地区。\n"
+        "掌握地理常识有助于理解文言文。"
+    ),
+    ("chinese", "古代文学的高峰成就"): (
+        "古代文学的发展中有几个高峰时期。\n"
+        "先秦诸子散文、汉赋是早期高峰。\n"
+        "唐诗、宋词、元曲是文学发展的鼎盛。\n"
+        "明清小说是又一个高峰。\n"
+        "各时期体裁不同、风格各异，共同构成中国文学的辉煌。"
+    ),
+    ("politics", "国际关系的决定因素"): (
+        "国际关系的决定因素是国家利益。\n"
+        "国家间的共同利益是合作的基础，利益对立是冲突的根源。\n"
+        "国际关系的基本形式有竞争、合作与冲突。\n"
+        "国家力量是影响国际关系的重要因素。\n"
+        "维护国家利益是主权国家对外活动的出发点和落脚点。"
+    ),
+    ("history", "明清进步思想的影响"): (
+        "明清之际进步思想具有启蒙意义。\n"
+        "代表人物有黄宗羲、顾炎武、王夫之。\n"
+        "批判君主专制，主张限制君权。\n"
+        "提倡经世致用，反对空谈。\n"
+        "反映了资本主义萌芽的发展，为近代思想解放提供借鉴。"
+    ),
+}
+
+
+def apply_overrides(ordered):
+    n = 0
+    index = {x["s"]: x for x in ordered}
+    for (key, title), body in BODY_OVERRIDES.items():
+        subj = index.get(key)
+        if subj is None:
+            continue
+        hit = False
+        for b in subj["blocks"]:
+            for c in b["children"]:
+                for it in c.get("items", []):
+                    if it["t"] == title:
+                        it["sec"][0]["body"] = body
+                        hit = True
+                        n += 1
+        if not hit:
+            print("! 定稿未匹配:", key, title)
+    return n
+
+
+def dedupe_items(ordered):
+    """合并重复知识点。
+    规则（同一科目内）：① 归一化标题相同且同小节 → 合并；
+    ② 标题互相包含且正文相似 ≥0.62 → 合并；③ 正文相似 ≥0.82 → 合并。
+    跨小节同标题但正文差异明显（<0.72）时不合并，输出告警由人工改标题区分。"""
+    removed, reports, warns = 0, [], []
+    index = {x["s"]: x for x in ordered}
+
+    def find_item(subj, title):
+        for b in subj["blocks"]:
+            for c in b["children"]:
+                for it in c.get("items", []):
+                    if it["t"] == title:
+                        return c, it
+        return None, None
+
+    # ① 人工确认的重复对
+    for key, keep_t, drop_t in MANUAL_PAIRS:
+        subj = index.get(key)
+        if subj is None:
+            continue
+        ck, ik = find_item(subj, keep_t)
+        cd, idd = find_item(subj, drop_t)
+        if ik is None or idd is None or ik is idd:
+            continue
+        _merge_items(ik, idd)
+        cd["items"] = [x for x in cd["items"] if x is not idd]
+        removed += 1
+        reports.append((subj["name"], ck["name"], keep_t, cd["name"], drop_t))
+
+    # ② 规则判定的重复（同标题/包含/正文高度相似）
+    for subj in ordered:
+        slots = []
+        for b in subj["blocks"]:
+            for c in b["children"]:
+                for it in c.get("items", []):
+                    slots.append([b, c, it, False])
+        for i in range(len(slots)):
+            b1, c1, it1, dead1 = slots[i]
+            if dead1:
+                continue
+            for j in range(i + 1, len(slots)):
+                b2, c2, it2, dead2 = slots[j]
+                if dead2:
+                    continue
+                nt1, nt2 = _norm_title(it1["t"]), _norm_title(it2["t"])
+                body1 = _plain(it1["sec"][0]["body"])
+                body2 = _plain(it2["sec"][0]["body"])
+                same_sec = (c1 is c2)
+                title_same = (nt1 == nt2)
+                contain = (nt1 in nt2 or nt2 in nt1) and abs(len(nt1) - len(nt2)) <= 6
+                sim = _sim(body1, body2)
+                if title_same:
+                    if not same_sec and sim < 0.72:
+                        warns.append((subj["name"], c1["name"], it1["t"], c2["name"], it2["t"]))
+                        continue
+                    should = True
+                elif contain and sim >= 0.62:
+                    should = True
+                elif sim >= 0.82:
+                    should = True
+                else:
+                    should = False
+                if not should:
+                    continue
+                # 标题只差「的」时，取更通顺的带「的」版本
+                if nt1 == nt2 and "的" in it2["t"] and "的" not in it1["t"]:
+                    it1["t"] = it2["t"]
+                _merge_items(it1, it2)
+                slots[j][3] = True
+                removed += 1
+                reports.append((subj["name"], c1["name"], it1["t"], c2["name"], it2["t"]))
+        for b, c, it, dead in slots:
+            if dead:
+                c["items"] = [x for x in c["items"] if x is not it]
+    return removed, reports, warns
+
+
+# ---------- 分数化：把 a/b 这类明确分式写成 \frac{a}{b}，UI 渲染成上下结构 ----------
+_MULTI_UNITS = ("mol", "mmol", "μmol", "kg", "mg", "km", "cm", "mm", "dm", "nm",
+                "min", "mL", "μL", "kJ", "kW", "mV", "mA", "kPa", "MPa", "kHz",
+                "MHz", "kcal", "cal", "Pa", "Hz", "℃", "dB")
+_GREEK = "αβγδεζηθικλμνξοπρστυφχψωΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ"
+_ATOM = set("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            "^_{}()|√πΔ′°·" + _GREEK)
+
+
+def _strip_script(t):
+    return re.sub(r"[\^_]\{[^{}]*\}", "", t)
+
+
+def _is_unit(den):
+    """分母是不是计量单位：只认多字母单位（mol/kg/cm…）和含「·」的复合单位（L·s）。
+    单字母 N/C/K/A/V/W/J/m/s/g 一律按变量处理，保证 M/N、a/b 这类能转成分数。"""
+    d = _strip_script(den)
+    if "·" in d:
+        return True
+    d2 = d.strip("()（）[]| ")
+    if not d2:
+        return False
+    for u in _MULTI_UNITS:
+        if u in d2:
+            return True
+    return False
+
+
+def _scan_left(s, pos):
+    i, depth = pos - 1, 0
+    while i >= 0:
+        c = s[i]
+        if c == ")":
+            depth += 1
+        elif c == "(":
+            if depth == 0:
+                break
+            depth -= 1
+        elif depth == 0 and c not in _ATOM:
+            break
+        i -= 1
+    return i + 1
+
+
+def _scan_right(s, pos):
+    i, depth, n = pos + 1, 0, len(s)
+    while i < n:
+        c = s[i]
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            if depth == 0:
+                break
+            depth -= 1
+        elif depth == 0 and c not in _ATOM:
+            break
+        i += 1
+    return i
+
+
+def fracify(s):
+    if not s or "/" not in s:
+        return s
+    out, i, n = [], 0, len(s)
+    while i < n:
+        if s[i] != "/":
+            out.append(s[i])
+            i += 1
+            continue
+        ls = _scan_left(s, i)
+        re_ = _scan_right(s, i)
+        num, den = s[ls:i], s[i + 1:re_]
+        ok = bool(num) and bool(den) and len(num) <= 24 and len(den) <= 20
+        if ok and re.fullmatch(r"[A-Za-z]{2,}", num) and re.fullmatch(r"[A-Za-z]{2,}", den):
+            ok = False            # have/has、am/is 这类英文并列
+        if ok and _is_unit(den):
+            ok = False            # 单位里的斜杠（mol、L、s…）保持原样
+        if ok:
+            if num:
+                del out[-len(num):]      # 分子已逐字符写入，先回退再去重
+            out.append("\\frac{" + num + "}{" + den + "}")
+            i = re_
+        else:
+            out.append("/")
+            i += 1
+    return "".join(out)
+
+
+# 括号套分数再加幂的写法改写成单个分数，窄屏更整齐（数学等价）
+_TIDY = (
+    ("(\\frac{(a+b)}{2})^{2}", "\\frac{(a+b)^{2}}{4}"),
+    ("(\\frac{b}{a})^{2}", "\\frac{b^{2}}{a^{2}}"),
+)
+
+
+def tidy_frac(t):
+    for a, b in _TIDY:
+        t = t.replace(a, b)
+    return t
+
+
+def sqrtify(s):
+    r"""把 √(…) / √2 / √ab 写成 \sqrt{…}，UI 会画成带顶部横线的根式。"""
+    if not s or "√" not in s:
+        return s
+    out, i, n = [], 0, len(s)
+    while i < n:
+        c = s[i]
+        if c != "√":
+            out.append(c)
+            i += 1
+            continue
+        j = i + 1
+        if j < n and s[j] in "([":
+            op = s[j]
+            cl = ")" if op == "(" else "]"
+            depth, e = 0, j
+            while e < n:
+                if s[e] == op:
+                    depth += 1
+                elif s[e] == cl:
+                    depth -= 1
+                    if depth == 0:
+                        break
+                e += 1
+            if e < n:
+                out.append("\\sqrt{" + s[j + 1:e] + "}")
+                i = e + 1
+                continue
+        e = j
+        while e < n:
+            ch = s[e]
+            if (ch.isalnum() and ord(ch) < 128) or ch in _GREEK or ch in "^{}":
+                e += 1
+            else:
+                break
+        atom = s[j:e]
+        if atom:
+            out.append("\\sqrt{" + atom + "}")
+            i = e
+        else:
+            out.append("√")
+            i += 1
+    return "".join(out)
+
+
+def apply_frac(ordered):
+    n = 0
+    for subj in ordered:
+        for b in subj["blocks"]:
+            for ch in b["children"]:
+                for it in ch.get("items", []):
+                    for sec in it.get("sec", []):
+                        sec["body"] = tidy_frac(sqrtify(fracify(sec["body"])))
+                        n += 1
+                for sec in ch.get("sec", []):
+                    sec["body"] = tidy_frac(sqrtify(fracify(sec["body"])))
+                    n += 1
+    return n
+
+
+from highlights import HL
+
+
+def apply_highlights(ordered):
+    """按 tools/highlights.py 里人工指定的片段加重点色（不再用规则批量判断）。"""
+    n, miss = 0, 0
+    for subj in ordered:
+        for b in subj["blocks"]:
+            for c in b["children"]:
+                for it in c.get("items", []):
+                    frag = HL.get((subj["s"], it["t"]))
+                    if not frag:
+                        continue
+                    body = it["sec"][0]["body"]
+                    if frag in body:
+                        it["sec"][0]["body"] = body.replace(frag, "**" + frag + "**", 1)
+                        n += 1
+                    else:
+                        miss += 1
+                        print("! 高亮片段未匹配:", subj["name"], it["t"], "->", frag)
+    return n, miss
+
+
+def apply_images(ordered):
+    """把工具生成的配图挂到对应知识点（数据层，UI 只负责渲染）。"""
+    from img_map import IMG_MAP
+    index = {s["s"]: s for s in ordered}
+    bound = 0
+    for key, ckw, ikw, img in IMG_MAP:
+        subj = index.get(key)
+        if subj is None:
+            print("! 配图科目不存在:", key)
+            continue
+        target = None
+        for b in subj["blocks"]:
+            for ch in b["children"]:
+                if ckw in ch["name"]:
+                    for it in ch["items"]:
+                        if "img" not in it and ikw in it["t"]:
+                            target = it
+                            break
+                if target:
+                    break
+            if target:
+                break
+        if target is None:  # 回退：全科按标题关键词找
+            for b in subj["blocks"]:
+                for ch in b["children"]:
+                    for it in ch["items"]:
+                        if "img" not in it and ikw in it["t"]:
+                            target = it
+                            break
+                    if target:
+                        break
+                if target:
+                    break
+        if target is None:
+            print("! 配图未匹配:", key, ckw, "/", ikw, "->", img)
+            continue
+        target["img"] = "img/%s.png" % img
+        bound += 1
+    return bound
+
+
+img_total = apply_images(ordered)
+dedupe_n, dedupe_reports, dedupe_warns = dedupe_items(ordered)
+ov_n = apply_overrides(ordered)
+frac_n = apply_frac(ordered)
+hl_total, hl_miss = apply_highlights(ordered)
+
+# 分科输出：每个科目一个 json 文件 + order.json 索引（数据库分文件，UI 只读）
+data_dir = os.path.join(TOOLS, "..", "app", "src", "main", "assets", "data")
+data_dir = os.path.abspath(data_dir)
+if not os.path.isdir(data_dir):
+    os.makedirs(data_dir)
+for s in ordered:
+    fp = os.path.join(data_dir, s["s"] + ".json")
+    with open(fp, "w", encoding="utf-8") as f:
+        json.dump({"v": DATA_VERSION, "subject": s}, f, ensure_ascii=False, indent=1)
+order_fp = os.path.join(data_dir, "order.json")
+with open(order_fp, "w", encoding="utf-8") as f:
+    json.dump({"v": DATA_VERSION, "order": [{"s": s["s"], "name": s["name"]} for s in ordered]},
+              f, ensure_ascii=False, indent=1)
+# 删除旧的合并文件（不再使用）
+old_fp = os.path.join(TOOLS, "..", "app", "src", "main", "assets", "knowledge.json")
+old_fp = os.path.abspath(old_fp)
+if os.path.exists(old_fp):
+    os.remove(old_fp)
+
+n_block = sum(len(s["blocks"]) for s in ordered)
+n_item = sum(len(c["items"]) for s in ordered for b in s["blocks"] for c in b["children"])
+print("已生成分科数据 assets/data/（每科一文件 + order.json）")
+print("科目:", [s["name"] for s in ordered])
+print("大块数:", n_block, " 考点数:", n_item, " 其中补充包新增:", extra_total)
+print("配图绑定:", img_total, " 分数化节数:", frac_n, " 人工标重点:", hl_total, "未匹配:", hl_miss)
+print("重复合并:", dedupe_n, "条  人工定稿:", ov_n, "条")
+for r in dedupe_reports:
+    print("  合并 %s: [%s] %s  <=  [%s] %s" % r)
+for w in dedupe_warns:
+    print("  ! 跨小节同标题需人工区分 %s: [%s] %s  vs  [%s] %s" % w)
+# 云端更新包：聚合为一个文件，供 App 下载后覆盖本地数据
+cloud_dir = os.path.join(TOOLS, "..", "cloud")
+cloud_dir = os.path.abspath(cloud_dir)
+os.makedirs(cloud_dir, exist_ok=True)
+cloud_fp = os.path.join(cloud_dir, "update.json")
+with open(cloud_fp, "w", encoding="utf-8") as f:
+    json.dump({"v": DATA_VERSION, "subjects": ordered}, f, ensure_ascii=False, separators=(",", ":"))
+print("云端更新包:", cloud_fp, os.path.getsize(cloud_fp), "bytes")
+print("目录:", data_dir)

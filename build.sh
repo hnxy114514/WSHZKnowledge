@@ -1,0 +1,95 @@
+#!/bin/bash
+# 汇总知识 v4 构建脚本（无 Gradle：aapt2 + javac + d8 + zipalign + apksigner）
+# 工程与产出全部在 D 盘；SDK 工具链复用本机既有环境（C 盘，只读引用）
+set -e
+
+# 签名密码通过环境变量传入（避免明文入库）：
+#   KS_PASS=你的密码 ./build.sh        （KEY_PASS 未设置时自动复用 KS_PASS）
+KS_PASS="${KS_PASS:?请先 export KS_PASS=签名密码}"
+KEY_PASS="${KEY_PASS:-$KS_PASS}"
+
+SDK="C:/Users/zzy33/WorkBuddy/Claw/sdk-setup/android-sdk"
+BT="$SDK/build-tools/34.0.0"
+R8="C:/Users/zzy33/WorkBuddy/Claw/sdk-setup/r8.jar"
+JAVA="/c/Program Files/Java/jdk-21/bin/java"
+JAVAC="/c/Program Files/Java/jdk-21/bin/javac"
+ANDROID_JAR="$SDK/platforms/android-34/android.jar"
+
+PROJ="D:/HZKnowledge"
+KEY="$PROJ/release.keystore"
+BUILD="$PROJ/build"
+SRC="$PROJ/app/src/main"
+RES="$SRC/res"
+MAN="$SRC/AndroidManifest.xml"
+OUT="$PROJ/汇总知识.apk"
+
+echo "== 1. 生成知识库（从 PDF 提炼）=="
+cd "$PROJ/tools"
+python build_authored.py
+
+echo "== 2. 清理 =="
+rm -rf "$BUILD/gen" "$BUILD/obj" "$BUILD/classes.dex" "$BUILD/dexout" \
+       "$BUILD/base.apk" "$BUILD/unsigned.apk" "$BUILD/aligned.apk" "$OUT"
+mkdir -p "$BUILD/gen" "$BUILD/obj"
+
+echo "== 3. aapt2 compile =="
+"$BT/aapt2" compile --dir "$RES" -o "$BUILD/gen/res.zip"
+
+echo "== 4. aapt2 link =="
+"$BT/aapt2" link "$BUILD/gen/res.zip" --manifest "$MAN" -o "$BUILD/base.apk" \
+  -I "$ANDROID_JAR" --no-version-vectors --auto-add-overlay
+
+echo "== 5. javac 编译 =="
+"$JAVAC" --release 8 -nowarn -g:none -d "$BUILD/obj" -cp "$ANDROID_JAR" \
+  "$SRC/java/com/lizard/hsknowledge/MainActivity.java"
+
+echo "== 6. 打包 class 为 jar =="
+python - "$BUILD/obj" "$BUILD/classes.jar" <<'PY'
+import sys, zipfile, os
+root, out = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
+    for dp, _, fs in os.walk(root):
+        for f in fs:
+            if f.endswith('.class'):
+                full = os.path.join(dp, f)
+                z.write(full, os.path.relpath(full, root))
+print('jar', os.path.getsize(out), 'bytes')
+PY
+
+echo "== 7. d8 生成 classes.dex =="
+mkdir -p "$BUILD/dexout"
+"$JAVA" -cp "$R8" com.android.tools.r8.D8 \
+  --lib "$ANDROID_JAR" --min-api 23 --output "$BUILD/dexout" "$BUILD/classes.jar"
+cp "$BUILD/dexout/classes.dex" "$BUILD/classes.dex"
+
+echo "== 8. 组装未签名 APK（dex + 全部 assets）=="
+python - "$BUILD/base.apk" "$BUILD/classes.dex" "$SRC/assets" "$BUILD/unsigned.apk" <<'PY'
+import sys, zipfile, os
+base, dex, assets, out = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+n = 0
+with zipfile.ZipFile(base, 'r') as zin, zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as zout:
+    for item in zin.infolist():
+        if item.filename == 'classes.dex':
+            continue
+        zout.writestr(item, zin.read(item.filename))
+    zout.write(dex, 'classes.dex')
+    for dp, _, fs in os.walk(assets):
+        for f in sorted(fs):
+            full = os.path.join(dp, f)
+            rel = os.path.relpath(full, assets).replace('\\', '/')
+            zout.write(full, 'assets/' + rel)
+            n += 1
+print('assembled', os.path.getsize(out), 'bytes, assets files:', n)
+PY
+
+echo "== 9. zipalign =="
+"$BT/zipalign" -f -p 4 "$BUILD/unsigned.apk" "$BUILD/aligned.apk"
+
+echo "== 10. apksigner 签名 =="
+"$JAVA" -jar "$BT/lib/apksigner.jar" sign \
+  --ks "$KEY" --ks-key-alias hskey \
+  --ks-pass "pass:$KS_PASS" --key-pass "pass:$KEY_PASS" \
+  --out "$OUT" "$BUILD/aligned.apk"
+
+echo "== 完成 =="
+ls -la "$OUT"

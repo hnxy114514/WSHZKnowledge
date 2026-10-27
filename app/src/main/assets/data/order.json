@@ -1,0 +1,41 @@
+{
+ "v": 15,
+ "order": [
+  {
+   "s": "chinese",
+   "name": "语文"
+  },
+  {
+   "s": "math",
+   "name": "数学"
+  },
+  {
+   "s": "english",
+   "name": "英语"
+  },
+  {
+   "s": "physics",
+   "name": "物理"
+  },
+  {
+   "s": "chem",
+   "name": "化学"
+  },
+  {
+   "s": "bio",
+   "name": "生物"
+  },
+  {
+   "s": "politics",
+   "name": "政治"
+  },
+  {
+   "s": "history",
+   "name": "历史"
+  },
+  {
+   "s": "geography",
+   "name": "地理"
+  }
+ ]
+}
