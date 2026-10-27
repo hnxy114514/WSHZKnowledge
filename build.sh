@@ -1,5 +1,5 @@
 #!/bin/bash
-# 汇总知识 v4 构建脚本（无 Gradle：aapt2 + javac + d8 + zipalign + apksigner）
+# 腕上知识汇总 构建脚本（无 Gradle：aapt2 + javac + d8 + zipalign + apksigner）
 # 工程与产出全部在 D 盘；SDK 工具链复用本机既有环境（C 盘，只读引用）
 set -e
 
@@ -23,7 +23,7 @@ RES="$SRC/res"
 MAN="$SRC/AndroidManifest.xml"
 OUT="$PROJ/汇总知识.apk"
 
-echo "== 1. 生成知识库（从 PDF 提炼）=="
+echo "== 1. 生成知识库（subjects → assets/data）=="
 cd "$PROJ/tools"
 python build_authored.py
 

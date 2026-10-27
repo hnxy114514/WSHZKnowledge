@@ -1,38 +1,162 @@
 # 腕上知识汇总（WSHZKnowledge）
 
-面向手表（腕上穿戴设备）的高中九科知识点汇总应用，内置数学、物理、化学、生物、政治、历史、地理、语文、英语九门科目的知识清单与配图，支持行内数学公式排版（分数、根号、上下角标可嵌套）与人工标注的重点高亮。
+面向手表（腕上穿戴设备）的高中九科知识点汇总 App。内置语文、数学、英语、物理、化学、生物、政治、历史、地理九门科目的知识清单与配图，支持行内数学公式排版（分数、根号、上下角标、向量可嵌套）与人工标注的重点高亮，并具备基于 GitHub Release 的 APK 覆盖更新。
+
+---
 
 ## 目录结构
 
 ```
-app/                     Android 工程源码
-  src/main/java/...      MainActivity.java（UI + 数学排版引擎 + 云端更新）
-  src/main/assets/data/  内置知识库 JSON（构建时生成）
-  src/main/assets/img/   配图（PNG）
-  src/main/res/          资源与图标
-tools/
-  subjects/*.py          九科源文件（结构化知识点树，含人工高亮标注）
-  highlights.py          人工标注的重点片段清单
-  build_authored.py      从 subjects 生成 assets/data 与 cloud/update.json
-  gen_images.py          公式配图生成
-  img_lib.py             数学公式排版库（LaTeX 结构解析 + 连续折线根号）
-cloud/
-  update.json            完整数据包备份（构建副产品）
-build.sh                 无 Gradle 构建脚本（aapt2 + javac + d8 + apksigner）
+WSHZKnowledge/
+├── app/                              Android 工程
+│   ├── src/main/
+│   │   ├── java/com/lizard/hsknowledge/
+│   │   │   ├── MainActivity.java        UI + 数学排版引擎 + 云端更新（核心，约 2000 行）
+│   │   │   └── ApkFileProvider.java     APK 覆盖安装用的 ContentProvider
+│   │   ├── assets/
+│   │   │   ├── data/                    九科知识库 JSON（构建时自动生成，勿手改）
+│   │   │   └── img/                     配图 PNG（gen_images.py 生成，勿手改）
+│   │   ├── res/                         资源（图标、样式、字符串）
+│   │   └── AndroidManifest.xml          版本号、权限、Provider 声明
+│
+├── tools/                             数据与配图的「源」和生成脚本
+│   ├── subjects/                       九科源文件（唯一需要手改内容的地方）
+│   │   ├── chinese.py / math.py / english.py /
+│   │   ├── physics.py / chem.py / bio.py /
+│   │   └── politics.py / history.py / geography.py
+│   ├── highlights.py                   人工标注的重点片段清单（key = 科目+标题）
+│   ├── build_authored.py               构建数据：subjects → assets/data + cloud/update.json
+│   ├── img_lib.py                      配图公式排版库（LaTeX 解析 + 分式/根号绘制）
+│   ├── gen_images.py                   生成 60 张配图 → assets/img
+│   ├── gen_icon.py                     生成应用图标
+│   └── _archive/                       历史旧源归档（只读，不再参与构建）
+│
+├── cloud/update.json                   完整数据包备份（构建副产品，App 已不读取，仅存档）
+├── build.sh                           无 Gradle 构建脚本（aapt2 + javac + d8 + apksigner）
+├── release.py                         一键发布：构建 + 创建 Release + 上传 APK
+├── .gitignore                          排除签名密钥、产物、缓存、归档
+└── README.md                           本文件
 ```
 
-## 构建
+未入库的本地目录（已 gitignore，按需清理）：
 
-签名密码不写入仓库，构建时通过环境变量传入：
+- `build/`：构建中间产物（每次构建重建）。
+- `tmp/`：临时审计/测试文件。
+- `tools/gen_out/`：早期实验导出。
+- `配图核对/`：配图人工核对工作区（01 已核验 / 02 生成中 / 03 待核对）。
+
+---
+
+## 数据流（一条链路）
+
+```
+tools/subjects/*.py  （九科知识点源，人工维护）
+        │  build_authored.py
+        ▼
+app/src/main/assets/data/*.json  （九科 JSON，构建时生成）
+        │  打包进 APK
+        ▼
+App 启动时读取 assets/data，MainActivity 排版引擎渲染
+```
+
+配图走另一条独立的链：
+
+```
+tools/img_lib.py + tools/gen_images.py
+        │  直接运行
+        ▼
+app/src/main/assets/img/*.png  （60 张）
+        │  打包进 APK
+        ▼
+知识点详情页展示，双击可全屏缩放
+```
+
+重点高亮链：
+
+```
+tools/highlights.py  （HL 字典：{科目, 标题} → 高亮片段）
+        │  build_authored.py 应用
+        ▼
+JSON 正文里的片段被包成加粗+高亮色
+```
+
+---
+
+## 开发工作流
+
+### 1. 修改知识点内容
+
+只改 `tools/subjects/*.py`（每个文件是 `TREE = {章: {节: [知识点]}}` 的嵌套结构，按缩进即层级）。改完重新构建。
+
+### 2. 修改 / 新增配图
+
+改 `tools/gen_images.py`（和 `img_lib.py`），然后：
+
+```bash
+cd tools && python gen_images.py
+```
+
+把新生成的 PNG 放入 `配图核对/` 走一遍人工核对，确认无误后再随 APK 发布。
+
+### 3. 修改 App 代码（UI / 排版引擎 / 更新逻辑）
+
+改 `app/src/main/java/.../MainActivity.java`，然后重新构建。
+
+### 4. 修改重点高亮
+
+改 `tools/highlights.py` 的 `HL` 字典，key 用「科目 key + 知识点标题」，value 是正文里要标亮的**原文字片段**。构建时会校验，匹配不到会打印「未匹配」提示。
+
+---
+
+## 构建与发布
+
+签名密码不写入仓库，通过环境变量传入。
+
+### 只构建
 
 ```bash
 KS_PASS=你的签名密码 ./build.sh
 ```
 
-构建产物为 `汇总知识.apk`（同时生成 `cloud/update.json` 作为数据包备份）。
+产物：`汇总知识.apk`。
 
-## 更新方式
+### 一键发布（构建 + Release + 上传 APK）
 
-- app 启动时后台检查 GitHub Release 最新版（按 tag 中的版本号与本地 versionCode 比较）。
-- 发现新版：先申请「安装未知应用」权限，再下载 APK 并触发覆盖安装。
-- 发布新版本：在 GitHub Releases 新建 Release，tag 用 `v<versionCode>`（如 `v16`），上传 APK 即可。
+```bash
+GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更新的说明"
+```
+
+脚本会：
+1. 从 `AndroidManifest.xml` 读 `versionName`（如 `1.3.1`）；
+2. 调用 `build.sh` 重新构建；
+3. 在 GitHub 创建 `v1.3.1` 标签的 Release；
+4. 上传 APK 并打印直链。
+
+---
+
+## 版本号规范（语义化）
+
+格式 `X.Y.Z`，只改三处之一：
+
+- 第 1 位 `X`：非常大的结构性改动；
+- 第 2 位 `Y`：新增内容 / 功能；
+- 第 3 位 `Z`：修 bug / 小调整。
+
+改 `AndroidManifest.xml` 的 `versionName`（`versionCode` 同步 +1 即可，仅作整数递增，不参与比较）。App 内更新比较用的是 `versionName` 与 Release 的 tag。
+
+---
+
+## 云端更新机制
+
+- App 启动时后台匿名请求 `api.github.com/repos/hnxy114514/WSHZKnowledge/releases/latest`。
+- 用 `versionName` 与最新 Release 的 `tag_name` 做语义化比较。
+- 有新版 → 先申请「安装未知应用」权限 → 下载 APK（临时文件 + 重命名，防残留旧包）→ 触发覆盖安装。
+- 无新版 / 网络失败静默（设置页可手动点「检查更新」）。
+
+---
+
+## 注意事项
+
+- `app/src/main/assets/data/` 和 `assets/img/` 都是**生成物**，不要手改，改源文件后重新构建。
+- 签名密钥 `release.keystore` 和 GitHub Token 都**不能入库、不能外泄**。
+- 发布新版本必须同时改 `versionName` 并推代码，否则 App 检测不到更新。
