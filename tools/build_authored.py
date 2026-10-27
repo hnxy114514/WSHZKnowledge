@@ -332,8 +332,12 @@ _MULTI_UNITS = ("mol", "mmol", "μmol", "kg", "mg", "km", "cm", "mm", "dm", "nm"
                 "min", "mL", "μL", "kJ", "kW", "mV", "mA", "kPa", "MPa", "kHz",
                 "MHz", "kcal", "cal", "Pa", "Hz", "℃", "dB")
 _GREEK = "αβγδεζηθικλμνξοπρστυφχψωΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ"
+# 注意：减号 − / 连字符 - 不在原子集里，作为「深度 0 的分隔符」终止分子/分母扫描，
+# 这样 1/n−1/(n+1) 会正确拆成 \frac{1}{n}−\frac{1}{(n+1)}；括号内的 −（如 (n−m)）不受影响。
 _ATOM = set("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-            "^_{}()|√πΔ′°·" + _GREEK)
+            "^_{}()|√πΔ′°·!\\²³¹⁻×" + _GREEK)
+# 单字母计量单位（用于识别 L·s、N·m 这类复合单位；x·lna 中的 x、lna 不在其中）
+_U1 = set("LNmsKJWVACg")
 
 
 def _strip_script(t):
@@ -341,47 +345,62 @@ def _strip_script(t):
 
 
 def _is_unit(den):
-    """分母是不是计量单位：只认多字母单位（mol/kg/cm…）和含「·」的复合单位（L·s）。
-    单字母 N/C/K/A/V/W/J/m/s/g 一律按变量处理，保证 M/N、a/b 这类能转成分数。"""
+    """分母是不是计量单位：多字母单位（mol/kg/cm…）保留；单字母复合单位（L·s、N·m）
+    按 · 拆开后每段都是单位符号才保留。x·lna 这类数学乘法不判为单位。"""
     d = _strip_script(den)
-    if "·" in d:
-        return True
     d2 = d.strip("()（）[]| ")
     if not d2:
         return False
     for u in _MULTI_UNITS:
         if u in d2:
             return True
+    if "·" in d2:
+        parts = [p for p in d2.split("·") if p]
+        if parts and all(p in _U1 for p in parts):
+            return True
     return False
 
 
 def _scan_left(s, pos):
-    i, depth = pos - 1, 0
+    i, dr, ds = pos - 1, 0, 0
     while i >= 0:
         c = s[i]
         if c == ")":
-            depth += 1
+            dr += 1
         elif c == "(":
-            if depth == 0:
+            if dr == 0:
                 break
-            depth -= 1
-        elif depth == 0 and c not in _ATOM:
+            dr -= 1
+        elif c == "]":
+            ds += 1
+        elif c == "[":
+            if ds == 0:
+                break
+            ds -= 1
+        elif dr == 0 and ds == 0 and c not in _ATOM:
             break
         i -= 1
     return i + 1
 
 
 def _scan_right(s, pos):
-    i, depth, n = pos + 1, 0, len(s)
+    i, n = pos + 1, len(s)
+    dr = ds = 0
     while i < n:
         c = s[i]
         if c == "(":
-            depth += 1
+            dr += 1
         elif c == ")":
-            if depth == 0:
+            if dr == 0:
                 break
-            depth -= 1
-        elif depth == 0 and c not in _ATOM:
+            dr -= 1
+        elif c == "[":
+            ds += 1
+        elif c == "]":
+            if ds == 0:
+                break
+            ds -= 1
+        elif dr == 0 and ds == 0 and c not in _ATOM:
             break
         i += 1
     return i
@@ -399,15 +418,15 @@ def fracify(s):
         ls = _scan_left(s, i)
         re_ = _scan_right(s, i)
         num, den = s[ls:i], s[i + 1:re_]
-        ok = bool(num) and bool(den) and len(num) <= 24 and len(den) <= 20
-        if ok and re.fullmatch(r"[A-Za-z]{2,}", num) and re.fullmatch(r"[A-Za-z]{2,}", den):
-            ok = False            # have/has、am/is 这类英文并列
+        ok = bool(num) and bool(den) and len(num) <= 60 and len(den) <= 60
         if ok and _is_unit(den):
             ok = False            # 单位里的斜杠（mol、L、s…）保持原样
         if ok:
             if num:
                 del out[-len(num):]      # 分子已逐字符写入，先回退再去重
-            out.append("\\frac{" + num + "}{" + den + "}")
+            num2 = fracify(num) if "/" in num else num
+            den2 = fracify(den) if "/" in den else den
+            out.append("\\frac{" + num2 + "}{" + den2 + "}")
             i = re_
         else:
             out.append("/")
@@ -473,17 +492,87 @@ def sqrtify(s):
     return "".join(out)
 
 
+# 中文/含中文下标的「除以」式：fracify 只吃公式字符，这类词级比值单独精确替换。
+# 注意顺序：先长后短，避免「转化量/起始量」误伤「已转化量/起始量」。
+_CN_FRAC = (
+    ("该核素一个原子的质量 / (^{12}C 原子质量的 1/12)",
+     "\\frac{该核素一个原子的质量}{(^{12}C 原子质量的 1/12)}"),
+    ("(第一次捕获数 × 第二次捕获数) / 第二次捕获中的标志数",
+     "\\frac{(第一次捕获数 × 第二次捕获数)}{第二次捕获中的标志数}"),
+    ("(第一次捕获数×第二次捕获数)/重捕中标志数",
+     "\\frac{(第一次捕获数×第二次捕获数)}{重捕中标志数}"),
+    ("(第一次捕获数×第二次捕获数)/重捕标志数",
+     "\\frac{(第一次捕获数×第二次捕获数)}{重捕标志数}"),
+    ("下一营养级同化量 / 上一营养级同化量 × 100%",
+     "\\frac{下一营养级同化量}{上一营养级同化量} × 100%"),
+    ("A 包含的基本事件数/基本事件总数",
+     "\\frac{A 包含的基本事件数}{基本事件总数}"),
+    ("A 含基本事件数/总基本事件数",
+     "\\frac{A 含基本事件数}{总基本事件数}"),
+    ("该基因的数目 / 该位点全部等位基因的总数",
+     "\\frac{该基因的数目}{该位点全部等位基因的总数}"),
+    ("某基因数/该基因座位全部等位基因总数",
+     "\\frac{某基因数}{该基因座位全部等位基因总数}"),
+    ("生成物浓度幂之积/反应物浓度幂之积",
+     "\\frac{生成物浓度幂之积}{反应物浓度幂之积}"),
+    ("转化的物质的量/起始物质的量",
+     "\\frac{转化的物质的量}{起始物质的量}"),
+    ("摩尔体积/阿伏加德罗常数",
+     "\\frac{摩尔体积}{阿伏加德罗常数}"),
+    ("商品价格总额/货币流通速度",
+     "\\frac{商品价格总额}{货币流通速度}"),
+    ("事件发生的次数/试验总次数",
+     "\\frac{事件发生的次数}{试验总次数}"),
+    ("该层个体数/总体个体数",
+     "\\frac{该层个体数}{总体个体数}"),
+    ("已转化量/起始量",
+     "\\frac{已转化量}{起始量}"),
+    ("转化量/起始量",
+     "\\frac{转化量}{起始量}"),
+    ("平方平均数/√2",
+     "\\frac{平方平均数}{√2}"),
+    ("竖直高度/水平宽度",
+     "\\frac{竖直高度}{水平宽度}"),
+    ("图上距离/实地距离",
+     "\\frac{图上距离}{实地距离}"),
+    ("样本量/总体量",
+     "\\frac{样本量}{总体量}"),
+    ("c标·V标/V待",
+     "\\frac{c标·V标}{V待}"),
+    ("d·v水/v船",
+     "\\frac{d·v水}{v船}"),
+    ("频率/组距",
+     "\\frac{频率}{组距}"),
+    ("路程/时间",
+     "\\frac{路程}{时间}"),
+    ("P损/P",
+     "\\frac{P损}{P}"),
+    ("U损/U",
+     "\\frac{U损}{U}"),
+    ("经度/15",
+     "\\frac{经度}{15}"),
+)
+
+
+def _cn_frac(s):
+    for a, b in _CN_FRAC:
+        s = s.replace(a, b)
+    return s
+
+
 def apply_frac(ordered):
     n = 0
     for subj in ordered:
+        if subj["s"] == "english":
+            continue            # 英语的斜杠是语法并列/日期/词缀，不转分式
         for b in subj["blocks"]:
             for ch in b["children"]:
                 for it in ch.get("items", []):
                     for sec in it.get("sec", []):
-                        sec["body"] = tidy_frac(sqrtify(fracify(sec["body"])))
+                        sec["body"] = tidy_frac(sqrtify(fracify(_cn_frac(sec["body"]))))
                         n += 1
                 for sec in ch.get("sec", []):
-                    sec["body"] = tidy_frac(sqrtify(fracify(sec["body"])))
+                    sec["body"] = tidy_frac(sqrtify(fracify(_cn_frac(sec["body"]))))
                     n += 1
     return n
 

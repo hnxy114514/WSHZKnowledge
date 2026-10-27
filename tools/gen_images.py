@@ -444,7 +444,7 @@ def p_refract():
     c.d.arc([O[0]-r2, O[1]-r2, O[0]+r2, O[1]+r2], 63, 90, fill=dark, width=3)
     c.rich(O[0]+24, O[1]+18, "θ_{2}", 16, False, dark, "ma")
     c.rich(O[0], yb - 150, "θ_{1} > θ_{2}（空气→玻璃）", 16, True, RED, "ma")
-    c.rich(168, 104, "n = sinθ_{1} / sinθ_{2}", 18, True, dark, "ma")
+    c.rich(168, 104, "n = \\frac{sinθ_{1}}{sinθ_{2}}", 18, True, dark, "ma")
     # ---- 右半：全反射（玻璃在下、空气在上）----
     O2 = (500, yb)
     ic = math.radians(50)
@@ -663,8 +663,8 @@ def c_mole():
     ox, oy = 320, 240
     c.circle(ox, oy, 52, (226, 236, 250), BLUE, 3)
     c.t(ox, oy, "n (mol)", 18, True, BLUE, "mm")
-    nodes = [(320, 132, "m 质量", "n = m / M"), (320, 348, "V 气体体积", "n = V / V_{m}"),
-             (166, 240, "N 微粒数", "n = N / N_{A}"), (474, 240, "c 物质的量浓度", "n = c V")]
+    nodes = [(320, 132, "m 质量", "n = \\frac{m}{M}"), (320, 348, "V 气体体积", "n = \\frac{V}{V_{m}}"),
+             (166, 240, "N 微粒数", "n = \\frac{N}{N_{A}}"), (474, 240, "c 物质的量浓度", "n = c V")]
     for x, y, lab, formula in nodes:
         c.rect(x - 74, y - 30, x + 74, y + 30, "white", (60, 60, 60), 2, 6)
         c.t(x, y - 8, lab, 14, True, dark, "mm")
@@ -1168,7 +1168,7 @@ def p_em():
 
 
 def p_ac():
-    c = C("正弦式交流电", "e = E_{m} sin ωt，周期 T，频率 f = 1/T")
+    c = C("正弦式交流电", "e = E_{m} sin ωt，周期 T，频率 f = \\frac{1}{T}")
     px, py = coords(c, -0.6, 10.4, -1.3, 1.3, (80, 122, 596, 360), "t", "e")
     c.fn_curve(lambda t: math.sin(t * 0.628), 0, 10.0, px, py, 300, RED, 4)
     c.dash(px(0), py(1.0), px(10.0), py(1.0), 1, GREY)
@@ -1182,7 +1182,7 @@ def p_ac():
 
 
 def p_capacitor():
-    c = C("平行板电容器", "板间是匀强电场，电容 C = εS/(4πkd)")
+    c = C("平行板电容器", "板间是匀强电场，电容 C = \\frac{εS}{4πkd}")
     y1, y2 = 150, 250
     c.rect(120, y1 - 8, 500, y1 + 8, "white", (40, 40, 40), 3)
     c.rect(120, y2 - 8, 500, y2 + 8, "white", (40, 40, 40), 3)
@@ -1196,7 +1196,7 @@ def p_capacitor():
     c.t(560, y1, "A 板", 17, True, RED, "la")
     c.t(560, y2, "B 板", 17, True, BLUE, "la")
     c.t(310, (y1 + y2) // 2, "E 匀强", 17, True, (90, 90, 90), "mm")
-    c.rich(W // 2, H - 42, "C = εS/(4πkd)；U = Ed；带电后储存电能 W = CU^{2}/2", 17)
+    c.rich(W // 2, H - 42, "C = \\frac{εS}{4πkd}；U = Ed；带电后储存电能 W = \\frac{CU^{2}}{2}", 17)
     save(c, "p_capacitor", acc)
 
 
@@ -1224,7 +1224,7 @@ def m_seq():
 
 
 def m_prob():
-    c = C("古典概型", "等可能基本事件：P(A) = 有利事件数 / 总事件数")
+    c = C("古典概型", "等可能基本事件：P(A) = \\frac{有利事件数}{总事件数}")
     # 骰子
     c.rect(130, 130, 230, 230, "white", (40, 40, 40), 3, 10)
     for i, (dx, dy) in enumerate(((-32, -32), (32, -32), (-32, 32), (32, 32), (0, 0), (0, -64))):
