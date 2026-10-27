@@ -1,0 +1,239 @@
+腕上知识汇总 · 工作技巧手册
+（操作类经验，配合《工作要求.txt》使用）
+
+==================================================
+一、环境与路径
+==================================================
+JDK      : C:/Program Files/Java/jdk-21
+Android SDK: C:/Users/zzy33/WorkBuddy/Claw/sdk-setup/android-sdk
+R8       : C:/Users/zzy33/WorkBuddy/Claw/sdk-setup/r8.jar
+构建工具链: build-tools/34.0.0（aapt2 / zipalign / apksigner）
+Python   : 系统 python（脚本都用标准库，无第三方依赖）
+Shell    : Git Bash（build.sh 是 bash 脚本）
+
+项目根目录: D:/HZKnowledge
+
+==================================================
+二、GitHub Token 的用法
+==================================================
+【怎么拿】
+GitHub 右上角头像 → Settings → Developer settings →
+Personal access tokens → Tokens (classic) → Generate new token
+勾选 repo 权限即可（用 90 天有效期那种）。
+
+【怎么用 —— 三种场景】
+
+1) 推送代码
+   git push https://用户名:TOKEN@github.com/owner/repo.git main
+   注意：TOKEN 只出现在这一条命令里，不要写进 .git/config、
+   不要提交任何含 token 的文件。
+
+2) 调 GitHub API（查仓库、查 Release）
+   curl -sk -H "Authorization: token $TOKEN" \
+        -H "Accept: application/vnd.github+json" \
+        https://api.github.com/repos/owner/repo/releases/latest
+   -k 是因为本机走 schannel 证书校验会失败，跳过即可。
+
+3) 手动创建 Release + 上传 APK
+   创建：
+   curl -sk -X POST \
+     -H "Authorization: token $TOKEN" \
+     -H "Accept: application/vnd.github+json" \
+     -H "Content-Type: application/json" \
+     --data-binary '{"tag_name":"v1.3.2","target_commitish":"main",
+                    "name":"v1.3.2","body":"说明","draft":false,"prerelease":false}' \
+     https://api.github.com/repos/owner/repo/releases
+   上传：
+   curl -sk -X POST \
+     -H "Authorization: token $TOKEN" \
+     -H "Content-Type: application/vnd.android.package-archive" \
+     --data-binary "@汇总知识.apk" \
+     "https://uploads.github.com/repos/owner/repo/releases/{RELEASE_ID}/assets?name=HZKnowledge-v1.3.2.apk"
+
+【原则】
+- token 一律用环境变量 GITHUB_TOKEN 传，不硬编码进任何仓库文件；
+- 只是本地开发用，泄露了随时去 GitHub 撤销重发。
+
+==================================================
+三、本机 git 连 GitHub 的坑
+==================================================
+症状：push 报 "schannel: CertGetCertificateChain ... 吊销" 之类错误。
+解决（只影响当前仓库）：
+  git config http.schannelCheckRevoke false
+  git config http.sslVerify false
+之后正常 push/pull。
+
+==================================================
+四、构建 APK
+==================================================
+命令（签名密码用环境变量传，不写进脚本）：
+  KS_PASS=你的签名密码 KEY_PASS=你的签名密码 bash build.sh
+
+流程（无 Gradle）：
+  1. 生成知识库（自动跑 build_authored.py）
+  2. aapt2 compile/link 资源
+  3. javac 编译 java（--release 8）
+  4. d8 生成 classes.dex
+  5. 组装未签名 APK（dex + assets）
+  6. zipalign
+  7. apksigner 签名
+
+产物：汇总知识.apk（项目根目录）
+
+==================================================
+五、发布 Release（一键）
+==================================================
+命令：
+  GITHUB_TOKEN=你的PAT KS_PASS=签名密码 python release.py "本次更新说明"
+
+它做的事：
+  1. 从 app/src/main/AndroidManifest.xml 读 versionName
+  2. 调用 build.sh 重新构建
+  3. 创建 tag = v{versionName} 的 Release
+  4. 上传 APK 并打印下载直链
+
+发版顺序建议：
+  改代码/数据 → 改 versionName + versionCode → git commit + push
+  → python release.py "说明"
+
+==================================================
+六、改知识点内容
+==================================================
+唯一要手改的地方：tools/subjects/*.py（9 个文件，每科一个）
+
+结构：
+  TREE = {
+    "章名": {
+      "节名": [
+        {"t": "知识点标题", "body": "正文（\n 换行）", "lvl": 2, "img": "可选配图名"},
+        ...
+      ]
+    }
+  }
+层级完全靠缩进表达，构建时自动转成 App 里的「章→节→知识点」。
+
+改完执行构建（build.sh 或 python tools/build_authored.py），
+会重新生成 app/src/main/assets/data/*.json。
+
+注意：assets/data/*.json 是生成物，不要手改。
+
+==================================================
+七、公式写法（数据里）
+==================================================
+App 自带的排版引擎支持这些（不要用斜杠写分数）：
+
+  分数    \frac{分子}{分母}        例：\frac{a+b}{2}
+  根号    \sqrt{内容}             例：\sqrt{x^{2}+1}
+  上标    ^{内容}                  例：x^{2}、a^{n+1}
+  下标    _{内容}                  例：a_{1}、S_{n}
+  向量    \vec{字母}               例：\vec{AB}
+  嵌套    \frac{\sqrt{2}}{2}
+
+要点：
+- 上下标多字符一定要加花括号：x^{2} 而不是 x^2（单字符可省略）。
+- 分数分子分母可以是中文：\frac{路程}{时间}、\frac{频率}{组距}。
+- Python 源文件里反斜杠要双写：'\\frac{a}{b}'（否则 \f 会变成换页符）。
+- JSON 里是单反斜杠转义：\\frac。
+- 不要写 a/b 这种斜杠分数，构建脚本会自动转，但中文/特殊嵌套建议直接写 \frac。
+
+==================================================
+八、配图
+==================================================
+生成：
+  cd tools && python gen_images.py
+
+配图库 img_lib.py 支持：\frac、\sqrt、上下标、\vec 等，
+文字用 c.t(...) 或 c.rich(...)，含反斜杠的字符串会自动走公式排版。
+
+输出：app/src/main/assets/img/*.png（60 张左右）
+改了配图后，要重新构建 APK 才会生效。
+
+==================================================
+九、重点高亮
+==================================================
+文件：tools/highlights.py 的 HL 字典
+
+格式：
+  HL = {
+    ("科目key", "知识点标题"): "正文里要标亮的原文片段",
+    ...
+  }
+科目 key：chinese / math / english / physics / chem / bio / politics / history / geography
+
+规则：
+- 片段必须是正文里**连续存在**的原文（构建时校验，匹配不到会打印提示）。
+- 一条知识点只支持一个高亮片段。
+- 如果知识点标题被合并/改名，对应的 HL key 要同步改，否则高亮会静默失效。
+
+==================================================
+十、去重
+==================================================
+位置：tools/build_authored.py 的 MANUAL_PAIRS
+
+格式：(科目, 保留的标题, 要合并掉的标题)
+合并时会把 drop 的正文并入 keep，然后删除 drop。
+
+判断重复的经验：
+- 标题归一化（去空白/标点/「的与和及其」）后高度相似；
+- 正文 Jaccard（字集重叠）≥ 0.45 基本是同一件事；
+- 标题只差「的用法/的作用/的方法/的特点」等通用后缀 → 重复；
+- 顺序调换（A与B / B与A）→ 重复。
+
+不要合并的（相似但不同）：
+- 平行概念：指数/对数、等差/等比、电场/磁场、左手/右手、植物/动物、
+  过去/现在/将来、直线/圆/椭圆/双曲线/抛物线；
+- 总-分关系：细胞周期 / 细胞周期的阶段、DNA的复制 / DNA复制的特点；
+- 不同范围：水资源 / 资源、电解质 / 弱电解质、一对 / 两对相对性状。
+
+合并后记得检查高亮是否失效（见第九节）。
+
+==================================================
+十一、版本号
+==================================================
+versionName 用三段 X.Y.Z：
+  X：非常大的结构性改动
+  Y：新增内容 / 新功能
+  Z：修 bug / 小调整
+versionCode 是整数，每次 +1（只给系统排序用，不参与更新比较）。
+
+Release 的 tag 必须 = v{versionName}，App 靠它判断要不要更新。
+
+==================================================
+十二、常用校验（改完必做）
+==================================================
+1) 语法/编译
+   javac --release 8 -cp android.jar -d /tmp/obj $(find app/src/main/java -name '*.java')
+
+2) 数据校验
+   - 跑 python tools/build_authored.py，看「未匹配」是否为 0
+   - 检查 JSON 花括号是否配平、\frac 数量、残留斜杠是否都是「或/单位」
+
+3) APK 校验
+   aapt2 dump badging 汇总知识.apk | grep package
+   apksigner verify --print-certs 汇总知识.apk
+   python -c "import zipfile,json; ..." 读 APK 内 assets/data 验证数据
+
+4) 云端校验
+   curl -sk https://api.github.com/repos/owner/repo/releases/latest
+
+==================================================
+十三、工具链踩坑记录
+==================================================
+1) Python 在 Windows 下，/tmp 和 Git Bash 的 /tmp 不是同一个地方。
+   跨工具传临时文件用项目内路径（如 D:/HZKnowledge/tmp_x.txt），
+   不要用 /tmp。
+
+2) Bash heredoc 不能直接接管道：
+   python << 'PY' | grep xxx   ← 会报语法错误
+   改成先写临时脚本再跑，或分两步。
+
+3) Python 字符串里的 "\frac" 中 \f 是换页符，
+   必须写 "\\frac" 或 r"\frac"。
+
+4) 处理中文/复杂转义时，sed/awk 容易出错，优先用 Python 脚本做替换。
+
+5) 修改源文件后一定要重新构建；assets 是生成物，直接改会被覆盖。
+
+6) 合并知识点会导致部分高亮失效，构建输出里的「未匹配」要盯住。
+
+7) 上传 APK 前先本地验证签名和 versionCode，避免推上去装不上。
