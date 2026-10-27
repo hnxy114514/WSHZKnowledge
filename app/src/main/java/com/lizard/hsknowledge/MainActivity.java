@@ -284,7 +284,7 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             public void run() {
                 try {
-                    final int local = getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
+                    final String local = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
                     URL u = new URL(RELEASES_URL);
                     HttpURLConnection cn = (HttpURLConnection) u.openConnection();
                     cn.setConnectTimeout(8000);
@@ -299,8 +299,8 @@ public class MainActivity extends Activity {
                     is.close();
                     cn.disconnect();
                     JSONObject obj = new JSONObject(new String(bos.toByteArray(), StandardCharsets.UTF_8));
-                    final int remote = parseVersion(obj.optString("tag_name", ""));
-                    if (remote <= local) {
+                    final String remoteTag = obj.optString("tag_name", "");
+                    if (compareSemver(local, remoteTag) >= 0) {
                         if (!silent) toast("已是最新版 v" + local);
                         return;
                     }
@@ -326,7 +326,7 @@ public class MainActivity extends Activity {
                                 requestInstallPermission();
                                 return;
                             }
-                            toast("正在下载 v" + remote + "…");
+                            toast("正在下载 v" + remoteTag + "…");
                             new Thread(new Runnable() {
                                 public void run() {
                                     try {
@@ -358,13 +358,35 @@ public class MainActivity extends Activity {
         }
     }
 
-    private int parseVersion(String tag) {
+    private int[] parseSemver(String v) {
+        int[] parts = new int[3];
+        int idx = 0;
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < tag.length(); i++) {
-            char c = tag.charAt(i);
-            if (c >= '0' && c <= '9') sb.append(c);
+        for (int i = 0; i < v.length() && idx < 3; i++) {
+            char c = v.charAt(i);
+            if (c >= '0' && c <= '9') {
+                sb.append(c);
+            } else if (sb.length() > 0) {
+                parts[idx++] = parseIntSafe(sb.toString());
+                sb.setLength(0);
+                if (idx >= 3) break;
+            }
         }
-        try { return Integer.parseInt(sb.toString()); } catch (Exception e) { return 0; }
+        if (sb.length() > 0 && idx < 3) parts[idx++] = parseIntSafe(sb.toString());
+        return parts;
+    }
+
+    private int parseIntSafe(String s) {
+        try { return Integer.parseInt(s); } catch (Exception e) { return 0; }
+    }
+
+    private int compareSemver(String a, String b) {
+        int[] x = parseSemver(a), y = parseSemver(b);
+        for (int i = 0; i < 3; i++) {
+            if (x[i] < y[i]) return -1;
+            if (x[i] > y[i]) return 1;
+        }
+        return 0;
     }
 
     private void downloadApk(String urlStr) throws Exception {
@@ -1611,6 +1633,20 @@ public class MainActivity extends Activity {
                     ssb.setSpan(new InlineSpan(root), st, ssb.length(),
                             Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                     i = b[1] + 1;
+                    continue;
+                }
+                i++;
+                continue;
+            }
+            if (c == '\uE005') {
+                int e = txt.indexOf('\uE006', i + 1);
+                if (e > i) {
+                    Inl root = Inl.group(parseInl(txt.substring(i, e + 1)));
+                    int st = ssb.length();
+                    ssb.append('\u00A0');
+                    ssb.setSpan(new InlineSpan(root), st, ssb.length(),
+                            Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    i = e + 1;
                     continue;
                 }
                 i++;
