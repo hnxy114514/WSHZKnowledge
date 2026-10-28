@@ -22,6 +22,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.os.Build;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.Editable;
@@ -198,6 +200,9 @@ public class MainActivity extends Activity {
     // 右滑返回手势（设置里可关）
     private static final float PREV_PARALLAX = 0.32f;  // 预览页的起始左移比例（视差）
     private boolean swipeBack = true;
+    // 交互震动反馈（设置里可关）
+    private boolean haptic = true;
+    private long lastVibrate = 0;           // 节流：避免连点狂震
     private boolean swipeTracking = false;
     private boolean swipeActive = false;     // 已进入拖动返回
     private boolean swipeBusy = false;       // 出场动画进行中
@@ -244,6 +249,7 @@ public class MainActivity extends Activity {
         fontSizeSp = prefs.getFloat("font_size", m.round ? 13f : 14f);
         listSizeSp = prefs.getFloat("list_size", m.round ? 14f : 15f);
         swipeBack = prefs.getBoolean("swipe_back", true);
+        haptic = prefs.getBoolean("haptic", true);
         loadGitHub();
         loadData();
         loadOrderKeys();
@@ -461,6 +467,7 @@ public class MainActivity extends Activity {
         go.setBackgroundDrawable(pill(0xFF14384A));
         go.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                vibrate();
                 dismissUpdateDialog();
                 prefs.edit().remove("skip_version").apply();
                 startUpdate(url, tag);
@@ -478,6 +485,7 @@ public class MainActivity extends Activity {
         later.setPadding(dp(8), dp(8), dp(8), dp(2));
         later.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                vibrate();
                 dismissUpdateDialog();
                 prefs.edit().putString("skip_version", ver).apply();
             }
@@ -492,6 +500,7 @@ public class MainActivity extends Activity {
         more.setPadding(dp(8), dp(2), dp(8), 0);
         more.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                vibrate();
                 dismissUpdateDialog();
                 changelogBack = (screen == S_CHANGELOG) ? S_SETTINGS : screen;
                 showScreen(S_CHANGELOG);
@@ -997,6 +1006,7 @@ public class MainActivity extends Activity {
         mineList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
                 if (pos == 0) return;
+                vibrate();
                 int idx = pos - 1;
                 if (idx < 0 || idx >= mineIssues.size()) return;
                 openIssueDetail(mineIssues.get(idx));
@@ -1016,6 +1026,7 @@ public class MainActivity extends Activity {
         subjectList = makeList();
         subjectList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
+                vibrate();
                 int idx = pos - 1;
                 if (idx < 0) { showScreen(S_SEARCH); return; }
                 if (idx >= orderKeys.size()) { showScreen(S_SETTINGS); return; }
@@ -1033,6 +1044,7 @@ public class MainActivity extends Activity {
         blockList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
                 if (pos == 0) return;   // 返回键 header
+                vibrate();
                 curBlock = curSubject.blocks.get(pos - 1);
                 openChildren();
             }
@@ -1047,6 +1059,7 @@ public class MainActivity extends Activity {
         childList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
                 if (pos == 0) return;   // 返回键 header
+                vibrate();
                 curChild = curBlock.children.get(pos - 1);
                 if ("topic".equals(curChild.type) && curChild.items.isEmpty()) {
                     openDetail(curChild.name, curChild.sec, curSubject.name + " › " + curBlock.name, S_CHILD, null);
@@ -1093,6 +1106,7 @@ public class MainActivity extends Activity {
         itemList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
                 if (pos == 0) return;   // 返回键 header
+                vibrate();
                 Item it = shownItems.get(pos - 1);
                 openDetail(it.t, it.sec, curSubject.name + " › " + curBlock.name + " › " + curChild.name, S_ITEM, it.img);
             }
@@ -1195,6 +1209,7 @@ public class MainActivity extends Activity {
         searchList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
                 if (pos == 0) return;                       // 返回键 header
+                vibrate();
                 if (pos - 1 >= searchHits.size()) return;   // 空提示行
                 Hit h = searchHits.get(pos - 1);
                 openDetail(h.item.t, h.item.sec, h.path, S_SEARCH, h.item.img);
@@ -1251,7 +1266,13 @@ public class MainActivity extends Activity {
         b.setGravity(Gravity.CENTER);
         b.setPadding(dp(10), dp(8), dp(10), dp(8));
         b.setBackgroundDrawable(pill(C_PILL));
-        b.setOnClickListener(onClick);
+        final View.OnClickListener user = onClick;
+        b.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                if (user != null) user.onClick(v);
+            }
+        });
         return b;
     }
 
@@ -1261,6 +1282,23 @@ public class MainActivity extends Activity {
         b.setLayoutParams(new AbsListView.LayoutParams(
                 AbsListView.LayoutParams.MATCH_PARENT, AbsListView.LayoutParams.WRAP_CONTENT));
         return b;
+    }
+
+    /** 交互震动反馈：轻点一下。受设置开关与节流控制，避免连点狂震。 */
+    private void vibrate() {
+        if (!haptic) return;
+        long now = System.currentTimeMillis();
+        if (now - lastVibrate < 60) return;
+        lastVibrate = now;
+        try {
+            Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+            if (v == null) return;
+            if (Build.VERSION.SDK_INT >= 26) {
+                v.vibrate(VibrationEffect.createOneShot(18, VibrationEffect.DEFAULT_AMPLITUDE));
+            } else {
+                v.vibrate(18);
+            }
+        } catch (Exception ignored) { }
     }
 
     private ArrayAdapter<String> stringAdapter(final List<String> data, final int color) {
@@ -2405,6 +2443,20 @@ public class MainActivity extends Activity {
                 renderSettings();
             }
         }), wrap());
+        settingsInner.addView(toggleRow("震动反馈", haptic, new View.OnClickListener() {
+            public void onClick(View v) {
+                haptic = !haptic;
+                prefs.edit().putBoolean("haptic", haptic).apply();
+                renderSettings();
+            }
+        }), wrap());
+        TextView hapticHint = new TextView(this);
+        hapticHint.setText("点击列表、返回、开关等交互时轻微震动一下，作为触感反馈。");
+        hapticHint.setTextSize(m.subtitleSize - 2f);
+        hapticHint.setTextColor(C_SUB);
+        hapticHint.setPadding(dp(4), dp(2), dp(4), dp(4));
+        settingsInner.addView(hapticHint, wrap());
+
         TextView swipeHint = new TextView(this);
         swipeHint.setText("从屏幕左侧 1/4 内向右拖动：当前页跟手滑出、露出上一页预览，滑到一半以上松手即返回，不够则弹回。查看大图时不生效，需点「‹ 关闭」。");
         swipeHint.setTextSize(m.subtitleSize - 2f);
@@ -2606,7 +2658,13 @@ public class MainActivity extends Activity {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(10), dp(8), dp(10), dp(8));
         row.setBackgroundDrawable(pill(C_CARD));
-        row.setOnClickListener(onClick);
+        final View.OnClickListener user = onClick;
+        row.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                if (user != null) user.onClick(v);
+            }
+        });
 
         TextView name = new TextView(this);
         name.setText(label);
@@ -2653,7 +2711,10 @@ public class MainActivity extends Activity {
         minusBtn.setTextColor(canMinus ? C_PRIMARY : 0xFF3E3E3E);
         minusBtn.setPadding(dp(12), dp(4), dp(12), dp(4));
         minusBtn.setEnabled(canMinus);
-        minusBtn.setOnClickListener(minus);
+        final View.OnClickListener minusU = minus;
+        minusBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { vibrate(); if (minusU != null) minusU.onClick(v); }
+        });
 
         TextView val = new TextView(this);
         val.setText(value + "sp");
@@ -2670,7 +2731,10 @@ public class MainActivity extends Activity {
         plusBtn.setTextColor(canPlus ? C_PRIMARY : 0xFF3E3E3E);
         plusBtn.setPadding(dp(12), dp(4), dp(12), dp(4));
         plusBtn.setEnabled(canPlus);
-        plusBtn.setOnClickListener(plus);
+        final View.OnClickListener plusU = plus;
+        plusBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { vibrate(); if (plusU != null) plusU.onClick(v); }
+        });
 
         row.addView(name);
         row.addView(minusBtn);
