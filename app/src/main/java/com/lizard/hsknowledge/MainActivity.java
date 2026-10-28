@@ -518,8 +518,8 @@ public class MainActivity extends Activity {
             Window w = updateDialog.getWindow();
             int sw = getResources().getDisplayMetrics().widthPixels;
             w.setLayout((int) (sw * (m.round ? 0.74f : 0.86f)), WindowManager.LayoutParams.WRAP_CONTENT);
-            // 不透明窗口背景：透明窗口 + 暗背景叠加在手表 GPU 上滚动会闪烁，故改用不透明底色
-            w.setBackgroundDrawable(new ColorDrawable(C_BG));
+            // 窗口背景透明：弹窗以外的区域保持透明，只显示卡片本身；box 已设为软件层整体渲染，滚动时整块重绘，不会闪烁
+            w.setBackgroundDrawable(new ColorDrawable(0x00000000));
         } catch (Exception ignored) { }
     }
 
