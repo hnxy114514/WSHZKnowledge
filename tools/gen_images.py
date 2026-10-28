@@ -915,7 +915,8 @@ def e_contour():
         return (ox + base * 1.48 * math.cos(theta) * k,
                 oy + base * 0.76 * math.sin(theta) * k)
 
-    for base in (150, 118, 90, 64, 40):
+    # 等高线：内圈密、外圈疏，明显体现「疏密→坡度陡缓」
+    for base in (172, 136, 104, 78, 58, 44):
         pts = [pt(i * 2 * math.pi / steps, base) for i in range(steps + 1)]
         c.d.line(pts, fill=dark, width=2, joint="curve")
 
@@ -933,9 +934,12 @@ def e_contour():
     c.t(556, 376, "山谷：等高线凸向高处", 14, True, (60, 120, 200), "rm")
 
     c.t(556, 132, "等高距相同", 13, False, GREY, "rm")
-    c.t(62, 372, "密集＝坡陡", 13, True, RED, "lm")
-    c.arrow(150, 366, 176, 340, 2, RED, 9)
-    c.rich(W // 2, H - 30, "等高线重合处为陡崖；闭合圈内大外小为山峰", 14)
+    # 疏密对比：内圈密、外圈疏，直接对应坡度陡缓
+    c.t(ox + 126, oy - 44, "密集 → 坡陡", 13, True, RED, "lm")
+    c.arrow(ox + 114, oy - 38, ox + 82, oy - 10, 2, RED, 9)
+    c.t(40, oy + 10, "稀疏 → 坡缓", 13, True, GREEN, "lm")
+    c.arrow(132, oy + 6, 94, oy - 10, 2, GREEN, 9)
+    c.rich(W // 2, H - 30, "等高线越密坡度越陡，越疏坡度越缓；重合处为陡崖，内大外小为山峰", 14)
     save(c, "e_contour", acc)
 
 

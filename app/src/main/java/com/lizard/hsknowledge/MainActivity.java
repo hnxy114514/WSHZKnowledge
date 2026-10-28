@@ -1703,20 +1703,23 @@ public class MainActivity extends Activity {
                 cb.setCornerRadius(dp(11));
                 card.setBackgroundDrawable(cb);
 
-                TextView tag = new TextView(this);
-                tag.setText(s.h);
-                tag.setTextSize(m.secTagSize);
-                tag.setTypeface(Typeface.DEFAULT_BOLD);
-                tag.setTextColor(Color.WHITE);
-                tag.setPadding(dp(9), dp(3), dp(9), dp(3));
-                GradientDrawable tg = new GradientDrawable();
-                tg.setColor(secColor(s.c));
-                tg.setCornerRadius(dp(9));
-                tag.setBackgroundDrawable(tg);
-                LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-                tlp.bottomMargin = dp(5);
-                card.addView(tag, tlp);
+                // 分类标签只在有实际文字时才显示；空文字会退化成无意义的纯色块（蓝色球）
+                if (s.h != null && s.h.trim().length() > 0) {
+                    TextView tag = new TextView(this);
+                    tag.setText(s.h);
+                    tag.setTextSize(m.secTagSize);
+                    tag.setTypeface(Typeface.DEFAULT_BOLD);
+                    tag.setTextColor(Color.WHITE);
+                    tag.setPadding(dp(9), dp(3), dp(9), dp(3));
+                    GradientDrawable tg = new GradientDrawable();
+                    tg.setColor(secColor(s.c));
+                    tg.setCornerRadius(dp(9));
+                    tag.setBackgroundDrawable(tg);
+                    LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                    tlp.bottomMargin = dp(5);
+                    card.addView(tag, tlp);
+                }
 
                 TextView body = new TextView(this);
                 body.setText(applyMarkup(s.body));
