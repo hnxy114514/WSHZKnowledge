@@ -24,16 +24,17 @@ WSHZKnowledge/
 │   │   ├── chinese.py / math.py / english.py /
 │   │   ├── physics.py / chem.py / bio.py /
 │   │   └── politics.py / history.py / geography.py
-│   ├── build_authored.py               构建数据：subjects → assets/data + cloud/update.json
+│   ├── build_authored.py               构建数据：subjects → assets/data（含去重、公式分数化、定稿覆盖）
+│   ├── img_map.py                      配图绑定表：科目 + 节 + 知识点 → 图片文件名
 │   ├── img_gen/                       配图生成（每张图一个脚本 + 共享 common.py）
 │   │   ├── common.py                   公式排版库（LaTeX 解析 + 分式/根号绘制）+ 颜色/coords/save
 │   │   ├── <图片名>.py                 每张配图一个脚本，单独运行只生成那一张
 │   │   └── gen_all.py                  一键重新生成全部在用配图
 │   ├── make_icon.py                    生成应用图标（表盘 + Emoji 书本，输出 5 个 dpi）
 │   └── emoji_src/open_book.png          图标用的书本 Emoji 源图（Fluent Emoji, MIT）
-│   └── _archive/                       历史旧源归档（只读，不再参与构建）
 │
-├── cloud/update.json                   完整数据包备份（构建副产品，App 已不读取，仅存档）
+├── cloud/version.json                 更新兜底用的版本号（App 拉不到 GitHub API 时读它）
+├── local/                             本地私密文件（凭据、keystore、备忘），已被 .gitignore 排除
 ├── scripts/build.sh                   无 Gradle 构建脚本（aapt2 + javac + d8 + apksigner）
 ├── scripts/release.py                 一键发布：构建 + 创建 Release + 上传 APK
 ├── .gitignore                          排除签名密钥、产物、缓存、归档
@@ -42,10 +43,8 @@ WSHZKnowledge/
 
 未入库的本地目录（已 gitignore，按需清理）：
 
-- `build/`：构建中间产物（每次构建重建）。
-- `tmp/`：临时审计/测试文件。
-- `tools/gen_out/`：早期实验导出。
-- `配图核对/`：配图人工核对工作区（01 已核验 / 02 生成中 / 03 待核对）。
+- `build/`：构建中间产物与产出 APK（每次构建重建）。
+- `local/`：发布凭据、签名 keystore、本地备忘，不进仓库。
 
 ---
 
@@ -73,13 +72,13 @@ app/src/main/assets/img/*.png  （56 张）
 知识点详情页展示，双击可全屏缩放
 ```
 
-重点高亮链：
+重点高亮链（已内联，不再有单独文件）：
 
 ```
-tools/highlights.py  （HL 字典：{科目, 标题} → 高亮片段）
-        │  build_authored.py 应用
+tools/subjects/*.py 正文里的 **片段**
+        │  build_authored.py 原样带过
         ▼
-JSON 正文里的片段被包成加粗+高亮色
+App 渲染为琥珀金加粗（applyMarkup 处理 **）
 ```
 
 ---
@@ -96,13 +95,11 @@ JSON 正文里的片段被包成加粗+高亮色
 要改某张图，只编辑对应的那个脚本，单独运行即可只重新生成它：
 
 ```bash
-cd tools/img_gen && python m_quad.py        # 只重新生成 m_quad.png
+cd tools/img_gen && python m_quad.py        # 只重新生成「数学_3.1_二次函数.png」
 python gen_all.py                           # 需要全部重生成时跑这个
 ```
 
-把新生成的 PNG 放入 `配图核对/` 走一遍人工核对，确认无误后再随 APK 发布。
-
-把新生成的 PNG 放入 `配图核对/` 走一遍人工核对，确认无误后再随 APK 发布。
+脚本会把 PNG 直接写到 `app/src/main/assets/img/` 下的对应文件名，跑一次构建就打包进去了。
 
 ### 3. 修改 App 代码（UI / 排版引擎 / 更新逻辑）
 
@@ -110,7 +107,7 @@ python gen_all.py                           # 需要全部重生成时跑这个
 
 ### 4. 修改重点高亮
 
-改 `tools/highlights.py` 的 `HL` 字典，key 用「科目 key + 知识点标题」，value 是正文里要标亮的**原文字片段**。构建时会校验，匹配不到会打印「未匹配」提示。
+重点高亮不再单独维护，直接在 `tools/subjects/*.py` 的正文里用 `**要标亮的原文片段**` 包起来即可，App 会渲染成琥珀金加粗。构建时如果 `**` 不成对会报异常。
 
 ---
 
