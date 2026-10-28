@@ -57,6 +57,7 @@ import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -128,7 +129,7 @@ public class MainActivity extends Activity {
 
     // ---------- 导航 ----------
     private static final int S_SUBJECT = 0, S_BLOCK = 1, S_CHILD = 2, S_ITEM = 3, S_DETAIL = 4, S_SETTINGS = 5,
-            S_SEARCH = 6, S_FEEDBACK = 7, S_MYFEEDBACK = 8, S_PROFILE = 9, S_CHANGELOG = 10, S_ABOUT = 11;
+            S_SEARCH = 6, S_FEEDBACK = 7, S_MYFEEDBACK = 8, S_PROFILE = 9, S_CHANGELOG = 10, S_ABOUT = 11, S_DISPLAY = 12;
     private int screen = S_SUBJECT;
     private Subject curSubject;
     private Block curBlock;
@@ -174,13 +175,16 @@ public class MainActivity extends Activity {
     private String lastPath = "";
     private boolean subjectDirty = true;
     private String lastQuery = null;
-    private final int[] savedPos = new int[12];
-    private final int[] savedTop = new int[12];
-    private final boolean[] hasSaved = new boolean[12];
-    private final boolean[] restoreNext = new boolean[12];
+    private final int[] savedPos = new int[13];
+    private final int[] savedTop = new int[13];
+    private final boolean[] hasSaved = new boolean[13];
+    private final boolean[] restoreNext = new boolean[13];
 
     // 关于 / 感谢名单
     private LinearLayout aboutScreen, aboutInner, thanksBox, thanksLoading;
+
+    // 显示调节（字号 / 界面缩放，带实时预览）
+    private LinearLayout displayScreen, displayInner;
     private ScrollView aboutScroll;
     private TextView aboutInfo, thanksState;
     private boolean thanksLoaded = false, thanksLoadingBusy = false;
@@ -209,6 +213,10 @@ public class MainActivity extends Activity {
     private SharedPreferences prefs;
     private float fontSizeSp = 14f;
     private float listSizeSp = 15f;
+    private float titleSizeSp = 0f;      // 0 表示按屏型取默认值
+    private float subSizeSp = 0f;
+    private float uiScale = 1f;          // 界面整体缩放（显示大小）
+    private boolean tuningFirstRun = false;
     private boolean isRound = false;
     // 右滑返回手势（设置里可关）
     private static final float PREV_PARALLAX = 0.32f;  // 预览页的起始左移比例（视差）
@@ -239,35 +247,48 @@ public class MainActivity extends Activity {
             if (round) {
                 sidePad = dp(12); topPad = dp(14); bottomPad = dp(12);
                 roundSafe = (int) Math.round(Math.min(w, h) * 0.146f);
-                titleSize = 15f; subtitleSize = 11f; backSize = 12f; secTagSize = 10f;
             } else {
                 sidePad = dp(14); topPad = dp(14); bottomPad = dp(14);
                 roundSafe = 0;
-                titleSize = 17f; subtitleSize = 12f; backSize = 13f; secTagSize = 11f;
             }
+            // 字号：优先用「显示调节」里的值，未设置时按屏型取默认
+            titleSize = titleSizeSp > 0 ? titleSizeSp : (round ? 15f : 17f);
+            subtitleSize = subSizeSp > 0 ? subSizeSp : (round ? 11f : 12f);
+            backSize = Math.max(9f, listSizeSp - 2f);
+            secTagSize = Math.max(8f, subtitleSize - 1f);
         }
     }
     private Metrics m;
 
     private int dp(float v) {
-        return Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics()));
+        float px = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v,
+                getResources().getDisplayMetrics());
+        return Math.round(px * uiScale);
     }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         try { isRound = getResources().getConfiguration().isScreenRound(); } catch (Exception ignored) { }
-        m = new Metrics();
         prefs = getSharedPreferences("settings", MODE_PRIVATE);
-        fontSizeSp = prefs.getFloat("font_size", m.round ? 13f : 14f);
-        listSizeSp = prefs.getFloat("list_size", m.round ? 14f : 15f);
+        fontSizeSp = prefs.getFloat("font_size", isRound ? 13f : 14f);
+        listSizeSp = prefs.getFloat("list_size", isRound ? 14f : 15f);
+        titleSizeSp = prefs.getFloat("title_size", 0f);
+        subSizeSp = prefs.getFloat("sub_size", 0f);
+        uiScale = prefs.getFloat("ui_scale", 1f);
+        m = new Metrics();
         swipeBack = prefs.getBoolean("swipe_back", true);
         haptic = prefs.getBoolean("haptic", true);
         loadGitHub();
         loadData();
         loadOrderKeys();
         buildUi();
-        showScreen(S_SUBJECT);
+        if (!prefs.getBoolean("display_tuned", false)) {
+            tuningFirstRun = true;
+            showScreen(S_DISPLAY);
+        } else {
+            showScreen(S_SUBJECT);
+        }
         checkUpdate(true);
     }
 
@@ -1043,6 +1064,10 @@ public class MainActivity extends Activity {
         aboutScreen = newScreen();
         buildAboutScreen();
         root.addView(aboutScreen, fp());
+
+        displayScreen = newScreen();
+        buildDisplayScreen();
+        root.addView(displayScreen, fp());
 
         // 主页
         subjectList = makeList();
@@ -2435,28 +2460,30 @@ public class MainActivity extends Activity {
         settingsInner.addView(profEntry, wrap());
 
         settingsInner.addView(sectionHeader("显示"), wrap());
-        settingsInner.addView(settingRow("正文字号", (int) fontSizeSp, 11, 22, new View.OnClickListener() {
+        TextView displayEntry = new TextView(this);
+        displayEntry.setText("显示调节");
+        displayEntry.setTextSize(m.backSize);
+        displayEntry.setTypeface(Typeface.DEFAULT_BOLD);
+        displayEntry.setTextColor(C_PRIMARY);
+        displayEntry.setGravity(Gravity.CENTER);
+        displayEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
+        displayEntry.setBackgroundDrawable(pill(C_PILL));
+        applyIcon(displayEntry, "ic_settings", C_PRIMARY, 15);
+        displayEntry.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                fontSizeSp = clamp(fontSizeSp - 1, 11f, 22f);
-                saveSettings(); renderSettings();
+                vibrate();
+                tuningFirstRun = false;
+                showScreen(S_DISPLAY);
             }
-        }, new View.OnClickListener() {
-            public void onClick(View v) {
-                fontSizeSp = clamp(fontSizeSp + 1, 11f, 22f);
-                saveSettings(); renderSettings();
-            }
-        }), wrap());
-        settingsInner.addView(settingRow("列表字号", (int) listSizeSp, 12, 20, new View.OnClickListener() {
-            public void onClick(View v) {
-                listSizeSp = clamp(listSizeSp - 1, 12f, 20f);
-                saveSettings(); renderSettings();
-            }
-        }, new View.OnClickListener() {
-            public void onClick(View v) {
-                listSizeSp = clamp(listSizeSp + 1, 12f, 20f);
-                saveSettings(); renderSettings();
-            }
-        }), wrap());
+        });
+        settingsInner.addView(displayEntry, wrap());
+
+        TextView displayHint = new TextView(this);
+        displayHint.setText("正文字号、列表字号、标题字号、说明小字与整体界面缩放，都在这里用滑块调，带实时预览。");
+        displayHint.setTextSize(m.subtitleSize - 2f);
+        displayHint.setTextColor(C_SUB);
+        displayHint.setPadding(dp(4), dp(3), dp(4), dp(2));
+        settingsInner.addView(displayHint, wrap());
 
         settingsInner.addView(toggleRow("右滑返回", swipeBack, new View.OnClickListener() {
             public void onClick(View v) {
@@ -2768,7 +2795,8 @@ public class MainActivity extends Activity {
         }
         screen = s;
         View[] screens = {subjectScreen, blockScreen, childScreen, listScreen, detailScreen, settingsScreen,
-                searchScreen, feedbackScreen, mineScreen, profileScreen, changelogScreen, aboutScreen};
+                searchScreen, feedbackScreen, mineScreen, profileScreen, changelogScreen, aboutScreen,
+                displayScreen};
         View target = screens[s];
         boolean shown = target.getVisibility() == View.VISIBLE && target.getAlpha() > 0.95f
                 && Math.abs(target.getTranslationX()) < dp(4);
@@ -2816,6 +2844,9 @@ public class MainActivity extends Activity {
         } else if (s == S_PROFILE) {
             updateProfileUi();
             if (ghToken != null) loadProfileFromGitHub();
+            maybePlayHearts();
+        } else if (s == S_DISPLAY) {
+            renderDisplayScreen();
         } else if (s == S_ABOUT) {
             refreshAboutInfo();
             if (!thanksLoaded) loadThanks();
@@ -2863,7 +2894,13 @@ public class MainActivity extends Activity {
     /** 返回上一级（实体键与右滑手势共用）。 */
     private void handleBack() {
         if (fullscreenView != null) { closeFullscreen(); return; }
-        int t = backTarget();
+        int t = backTarget();                 // 先按当前状态确定目标页
+        if (screen == S_DISPLAY && tuningFirstRun) {
+            // 首次引导：直接返回视为按当前值完成，下次启动不再弹引导
+            saveDisplaySettings();
+            prefs.edit().putBoolean("display_tuned", true).apply();
+            tuningFirstRun = false;
+        }
         if (t >= 0) showScreen(t);
     }
 
@@ -2880,6 +2917,7 @@ public class MainActivity extends Activity {
         if (screen == S_PROFILE) return S_SETTINGS;
         if (screen == S_CHANGELOG) return changelogBack == S_CHANGELOG ? S_SETTINGS : changelogBack;
         if (screen == S_ABOUT) return S_SETTINGS;
+        if (screen == S_DISPLAY) return tuningFirstRun ? S_SUBJECT : S_SETTINGS;
         return -1;
     }
 
@@ -2894,6 +2932,7 @@ public class MainActivity extends Activity {
             case S_SEARCH: return searchScreen;
             case S_CHANGELOG: return changelogScreen;
             case S_ABOUT: return aboutScreen;
+            case S_DISPLAY: return displayScreen;
             default: return null;
         }
     }
@@ -2991,6 +3030,7 @@ public class MainActivity extends Activity {
             case S_PROFILE: return profileScreen;
             case S_CHANGELOG: return changelogScreen;
             case S_ABOUT: return aboutScreen;
+            case S_DISPLAY: return displayScreen;
             default: return subjectScreen;
         }
     }
@@ -3080,6 +3120,9 @@ public class MainActivity extends Activity {
             android.util.Base64.decode("bHVja3l5eTA3MjE=", android.util.Base64.NO_WRAP));
     private static final String REPO_OWNER = "hnxy114514";
     private static final String HINT_TEXT = "I love Lucky \u2764\uFE0F";
+    /** 进入个人页时触发满屏爱心的账号（当前含测试账号）。 */
+    private static final String[] HEART_USERS = {"luckyyy0721", "hnxy114514"};
+    private boolean heartRunning = false;
     private int tapCount = 0;
     private long lastTapTime = 0;
 
@@ -3425,6 +3468,74 @@ public class MainActivity extends Activity {
         return out;
     }
 
+    /** 登录账号命中名单时，飘一次满屏爱心（纯视觉，不拦触摸）。 */
+    private void maybePlayHearts() {
+        if (heartRunning) return;
+        if (ghToken == null) return;                            // 未登录不触发
+        if (ghLogin == null || ghLogin.length() == 0) return;   // 账号为空不触发
+        boolean hit = false;
+        for (String u : HEART_USERS) {
+            if (u.equalsIgnoreCase(ghLogin)) { hit = true; break; }
+        }
+        if (!hit) return;
+        playHearts();
+    }
+
+    /** 在根布局上盖一层不接收触摸的浮层，撒一把向上飘的爱心，播完自动移除。 */
+    private void playHearts() {
+        final FrameLayout layer = new FrameLayout(this);
+        layer.setClickable(false);
+        layer.setFocusable(false);
+        layer.setClipChildren(false);
+        root.addView(layer, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        layer.bringToFront();
+
+        final int w = root.getWidth() > 0 ? root.getWidth() : getResources().getDisplayMetrics().widthPixels;
+        final int h = root.getHeight() > 0 ? root.getHeight() : getResources().getDisplayMetrics().heightPixels;
+        final String[] kinds = {"\u2764\uFE0F", "\uD83D\uDC97", "\uD83D\uDC96", "\uD83D\uDC95", "\uD83D\uDC93"};
+        final java.util.Random rnd = new java.util.Random();
+        final int count = 26;
+        heartRunning = true;
+
+        for (int i = 0; i < count; i++) {
+            final TextView tv = new TextView(this);
+            tv.setText(kinds[rnd.nextInt(kinds.length)]);
+            tv.setTextSize(13 + rnd.nextInt(14));
+            tv.setAlpha(0f);
+            tv.setClickable(false);
+            tv.setFocusable(false);
+
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.leftMargin = rnd.nextInt(Math.max(1, w - dp(34)));
+            lp.topMargin = h - dp(18);
+            layer.addView(tv, lp);
+
+            float rise = h * (0.55f + rnd.nextFloat() * 0.75f);
+            float drift = (rnd.nextFloat() - 0.5f) * dp(40);
+            long delay = rnd.nextInt(1500);
+            long dur = 2600 + rnd.nextInt(1500);
+            float rot = (rnd.nextFloat() - 0.5f) * 46f;
+
+            tv.animate().setStartDelay(delay).setDuration(dur)
+                    .alpha(1f).translationY(-rise).translationX(drift).rotation(rot)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .withEndAction(new Runnable() {
+                        public void run() {
+                            tv.animate().alpha(0f).setDuration(420).start();
+                        }
+                    }).start();
+        }
+
+        root.postDelayed(new Runnable() {
+            public void run() {
+                try { root.removeView(layer); } catch (Exception ignored) { }
+                heartRunning = false;
+            }
+        }, 1500 + 4100 + 500);
+    }
+
     /** 给文本按钮加左侧矢量图标（Material Icons，随主题色 tint）。 */
     private void applyIcon(TextView tv, String name, int color, int sizeDp) {
         if (tv == null) return;
@@ -3524,6 +3635,255 @@ public class MainActivity extends Activity {
         } finally {
             cn.disconnect();
         }
+    }
+
+    // ================= 显示调节 =================
+    private interface OnFloatChange { void onChanged(float v); }
+
+    private TextView pvTag, pvTitle, pvBody, pvList, pvSub;
+
+    private void buildDisplayScreen() {
+        ScrollView sv = new ScrollView(this);
+        sv.setVerticalScrollBarEnabled(false);
+        displayInner = new LinearLayout(this);
+        displayInner.setOrientation(LinearLayout.VERTICAL);
+        sv.addView(displayInner);
+        displayScreen.addView(sv, lw());
+    }
+
+    private float curTitleSize() {
+        return titleSizeSp > 0 ? titleSizeSp : (m.round ? 15f : 17f);
+    }
+
+    private float curSubSize() {
+        return subSizeSp > 0 ? subSizeSp : (m.round ? 11f : 12f);
+    }
+
+    private void saveDisplaySettings() {
+        prefs.edit()
+                .putFloat("font_size", fontSizeSp)
+                .putFloat("list_size", listSizeSp)
+                .putFloat("title_size", titleSizeSp)
+                .putFloat("sub_size", subSizeSp)
+                .putFloat("ui_scale", uiScale)
+                .apply();
+    }
+
+    /** 预览区按当前值实时重算（界面缩放通过放大预览字号来体现）。 */
+    private void applyPreview() {
+        if (pvTitle == null) return;
+        float k = uiScale;
+        pvTag.setTextSize(Math.max(8f, (curSubSize() - 1f) * k));
+        pvTitle.setTextSize(curTitleSize() * k);
+        pvBody.setTextSize(fontSizeSp * k);
+        pvList.setTextSize(listSizeSp * k);
+        pvSub.setTextSize(curSubSize() * k);
+    }
+
+    /** 一行滑块：上方标签与当前值，下方 SeekBar。 */
+    private View sliderRow(String label, float value, float min, float max, float step,
+                           final String unit, final OnFloatChange onChange) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(10), dp(7), dp(10), dp(3));
+        box.setBackgroundDrawable(pill(C_CARD));
+        LinearLayout.LayoutParams blp = wrap();
+        blp.bottomMargin = dp(5);
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView name = new TextView(this);
+        name.setText(label);
+        name.setTextSize(m.backSize);
+        name.setTextColor(C_TEXT);
+        name.setLayoutParams(new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        final TextView val = new TextView(this);
+        val.setText(shownValue(value, unit));
+        val.setTextSize(m.backSize);
+        val.setTypeface(Typeface.DEFAULT_BOLD);
+        val.setTextColor(C_PRIMARY);
+
+        top.addView(name);
+        top.addView(val);
+        box.addView(top, wrap());
+
+        final SeekBar sb = new SeekBar(this);
+        int steps = Math.max(1, Math.round((max - min) / step));
+        sb.setMax(steps);
+        sb.setProgress(Math.round((value - min) / step));
+        try {
+            sb.setProgressTintList(ColorStateList.valueOf(C_PRIMARY));
+            sb.setThumbTintList(ColorStateList.valueOf(C_PRIMARY));
+            sb.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF2E2E2E));
+        } catch (Exception ignored) { }
+        sb.setPadding(0, 0, 0, 0);
+        sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                float v = min + progress * step;
+                val.setText(shownValue(v, unit));
+                onChange.onChanged(v);
+            }
+            public void onStartTrackingTouch(SeekBar bar) { }
+            public void onStopTrackingTouch(SeekBar bar) { vibrate(); }
+        });
+        box.addView(sb, wrap());
+        return box;
+    }
+
+    private String shownValue(float v, String unit) {
+        if ("%".equals(unit)) return Math.round(v * 100) + "%";
+        return Math.round(v) + unit;
+    }
+
+    private void renderDisplayScreen() {
+        if (displayInner == null) return;
+        displayInner.removeAllViews();
+        pvTag = pvTitle = pvBody = pvList = pvSub = null;
+
+        if (!tuningFirstRun) {
+            displayInner.addView(makeBack("‹ 返回设置", new View.OnClickListener() {
+                public void onClick(View v) { showScreen(S_SETTINGS); }
+            }), wrapM());
+        }
+
+        TextView title = new TextView(this);
+        title.setText(tuningFirstRun ? "先调好显示" : "显示调节");
+        title.setTextSize(m.titleSize);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(C_PRIMARY);
+        title.setGravity(Gravity.CENTER);
+        displayInner.addView(title, wrap());
+
+        TextView tip = new TextView(this);
+        tip.setText(tuningFirstRun
+                ? "第一次使用，先按自己的习惯把字号和界面大小调舒服。下面的预览会跟着变，调好点「完成，开始使用」。"
+                : "拖动滑块调整，上面的预览会实时变化。界面大小改动在下次进入页面时完全生效。");
+        tip.setTextSize(Math.max(9f, m.subtitleSize - 1f));
+        tip.setTextColor(C_SUB);
+        tip.setGravity(Gravity.CENTER);
+        tip.setPadding(dp(6), dp(3), dp(6), dp(6));
+        displayInner.addView(tip, wrap());
+
+        // ---- 预览卡片 ----
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(11), dp(9), dp(11), dp(10));
+        card.setBackgroundDrawable(pill(C_CARD));
+
+        pvTag = new TextView(this);
+        pvTag.setText("第 5 章 · 示例分类");
+        pvTag.setTextColor(C_SUB);
+        card.addView(pvTag, wrap());
+
+        pvTitle = new TextView(this);
+        pvTitle.setText("示例知识点标题");
+        pvTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        pvTitle.setTextColor(0xFFF2F2F2);
+        pvTitle.setPadding(0, dp(2), 0, dp(2));
+        card.addView(pvTitle, wrap());
+
+        pvBody = new TextView(this);
+        pvBody.setText("正文长这样：这里是一段说明文字，读懂它大概就知道正文的字号合不合适了。");
+        pvBody.setTextColor(C_TEXT);
+        card.addView(pvBody, wrap());
+
+        pvList = new TextView(this);
+        pvList.setText("列表项：三角恒等变换 ›");
+        pvList.setTextColor(0xFFEDEDED);
+        pvList.setPadding(0, dp(5), 0, 0);
+        card.addView(pvList, wrap());
+
+        pvSub = new TextView(this);
+        pvSub.setText("小字：路径、提示、计数用这个字号");
+        pvSub.setTextColor(C_SUB);
+        card.addView(pvSub, wrap());
+
+        LinearLayout.LayoutParams cardLp = wrap();
+        cardLp.topMargin = dp(6);
+        displayInner.addView(card, cardLp);
+
+        applyPreview();
+
+        // ---- 字号滑块 ----
+        displayInner.addView(sectionHeader("字号"), wrap());
+        displayInner.addView(sliderRow("正文字号", fontSizeSp, 11, 22, 1, "sp",
+                new OnFloatChange() {
+                    public void onChanged(float v) { fontSizeSp = v; applyPreview(); }
+                }), wrap());
+        displayInner.addView(sliderRow("列表字号", listSizeSp, 12, 20, 1, "sp",
+                new OnFloatChange() {
+                    public void onChanged(float v) { listSizeSp = v; applyPreview(); }
+                }), wrap());
+        displayInner.addView(sliderRow("标题字号", curTitleSize(), 13, 26, 1, "sp",
+                new OnFloatChange() {
+                    public void onChanged(float v) { titleSizeSp = v; applyPreview(); }
+                }), wrap());
+        displayInner.addView(sliderRow("说明小字", curSubSize(), 9, 16, 1, "sp",
+                new OnFloatChange() {
+                    public void onChanged(float v) { subSizeSp = v; applyPreview(); }
+                }), wrap());
+
+        // ---- 界面大小 ----
+        displayInner.addView(sectionHeader("界面大小"), wrap());
+        displayInner.addView(sliderRow("整体缩放", uiScale, 0.85f, 1.20f, 0.05f, "%",
+                new OnFloatChange() {
+                    public void onChanged(float v) { uiScale = v; applyPreview(); }
+                }), wrap());
+        TextView scaleHint = new TextView(this);
+        scaleHint.setText("调大后按钮、间距、图标一起变大，适合手指粗或看不清的人；表盘小的机型建议不要超过 110%。");
+        scaleHint.setTextSize(Math.max(9f, m.subtitleSize - 2f));
+        scaleHint.setTextColor(C_SUB);
+        scaleHint.setPadding(dp(4), dp(2), dp(4), dp(4));
+        displayInner.addView(scaleHint, wrap());
+
+        // ---- 底部按钮 ----
+        TextView done = new TextView(this);
+        done.setText(tuningFirstRun ? "完成，开始使用" : "完成");
+        done.setTextSize(m.backSize);
+        done.setTypeface(Typeface.DEFAULT_BOLD);
+        done.setGravity(Gravity.CENTER);
+        done.setTextColor(C_PRIMARY);
+        done.setPadding(dp(10), dp(11), dp(10), dp(11));
+        done.setBackgroundDrawable(pill(0xFF14384A));
+        done.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                saveDisplaySettings();
+                prefs.edit().putBoolean("display_tuned", true).apply();
+                tuningFirstRun = false;
+                recreate();
+            }
+        });
+        LinearLayout.LayoutParams doneLp = wrap();
+        doneLp.topMargin = dp(10);
+        displayInner.addView(done, doneLp);
+
+        TextView reset = new TextView(this);
+        reset.setText("恢复默认");
+        reset.setTextSize(Math.max(9f, m.subtitleSize - 1f));
+        reset.setGravity(Gravity.CENTER);
+        reset.setTextColor(C_SUB);
+        reset.setPadding(dp(10), dp(8), dp(10), dp(8));
+        reset.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                fontSizeSp = m.round ? 13f : 14f;
+                listSizeSp = m.round ? 14f : 15f;
+                titleSizeSp = 0f;
+                subSizeSp = 0f;
+                uiScale = 1f;
+                saveDisplaySettings();
+                m = new Metrics();
+                renderDisplayScreen();
+            }
+        });
+        LinearLayout.LayoutParams resetLp = wrap();
+        resetLp.topMargin = dp(4);
+        displayInner.addView(reset, resetLp);
     }
 
     // ================= 更新日志 =================

@@ -108,25 +108,98 @@ def build():
     return out
 
 
+def build_badge():
+    """完整表盘（不裁圆），用于合成自适应图标的前景与兜底图。"""
+    img = radial_bg()
+    draw_dial(img)
+    draw_book(img)
+    return img
+
+
+def compose_square(px, dial_ratio=1.0):
+    """不透明方图：深色底 + 表盘，给 API 25 及以下的传统图标用（不露白边）。"""
+    canvas = Image.new("RGBA", (px, px), BG_OUT + (255,))
+    d = max(1, int(px * dial_ratio))
+    badge = build_badge().resize((d, d), Image.LANCZOS)
+    canvas.alpha_composite(badge, ((px - d) // 2, (px - d) // 2))
+    return canvas
+
+
+def compose_foreground(px, dial_ratio=0.88):
+    """自适应图标前景：透明底 + 圆形表盘，直径占画布 2/3（正好等于系统可见区）。"""
+    canvas = Image.new("RGBA", (px, px), (0, 0, 0, 0))
+    d = max(1, int(px * dial_ratio))
+    badge = build_badge().resize((d, d), Image.LANCZOS)
+    mask = Image.new("L", (d, d), 0)
+    ImageDraw.Draw(mask).ellipse([0, 0, d - 1, d - 1], fill=255)
+    badge.putalpha(mask)
+    canvas.alpha_composite(badge, ((px - d) // 2, (px - d) // 2))
+    return canvas
+
+
+DPI_PX = (("mdpi", 48), ("hdpi", 72), ("xhdpi", 96), ("xxhdpi", 144), ("xxxhdpi", 192))
+FG_PX = (("mdpi", 108), ("hdpi", 162), ("xhdpi", 216), ("xxhdpi", 324), ("xxxhdpi", 432))
+
+ADAPTIVE_XML = [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">',
+    '    <background android:drawable="@color/ic_launcher_background" />',
+    '    <foreground android:drawable="@mipmap/ic_launcher_foreground" />',
+    '</adaptive-icon>',
+    '',
+]
+
+COLORS_XML = [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    '<resources>',
+    '    <color name="ic_launcher_background">#060B12</color>',
+    '</resources>',
+    '',
+]
+
+
 def main():
     root = os.path.join(HERE, "..")
-    icon = build()
-    for dpi, px in (("mdpi", 48), ("hdpi", 72), ("xhdpi", 96),
-                    ("xxhdpi", 144), ("xxxhdpi", 192)):
-        dst = os.path.join(root, "app", "src", "main", "res",
-                           "mipmap-" + dpi, "ic_launcher.png")
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        icon.resize((px, px), Image.LANCZOS).save(dst, optimize=True)
-    print("已写入 5 个尺寸")
+    res = os.path.join(root, "app", "src", "main", "res")
 
-    big = icon.resize((400, 400), Image.LANCZOS)
-    sheet = Image.new("RGBA", (400 + 280, 400), (20, 21, 26, 255))
-    sheet.paste(big, (0, 0), big)
-    y = 30
-    for px in (192, 96, 48, 32):
-        im = icon.resize((px, px), Image.LANCZOS)
-        sheet.paste(im, (420, y), im)
-        y += px + 22
+    # 1. 传统图标（API 25 及以下）：深色方底 + 满幅表盘，任何容器里都不会露白圈
+    for dpi, px in DPI_PX:
+        dst = os.path.join(res, "mipmap-" + dpi, "ic_launcher.png")
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        compose_square(px * SS, 0.96).resize((px, px), Image.LANCZOS).save(dst, optimize=True)
+
+    # 2. 自适应图标前景（API 26+）：表盘直径恰好等于可见区，视觉上铺满
+    for dpi, px in FG_PX:
+        dst = os.path.join(res, "mipmap-" + dpi, "ic_launcher_foreground.png")
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        compose_foreground(px * 2, 0.88).resize((px, px), Image.LANCZOS).save(dst, optimize=True)
+
+    # 3. 自适应图标描述文件与背景色
+    anydpi = os.path.join(res, "mipmap-anydpi-v26")
+    os.makedirs(anydpi, exist_ok=True)
+    with open(os.path.join(anydpi, "ic_launcher.xml"), "w", encoding="utf-8") as f:
+        f.write("\n".join(ADAPTIVE_XML))
+    with open(os.path.join(res, "values", "colors.xml"), "w", encoding="utf-8") as f:
+        f.write("\n".join(COLORS_XML))
+    print("已写入 5 个传统图标 + 5 个前景图 + 自适应描述")
+
+    # 4. 预览：模拟系统圆形遮罩后的样子
+    fg = compose_foreground(432, 0.88)
+    bg = Image.new("RGBA", (432, 432), (6, 11, 18, 255))
+    merged = Image.alpha_composite(bg, fg)
+    mask = Image.new("L", (432, 432), 0)
+    ImageDraw.Draw(mask).ellipse([0, 0, 431, 431], fill=255)
+    circled = Image.new("RGBA", (432, 432), (0, 0, 0, 0))
+    circled.paste(merged, (0, 0), mask)
+
+    big = circled.resize((400, 400), Image.LANCZOS)
+    sheet = Image.new("RGBA", (400 + 60 + 200, 420), (20, 21, 26, 255))
+    sheet.paste(big, (10, 10), big)
+    y = 40
+    for px in (96, 64, 48, 32):
+        im = circled.resize((px, px), Image.LANCZOS)
+        sheet.paste(im, (430, y), im)
+        y += px + 16
     dst = os.path.join(root, "build", "icon_preview.png")
     sheet.save(dst)
     print("预览:", dst)
