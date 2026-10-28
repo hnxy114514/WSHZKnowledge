@@ -359,3 +359,20 @@ Release 的 tag 必须 = v{versionName}，App 靠它判断要不要更新。
 
 6) 验证提交是否成功：到仓库 Issues 看有没有新条目，
    标题形如「[内容有误] 描述前 20 字」，正文带版本/设备/最近浏览。
+
+7) 反馈状态约定（App「我的反馈记录」按这个显示）：
+   - 开始处理：给 issue 打 label「处理中」
+   - 修完发布：加一条评论说明版本 + 打 label「已修复」+ 关闭 issue
+   打标签命令（PAT 在 GITHUB_TOKEN）：
+   curl -sk -X POST -H "Authorization: token $GITHUB_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"labels":["已修复"]}' \
+     https://api.github.com/repos/hnxy114514/WSHZKnowledge/issues/<号>/labels
+   关闭：curl -sk -X PATCH ... -d '{"state":"closed"}' .../issues/<号>
+
+7) 反馈状态约定（App「我的反馈记录」按这个显示）：
+   - 开始处理：给 issue 打 label「处理中」
+   - 修完发布：加一条评论说明版本 + 打 label「已修复」+ 关闭 issue
+   打标签命令（PAT 在 GITHUB_TOKEN）：
+   curl -sk -X POST -H "Authorization: token $GITHUB_TOKEN"      -H "Content-Type: application/json"      -d '{"labels":["已修复"]}'      https://api.github.com/repos/hnxy114514/WSHZKnowledge/issues/<号>/labels
+   关闭：curl -sk -X PATCH ... -d '{"state":"closed"}' .../issues/<号>

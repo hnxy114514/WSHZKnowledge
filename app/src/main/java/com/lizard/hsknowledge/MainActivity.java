@@ -123,7 +123,7 @@ public class MainActivity extends Activity {
 
     // ---------- 导航 ----------
     private static final int S_SUBJECT = 0, S_BLOCK = 1, S_CHILD = 2, S_ITEM = 3, S_DETAIL = 4, S_SETTINGS = 5,
-            S_SEARCH = 6, S_FEEDBACK = 7;
+            S_SEARCH = 6, S_FEEDBACK = 7, S_MYFEEDBACK = 8;
     private int screen = S_SUBJECT;
     private Subject curSubject;
     private Block curBlock;
@@ -158,9 +158,15 @@ public class MainActivity extends Activity {
     private String lastPath = "";
     private boolean subjectDirty = true;
     private String lastQuery = null;
-    private final int[] savedPos = new int[8];
-    private final int[] savedTop = new int[8];
-    private final boolean[] hasSaved = new boolean[8];
+    private final int[] savedPos = new int[9];
+    private final int[] savedTop = new int[9];
+    private final boolean[] hasSaved = new boolean[9];
+
+    // 我的反馈记录
+    private LinearLayout mineScreen;
+    private ListView mineList;
+    private final List<JSONObject> mineIssues = new ArrayList<JSONObject>();
+    private final List<String[]> mineRows = new ArrayList<String[]>();
     private FrameLayout progBox;
     private View progFill;
     private TextView progTitle, progDetail;
@@ -742,6 +748,22 @@ public class MainActivity extends Activity {
         root.addView(searchScreen, fp());
         buildFeedbackScreen();
         root.addView(feedbackScreen, fp());
+
+        mineScreen = newScreen();
+        mineList = makeList();
+        mineList.addHeaderView(makeBackHeader("‹ 返回反馈", new View.OnClickListener() {
+            public void onClick(View v) { showScreen(S_FEEDBACK); }
+        }));
+        mineScreen.addView(mineList, lw());
+        mineList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
+                if (pos == 0) return;
+                int idx = pos - 1;
+                if (idx < 0 || idx >= mineIssues.size()) return;
+                openIssueDetail(mineIssues.get(idx));
+            }
+        });
+        root.addView(mineScreen, fp());
 
         // 主页
         subjectList = makeList();
@@ -2394,7 +2416,7 @@ public class MainActivity extends Activity {
         }
         screen = s;
         View[] screens = {subjectScreen, blockScreen, childScreen, listScreen, detailScreen, settingsScreen,
-                searchScreen, feedbackScreen};
+                searchScreen, feedbackScreen, mineScreen};
         View target = screens[s];
         boolean shown = target.getVisibility() == View.VISIBLE && target.getAlpha() > 0.95f
                 && Math.abs(target.getTranslationX()) < dp(4);
@@ -2458,6 +2480,7 @@ public class MainActivity extends Activity {
             case S_CHILD: return childList;
             case S_ITEM: return itemList;
             case S_SEARCH: return searchList;
+            case S_MYFEEDBACK: return mineList;
             default: return null;
         }
     }
@@ -2491,6 +2514,7 @@ public class MainActivity extends Activity {
         if (screen == S_SETTINGS) return S_SUBJECT;
         if (screen == S_SEARCH) return S_SUBJECT;
         if (screen == S_FEEDBACK) return S_SETTINGS;
+        if (screen == S_MYFEEDBACK) return S_FEEDBACK;
         return -1;
     }
 
@@ -2596,6 +2620,7 @@ public class MainActivity extends Activity {
             case S_SETTINGS: return settingsScreen;
             case S_SEARCH: return searchScreen;
             case S_FEEDBACK: return feedbackScreen;
+            case S_MYFEEDBACK: return mineScreen;
             default: return subjectScreen;
         }
     }
@@ -2823,6 +2848,28 @@ public class MainActivity extends Activity {
             public void onClick(View v) { submitFeedback(); }
         });
         feedbackInner.addView(fbSubmitBtn, wrap());
+
+        TextView mineBtn = new TextView(this);
+        mineBtn.setText("我的反馈记录");
+        mineBtn.setTextSize(m.backSize);
+        mineBtn.setTypeface(Typeface.DEFAULT_BOLD);
+        mineBtn.setGravity(Gravity.CENTER);
+        mineBtn.setPadding(dp(10), dp(10), dp(10), dp(10));
+        mineBtn.setTextColor(C_PRIMARY);
+        mineBtn.setBackgroundDrawable(pill(C_PILL));
+        mineBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (ghToken == null) {
+                    toast("请先登录 GitHub");
+                    return;
+                }
+                showScreen(S_MYFEEDBACK);
+                loadMyIssues();
+            }
+        });
+        LinearLayout.LayoutParams mlp = wrap();
+        mlp.topMargin = dp(8);
+        feedbackInner.addView(mineBtn, mlp);
     }
 
     private void updateFeedbackUi() {
@@ -3240,5 +3287,185 @@ public class MainActivity extends Activity {
         } finally {
             cn.disconnect();
         }
+    }
+    // ================= 我的反馈记录 =================
+
+    private void loadMyIssues() {
+        mineIssues.clear();
+        mineRows.clear();
+        mineRows.add(new String[]{"正在加载…", "", "#FF8A8A8A"});
+        mineList.setAdapter(pairAdapter(mineRows));
+        final String login = ghLogin;
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    String url = "https://api.github.com/repos/" + REPO + "/issues?state=all&per_page=40"
+                            + (login != null && login.length() > 0 ? "&creator=" + login : "");
+                    JSONArray arr = new JSONArray(httpGetAuthed(url));
+                    final List<JSONObject> items = new ArrayList<JSONObject>();
+                    final List<String[]> rows = new ArrayList<String[]>();
+                    for (int i = 0; i < arr.length(); i++) {
+                        JSONObject o = arr.getJSONObject(i);
+                        if (o.has("pull_request")) continue;
+                        items.add(o);
+                        rows.add(new String[]{
+                                "#" + o.optInt("number") + " " + o.optString("title"),
+                                issueStatusText(o) + " · " + shortTime(o.optString("created_at", "")),
+                                issueStatusColor(o)});
+                    }
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            mineIssues.clear();
+                            mineIssues.addAll(items);
+                            mineRows.clear();
+                            if (rows.isEmpty()) {
+                                mineRows.add(new String[]{"还没有提交过反馈", "", "#FF8A8A8A"});
+                            } else {
+                                mineRows.addAll(rows);
+                            }
+                            mineList.setAdapter(pairAdapter(mineRows));
+                        }
+                    });
+                } catch (final Exception e) {
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            mineRows.clear();
+                            mineRows.add(new String[]{"加载失败：" + e.getMessage(), "", "#FFE57373"});
+                            mineList.setAdapter(pairAdapter(mineRows));
+                        }
+                    });
+                }
+            }
+        }).start();
+    }
+
+    private String issueStatusText(JSONObject o) {
+        boolean working = false, fixed = false;
+        JSONArray ls = o.optJSONArray("labels");
+        if (ls != null) {
+            for (int i = 0; i < ls.length(); i++) {
+                JSONObject l = ls.optJSONObject(i);
+                if (l == null) continue;
+                String n = l.optString("name", "");
+                if (n.contains("已修复") || n.contains("已处理")) fixed = true;
+                if (n.contains("处理中")) working = true;
+            }
+        }
+        if (fixed) return "已修复";
+        if ("closed".equals(o.optString("state"))) return "已处理";
+        if (working) return "处理中";
+        return "待处理";
+    }
+
+    private String issueStatusColor(JSONObject o) {
+        String s = issueStatusText(o);
+        if ("已修复".equals(s) || "已处理".equals(s)) return "#FF81C784";
+        if ("处理中".equals(s)) return "#FF4FC3F7";
+        return "#FFFFB74D";
+    }
+
+    private String shortTime(String iso) {
+        if (iso == null || iso.length() < 10) return "";
+        return iso.substring(5, 10);
+    }
+
+    /** 两行列表：第一行标题，第二行小字（状态 · 日期）。 */
+    private ArrayAdapter<String[]> pairAdapter(final List<String[]> rows) {
+        return new ArrayAdapter<String[]>(this, 0, rows) {
+            @Override
+            public View getView(int position, View convertView, ViewGroup parent) {
+                LinearLayout box;
+                TextView title, sub;
+                if (convertView instanceof LinearLayout) {
+                    box = (LinearLayout) convertView;
+                    title = (TextView) box.getChildAt(0);
+                    sub = (TextView) box.getChildAt(1);
+                } else {
+                    box = new LinearLayout(MainActivity.this);
+                    box.setOrientation(LinearLayout.VERTICAL);
+                    box.setGravity(Gravity.CENTER);
+                    box.setPadding(dp(10), dp(8), dp(10), dp(8));
+                    GradientDrawable content = pill(C_PILL);
+                    GradientDrawable mask = new GradientDrawable();
+                    mask.setColor(Color.WHITE);
+                    mask.setCornerRadius(dp(13));
+                    try {
+                        box.setBackground(new RippleDrawable(ColorStateList.valueOf(0x334FC3F7), content, mask));
+                    } catch (Exception ignored) {
+                        box.setBackgroundDrawable(content);
+                    }
+                    title = new TextView(MainActivity.this);
+                    title.setTextSize(listSizeSp - 1f);
+                    title.setTextColor(0xFFF0F0F0);
+                    title.setTypeface(Typeface.DEFAULT_BOLD);
+                    title.setGravity(Gravity.CENTER);
+                    title.setMaxLines(2);
+                    title.setEllipsize(TextUtils.TruncateAt.END);
+                    box.addView(title, wrap());
+
+                    sub = new TextView(MainActivity.this);
+                    sub.setTextSize(m.subtitleSize - 2f);
+                    sub.setGravity(Gravity.CENTER);
+                    sub.setMaxLines(1);
+                    sub.setPadding(0, dp(2), 0, 0);
+                    box.addView(sub, wrap());
+                }
+                String[] r = getItem(position);
+                title.setText(r[0]);
+                sub.setText(r[1]);
+                try {
+                    sub.setTextColor(Color.parseColor(r[2]));
+                } catch (Exception ignored) {
+                    sub.setTextColor(C_SUB);
+                }
+                return box;
+            }
+        };
+    }
+
+    /** 打开单条反馈：正文 + 最新回复。 */
+    private void openIssueDetail(final JSONObject issue) {
+        final int number = issue.optInt("number");
+        final String title = issue.optString("title");
+        final String body = issue.optString("body", "");
+        final String status = issueStatusText(issue);
+        toast("正在读取 #" + number + "…");
+        new Thread(new Runnable() {
+            public void run() {
+                String reply = null;
+                try {
+                    String u = "https://api.github.com/repos/" + REPO + "/issues/" + number + "/comments?per_page=30";
+                    JSONArray arr = new JSONArray(httpGetAuthed(u));
+                    for (int i = 0; i < arr.length(); i++) {
+                        String b = arr.getJSONObject(i).optString("body", "");
+                        if (b.length() > 0) reply = b;
+                    }
+                } catch (Exception ignored) { }
+                final String finalReply = reply;
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        List<Section> secs = new ArrayList<Section>();
+                        Section s1 = new Section();
+                        s1.h = "反馈内容";
+                        s1.c = "K";
+                        s1.body = body.length() == 0 ? "(没有正文)" : body;
+                        secs.add(s1);
+
+                        Section s2 = new Section();
+                        s2.h = "处理回复";
+                        if (finalReply != null) {
+                            s2.c = "M";
+                            s2.body = finalReply;
+                        } else {
+                            s2.c = "E";
+                            s2.body = "还没有回复。处理后会写在这里，状态变成「已处理」时说明已经修好。";
+                        }
+                        secs.add(s2);
+                        openDetail("#" + number + " " + title, secs, status + " · " + shortTime(
+                                issue.optString("created_at", "")), S_MYFEEDBACK, null);
+                    }
+                });
+            }
+        }).start();
     }
 }

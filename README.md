@@ -168,6 +168,10 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
 - 流程：点登录 → 取 8 位授权码 → 自动复制到剪贴板并弹原生对话框 → 反馈页显示固定网址二维码（`assets/qr_login.png`，内容 `https://github.com/login/device`）+ 大号授权码，手机扫码后输码授权（手表浏览器支持不佳，作为备选按钮）→ 手表每 5 秒轮询 → 成功后 token 存 SharedPreferences（`gh_token` / `gh_login`）。
 - 二维码是静态图片，不含授权码：授权码每次不同，静态图只承载固定网址，用户扫完照表上的码输入。
 - 提交：`POST /repos/<repo>/issues`，正文自动附带版本号、机型、Android 版本、圆/方屏、最近浏览的知识点路径。
+- 「我的反馈记录」：拉取 `issues?creator=<自己>&state=all`，列表显示状态与日期，点开看正文 + 最新回复。
+- 状态约定（靠 label 与 state）：有 `已修复` 标签 → 已修复；issue 已关闭 → 已处理；有 `处理中` 标签 → 处理中；否则 待处理。处理一条反馈时：先打 `处理中`，修完补评论 + 打 `已修复` + 关闭。
+- 「我的反馈记录」：拉取 `issues?creator=<自己>&state=all`，列表显示状态与日期，点开看正文 + 最新回复。
+- 状态约定（靠 label 与 state）：有 `已修复` 标签 → 已修复；issue 已关闭 → 已处理；有 `处理中` 标签 → 处理中；否则 待处理。处理一条反馈时：先打 `处理中`，修完补评论 + 打 `已修复` + 关闭。
 - OAuth App 的两条硬要求：必须勾选 **Enable Device Flow**；**不要**勾 Expire user access tokens（勾了 8 小时过期，续期需要 client_secret，而 secret 不能放进公开 APK）。
 
 ---
