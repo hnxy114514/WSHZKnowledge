@@ -156,6 +156,11 @@ public class MainActivity extends Activity {
     private String fbCode, fbCodeUrl;
     private AlertDialog codeDialog;
     private String lastPath = "";
+    private boolean subjectDirty = true;
+    private String lastQuery = null;
+    private final int[] savedPos = new int[8];
+    private final int[] savedTop = new int[8];
+    private final boolean[] hasSaved = new boolean[8];
     private FrameLayout progBox;
     private View progFill;
     private TextView progTitle, progDetail;
@@ -235,6 +240,10 @@ public class MainActivity extends Activity {
         for (String k : DEFAULT_ORDER) {
             if (subjectMap.containsKey(k) && !orderKeys.contains(k)) orderKeys.add(k);
         }
+    }
+
+    private void markSubjectsDirty() {
+        subjectDirty = true;
     }
 
     private void saveOrderKeys() {
@@ -1095,6 +1104,7 @@ public class MainActivity extends Activity {
 
     private void refreshGlobalSearch() {
         String q = gSearchBox.getText().toString().trim();
+        lastQuery = q;
         searchHits.clear();
         if (q.length() == 0) {
             searchTitle.setText("搜索全部知识点");
@@ -2205,7 +2215,7 @@ public class MainActivity extends Activity {
                 prefs.edit().clear().apply();
                 orderKeys.clear();
                 for (String k : DEFAULT_ORDER) if (subjectMap.containsKey(k)) orderKeys.add(k);
-                saveOrderKeys();
+                saveOrderKeys(); markSubjectsDirty();
                 saveSettings();
                 renderSettings();
                 Toast.makeText(MainActivity.this, "已恢复默认", Toast.LENGTH_SHORT).show();
@@ -2249,7 +2259,7 @@ public class MainActivity extends Activity {
                 if (idx <= 0) return;
                 String k = orderKeys.remove(idx);
                 orderKeys.add(idx - 1, k);
-                saveOrderKeys(); renderSettings();
+                saveOrderKeys(); markSubjectsDirty(); renderSettings();
             }
         });
         TextView dn = orderBtn("▼", idx < orderKeys.size() - 1, new View.OnClickListener() {
@@ -2257,7 +2267,7 @@ public class MainActivity extends Activity {
                 if (idx >= orderKeys.size() - 1) return;
                 String k = orderKeys.remove(idx);
                 orderKeys.add(idx + 1, k);
-                saveOrderKeys(); renderSettings();
+                saveOrderKeys(); markSubjectsDirty(); renderSettings();
             }
         });
 
@@ -2371,6 +2381,13 @@ public class MainActivity extends Activity {
 
     // ================= 页面切换（带动画） =================
     private void showScreen(int s) {
+        // 记下离开页面的滚动位置，回来时原样恢复（避免淡入后跳回顶部）
+        ListView leaving = listOf(screen);
+        if (leaving != null && leaving.getChildCount() > 0) {
+            savedPos[screen] = leaving.getFirstVisiblePosition();
+            savedTop[screen] = leaving.getChildAt(0).getTop();
+            hasSaved[screen] = true;
+        }
         screen = s;
         View[] screens = {subjectScreen, blockScreen, childScreen, listScreen, detailScreen, settingsScreen,
                 searchScreen, feedbackScreen};
@@ -2395,21 +2412,49 @@ public class MainActivity extends Activity {
         }
 
         if (s == S_SUBJECT) {
-            List<String> names = new ArrayList<String>();
-            names.add("搜索（全部知识点）");
-            for (String k : orderKeys) {
-                Subject su = subjectMap.get(k);
-                if (su != null) names.add(su.name);
+            if (subjectDirty) {
+                List<String> names = new ArrayList<String>();
+                names.add("搜索（全部知识点）");
+                for (String k : orderKeys) {
+                    Subject su = subjectMap.get(k);
+                    if (su != null) names.add(su.name);
+                }
+                names.add("设置");
+                subjectList.setAdapter(stringAdapter(names, C_PRIMARY));
+                subjectDirty = false;
             }
-            names.add("设置");
-            subjectList.setAdapter(stringAdapter(names, C_PRIMARY));
         } else if (s == S_SETTINGS) {
             renderSettings();
         } else if (s == S_SEARCH) {
-            // 保留上次输入（只有点 ✕ 才清空），从详情返回时能接着看结果
-            refreshGlobalSearch();
+            // 关键词没变就不重设 adapter，返回时列表位置不会跳回顶部
+            String q = gSearchBox.getText().toString().trim();
+            if (lastQuery == null || !lastQuery.equals(q)) refreshGlobalSearch();
         } else if (s == S_FEEDBACK) {
             updateFeedbackUi();
+        }
+
+        final ListView enter = listOf(s);
+        if (enter != null && hasSaved[s]) {
+            final int pos = savedPos[s];
+            final int top = savedTop[s];
+            enter.post(new Runnable() {
+                public void run() {
+                    try {
+                        enter.setSelectionFromTop(pos, top);
+                    } catch (Exception ignored) { }
+                }
+            });
+        }
+    }
+
+    private ListView listOf(int s) {
+        switch (s) {
+            case S_SUBJECT: return subjectList;
+            case S_BLOCK: return blockList;
+            case S_CHILD: return childList;
+            case S_ITEM: return itemList;
+            case S_SEARCH: return searchList;
+            default: return null;
         }
     }
 
@@ -2834,7 +2879,16 @@ public class MainActivity extends Activity {
         SharedPreferences.Editor e = prefs.edit().putString("gh_token", token == null ? "" : token);
         if (login != null) e.putString("gh_login", login);
         e.apply();
-        updateFeedbackUi();
+    }
+
+    /** 登录流程结束后的 UI 收尾；后台线程调用安全。 */
+    private void afterLoginEnds() {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                dismissCodeDialog();
+                updateFeedbackUi();
+            }
+        });
     }
 
     private void logoutGitHub() {
@@ -2883,7 +2937,7 @@ public class MainActivity extends Activity {
                     pollDeviceToken(device, interval);
                 } catch (final Exception e) {
                     loginRunning = false;
-                    updateFeedbackUi();
+                    afterLoginEnds();
                     toast("登录失败：" + e.getMessage());
                 }
             }
@@ -2915,8 +2969,7 @@ public class MainActivity extends Activity {
                 if ("slow_down".equals(err)) { interval += 5; continue; }
                 if ("authorization_pending".equals(err)) continue;
                 loginRunning = false;
-                dismissCodeDialog();
-                updateFeedbackUi();
+                afterLoginEnds();
                 toast("登录未完成：" + ("access_denied".equals(err) ? "已取消授权" : err));
                 return;
             } catch (Exception ignored) {
@@ -2924,8 +2977,7 @@ public class MainActivity extends Activity {
             }
         }
         loginRunning = false;
-        dismissCodeDialog();
-        updateFeedbackUi();
+        afterLoginEnds();
         if (ghToken == null) toast("登录超时，可再点一次登录");
     }
 
@@ -2937,8 +2989,8 @@ public class MainActivity extends Activity {
                     login = new JSONObject(httpGetAuthed(GH_USER)).optString("login", "");
                 } catch (Exception ignored) { }
                 loginRunning = false;
-                dismissCodeDialog();
                 saveGitHub(ghToken, login);
+                afterLoginEnds();
                 toast(login == null ? "已登录 GitHub" : "已登录 @" + login);
             }
         }).start();
