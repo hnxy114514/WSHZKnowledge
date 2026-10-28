@@ -116,9 +116,9 @@ public class MainActivity extends Activity {
 
     // ---------- 数据模型 ----------
     static class Section { String h, c, body; }
-    static class Item { String t; int star; String img; List<Section> sec = new ArrayList<Section>(); }
+    static class Item { String t; int star; String img; String id, d; List<Section> sec = new ArrayList<Section>(); }
     static class Child { String type; String name; List<Item> items = new ArrayList<Item>(); List<Section> sec = new ArrayList<Section>(); }
-    static class Block { String name; List<Child> children = new ArrayList<Child>(); }
+    static class Block { String name, id; List<Child> children = new ArrayList<Child>(); }
     static class Subject { String key, name; List<Block> blocks = new ArrayList<Block>(); }
     static class Hit { String path; Item item; }
 
@@ -129,7 +129,7 @@ public class MainActivity extends Activity {
 
     // ---------- 导航 ----------
     private static final int S_SUBJECT = 0, S_BLOCK = 1, S_CHILD = 2, S_ITEM = 3, S_DETAIL = 4, S_SETTINGS = 5,
-            S_SEARCH = 6, S_FEEDBACK = 7, S_MYFEEDBACK = 8, S_PROFILE = 9, S_CHANGELOG = 10, S_ABOUT = 11, S_DISPLAY = 12;
+            S_SEARCH = 6, S_FEEDBACK = 7, S_MYFEEDBACK = 8, S_PROFILE = 9, S_CHANGELOG = 10, S_ABOUT = 11, S_DISPLAY = 12, S_TODAY = 13;
     private int screen = S_SUBJECT;
     private Subject curSubject;
     private Block curBlock;
@@ -175,16 +175,25 @@ public class MainActivity extends Activity {
     private String lastPath = "";
     private boolean subjectDirty = true;
     private String lastQuery = null;
-    private final int[] savedPos = new int[13];
-    private final int[] savedTop = new int[13];
-    private final boolean[] hasSaved = new boolean[13];
-    private final boolean[] restoreNext = new boolean[13];
+    private final int[] savedPos = new int[14];
+    private final int[] savedTop = new int[14];
+    private final boolean[] hasSaved = new boolean[14];
+    private final boolean[] restoreNext = new boolean[14];
 
     // 关于 / 感谢名单
     private LinearLayout aboutScreen, aboutInner, thanksBox, thanksLoading;
 
     // 显示调节（字号 / 界面缩放，带实时预览）
     private LinearLayout displayScreen, displayInner;
+
+    // 今日新增（分页加载）
+    private LinearLayout todayScreen;
+    private ListView todayList;
+    private TextView todayTitle;
+    private ArrayAdapter<Hit> todayAdapter;
+    private final List<Hit> todayAll = new ArrayList<Hit>();
+    private final List<Hit> todayShown = new ArrayList<Hit>();
+    private String todayBuiltFor = "";
     private ScrollView aboutScroll;
     private TextView aboutInfo, thanksState;
     private boolean thanksLoaded = false, thanksLoadingBusy = false;
@@ -335,6 +344,7 @@ public class MainActivity extends Activity {
                 JSONObject bo = bs.getJSONObject(j);
                 Block b = new Block();
                 b.name = bo.optString("name", "");
+                b.id = bo.optString("id", "");
                 JSONArray cs = bo.optJSONArray("children");
                 if (cs != null) {
                     for (int k = 0; k < cs.length(); k++) {
@@ -1002,6 +1012,8 @@ public class MainActivity extends Activity {
         it.t = io.optString("t", "");
         it.star = io.optInt("star", 2);
         it.img = io.optString("img", "");
+        it.id = io.optString("id", "");
+        it.d = io.optString("d", "");
         try {
             JSONArray secs = io.optJSONArray("sec");
             if (secs != null) it.sec = parseSections(secs);
@@ -1069,6 +1081,10 @@ public class MainActivity extends Activity {
         buildDisplayScreen();
         root.addView(displayScreen, fp());
 
+        todayScreen = newScreen();
+        buildTodayScreen();
+        root.addView(todayScreen, fp());
+
         // 主页
         subjectList = makeList();
         subjectList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
@@ -1076,7 +1092,8 @@ public class MainActivity extends Activity {
                 vibrate();
                 int idx = pos - 1;
                 if (idx < 0) { showScreen(S_SEARCH); return; }
-                if (idx >= orderKeys.size()) { showScreen(S_SETTINGS); return; }
+                if (idx == orderKeys.size()) { showScreen(S_TODAY); return; }
+                if (idx > orderKeys.size()) { showScreen(S_SETTINGS); return; }
                 curSubject = subjectMap.get(orderKeys.get(idx));
                 if (curSubject != null) openBlocks();
             }
@@ -2796,7 +2813,7 @@ public class MainActivity extends Activity {
         screen = s;
         View[] screens = {subjectScreen, blockScreen, childScreen, listScreen, detailScreen, settingsScreen,
                 searchScreen, feedbackScreen, mineScreen, profileScreen, changelogScreen, aboutScreen,
-                displayScreen};
+                displayScreen, todayScreen};
         View target = screens[s];
         boolean shown = target.getVisibility() == View.VISIBLE && target.getAlpha() > 0.95f
                 && Math.abs(target.getTranslationX()) < dp(4);
@@ -2825,6 +2842,7 @@ public class MainActivity extends Activity {
                     Subject su = subjectMap.get(k);
                     if (su != null) names.add(su.name);
                 }
+                names.add("新增知识点（今日）");
                 names.add("设置");
                 subjectList.setAdapter(stringAdapter(names, C_PRIMARY));
                 subjectDirty = false;
@@ -2847,6 +2865,10 @@ public class MainActivity extends Activity {
             maybePlayHearts();
         } else if (s == S_DISPLAY) {
             renderDisplayScreen();
+        } else if (s == S_TODAY) {
+            String td = new java.text.SimpleDateFormat("yyMMdd", java.util.Locale.US)
+                    .format(new java.util.Date());
+            if (todayAll.isEmpty() || !td.equals(todayBuiltFor)) buildTodayData();
         } else if (s == S_ABOUT) {
             refreshAboutInfo();
             if (!thanksLoaded) loadThanks();
@@ -2873,6 +2895,7 @@ public class MainActivity extends Activity {
             case S_ITEM: return itemList;
             case S_SEARCH: return searchList;
             case S_MYFEEDBACK: return mineList;
+            case S_TODAY: return todayList;
             default: return null;
         }
     }
@@ -2894,13 +2917,12 @@ public class MainActivity extends Activity {
     /** 返回上一级（实体键与右滑手势共用）。 */
     private void handleBack() {
         if (fullscreenView != null) { closeFullscreen(); return; }
-        int t = backTarget();                 // 先按当前状态确定目标页
         if (screen == S_DISPLAY && tuningFirstRun) {
-            // 首次引导：直接返回视为按当前值完成，下次启动不再弹引导
-            saveDisplaySettings();
-            prefs.edit().putBoolean("display_tuned", true).apply();
-            tuningFirstRun = false;
+            // 第一次必须点「完成，开始使用」才算确认，返回键不放行
+            toast("先点下面的「完成，开始使用」");
+            return;
         }
+        int t = backTarget();
         if (t >= 0) showScreen(t);
     }
 
@@ -2917,7 +2939,8 @@ public class MainActivity extends Activity {
         if (screen == S_PROFILE) return S_SETTINGS;
         if (screen == S_CHANGELOG) return changelogBack == S_CHANGELOG ? S_SETTINGS : changelogBack;
         if (screen == S_ABOUT) return S_SETTINGS;
-        if (screen == S_DISPLAY) return tuningFirstRun ? S_SUBJECT : S_SETTINGS;
+        if (screen == S_DISPLAY) return tuningFirstRun ? -1 : S_SETTINGS;
+        if (screen == S_TODAY) return S_SUBJECT;
         return -1;
     }
 
@@ -2933,6 +2956,7 @@ public class MainActivity extends Activity {
             case S_CHANGELOG: return changelogScreen;
             case S_ABOUT: return aboutScreen;
             case S_DISPLAY: return displayScreen;
+            case S_TODAY: return todayScreen;
             default: return null;
         }
     }
@@ -3031,6 +3055,7 @@ public class MainActivity extends Activity {
             case S_CHANGELOG: return changelogScreen;
             case S_ABOUT: return aboutScreen;
             case S_DISPLAY: return displayScreen;
+            case S_TODAY: return todayScreen;
             default: return subjectScreen;
         }
     }
@@ -3635,6 +3660,107 @@ public class MainActivity extends Activity {
         } finally {
             cn.disconnect();
         }
+    }
+
+    // ================= 今日新增 =================
+    private static final int TODAY_PAGE = 40;
+
+    private void buildTodayScreen() {
+        todayTitle = new TextView(this);
+        todayTitle.setText("今日新增");
+        todayTitle.setTextSize(m.subtitleSize + 2f);
+        todayTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        todayTitle.setTextColor(C_PRIMARY);
+        todayTitle.setGravity(Gravity.CENTER);
+        todayTitle.setPadding(0, 0, 0, dp(3));
+        todayScreen.addView(todayTitle, wrap());
+
+        todayList = makeList();
+        todayList.addHeaderView(makeBackHeader("\u2039 返回学科", new View.OnClickListener() {
+            public void onClick(View v) { showScreen(S_SUBJECT); }
+        }));
+        todayList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
+                if (pos == 0) return;                      // 返回键
+                int idx = pos - 1;
+                if (idx < 0 || idx >= todayShown.size()) return;
+                vibrate();
+                Hit h = todayShown.get(idx);
+                openDetail(h.item.t, h.item.sec, h.path, S_TODAY, h.item.img);
+            }
+        });
+        // 滚到接近底部再追加，避免一次把上千条都塞进列表
+        todayList.setOnScrollListener(new AbsListView.OnScrollListener() {
+            public void onScrollStateChanged(AbsListView v, int state) { }
+            public void onScroll(AbsListView v, int first, int visible, int total) {
+                if (total > 0 && first + visible >= total - 5) loadMoreToday();
+            }
+        });
+        todayScreen.addView(todayList, lw());
+    }
+
+    /** 重新收集「最近一批新增」的知识点，先只放出第一页。 */
+    private void buildTodayData() {
+        if (todayList == null) return;
+        todayAll.clear();
+        todayShown.clear();
+
+        String today = new java.text.SimpleDateFormat("yyMMdd", java.util.Locale.US)
+                .format(new java.util.Date());
+        String newest = "";
+        boolean hasToday = false;
+        for (Subject su : subjects) {
+            for (Block b : su.blocks) {
+                for (Child c : b.children) {
+                    for (Item it : c.items) {
+                        if (it.d == null || it.d.length() == 0) continue;
+                        if (it.d.equals(today)) hasToday = true;
+                        if (newest.length() == 0 || it.d.compareTo(newest) > 0) newest = it.d;
+                    }
+                }
+            }
+        }
+        // 今天没有新增时，退一步展示数据里最近的一批，避免页面永远是空的
+        String pick = hasToday ? today : newest;
+        todayBuiltFor = today;
+
+        if (pick.length() > 0) {
+            for (Subject su : subjects) {
+                for (Block b : su.blocks) {
+                    for (Child c : b.children) {
+                        for (Item it : c.items) {
+                            if (it.d == null || !it.d.equals(pick)) continue;
+                            Hit h = new Hit();
+                            h.item = it;
+                            h.path = su.name + " \u203a " + b.name
+                                    + (it.id != null && it.id.length() > 0 ? "  ·  " + it.id : "");
+                            todayAll.add(h);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (todayAll.isEmpty()) {
+            todayTitle.setText("今日暂无新增");
+        } else {
+            String label = hasToday ? "今日新增" : "最近新增（" + pick.substring(2, 4) + "-"
+                    + pick.substring(4, 6) + "）";
+            todayTitle.setText(label + " · " + todayAll.size() + " 条");
+        }
+        todayAdapter = searchAdapter(todayShown);
+        todayList.setAdapter(todayAdapter);
+        loadMoreToday();
+    }
+
+    /** 追加一页，无感：只 notifyDataSetChanged，不重建整表。 */
+    private void loadMoreToday() {
+        if (todayAdapter == null) return;
+        if (todayShown.size() >= todayAll.size()) return;
+        int from = todayShown.size();
+        int to = Math.min(todayAll.size(), from + TODAY_PAGE);
+        for (int i = from; i < to; i++) todayShown.add(todayAll.get(i));
+        todayAdapter.notifyDataSetChanged();
     }
 
     // ================= 显示调节 =================

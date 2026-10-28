@@ -955,11 +955,64 @@ def apply_images(ordered):
     return bound
 
 
+
+# ---------- 编号：章与知识点（编号里带科目码与加入日期） ----------
+import datetime as _dt
+
+SUBJ_CODE = {"chinese": "CH", "math": "MA", "english": "EN", "physics": "PH",
+             "chem": "CM", "bio": "BI", "politics": "PL", "history": "HI", "geography": "GE"}
+
+
+def assign_ids(ordered):
+    """给每个章、每个知识点分配可读编号，并持久化到 tools/ids.json。
+
+    规则：<科目码>-<加入日期 YYMMDD>-<章序号>[-<章内序号>]
+    例：MA-261028-03（数学第 3 章）、MA-261028-03-012（该章第 12 条）
+    已分配过的编号永不变；新出现的章/知识点用构建当天的日期。
+    """
+    path = os.path.join(TOOLS, "ids.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            ids = json.load(f)
+    except Exception:
+        ids = {"v": 1, "blocks": {}, "items": {}}
+    today = _dt.date.today().strftime("%y%m%d")
+    added_b = added_i = 0
+    for s in ordered:
+        code = SUBJ_CODE.get(s["s"], "XX")
+        for b in s["blocks"]:
+            bk = s["s"] + "|" + b["name"]
+            rec = ids["blocks"].get(bk)
+            if rec is None:
+                no = sum(1 for k in ids["blocks"] if k.startswith(s["s"] + "|")) + 1
+                rec = {"id": "%s-%s-%02d" % (code, today, no), "d": today}
+                ids["blocks"][bk] = rec
+                added_b += 1
+            b["id"] = rec["id"]
+            ch = rec["id"].rsplit("-", 1)[-1]
+            cnt = sum(1 for k in ids["items"] if k.startswith(bk + "|"))
+            for c in b["children"]:
+                for it in c.get("items", []):
+                    ik = bk + "|" + it["t"]
+                    r2 = ids["items"].get(ik)
+                    if r2 is None:
+                        cnt += 1
+                        r2 = {"id": "%s-%s-%s-%03d" % (code, today, ch, cnt), "d": today}
+                        ids["items"][ik] = r2
+                        added_i += 1
+                    it["id"] = r2["id"]
+                    it["d"] = r2["d"]
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(ids, f, ensure_ascii=False, indent=0)
+    print("编号分配：新增章 %d，新增知识点 %d（日期 %s）" % (added_b, added_i, today))
+    return added_b, added_i
+
 img_total = apply_images(ordered)
 dedupe_n, dedupe_reports, dedupe_warns = dedupe_items(ordered)
 ov_n = apply_overrides(ordered)
 frac_n = apply_frac(ordered)
 hl_total, hl_miss = apply_highlights(ordered)
+id_b, id_i = assign_ids(ordered)
 
 # 分科输出：每个科目一个 json 文件 + order.json 索引（数据库分文件，UI 只读）
 data_dir = os.path.join(TOOLS, "..", "app", "src", "main", "assets", "data")
