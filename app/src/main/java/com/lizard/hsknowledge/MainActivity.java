@@ -149,7 +149,7 @@ public class MainActivity extends Activity {
     private static final String[] FB_TYPES = {"内容有误", "公式显示", "闪退卡顿", "功能建议", "其他问题"};
     private LinearLayout feedbackScreen, feedbackInner;
     private ScrollView feedbackScroll;
-    private TextView fbStatusTxt, fbSubmitBtn;
+    private TextView fbStatusTxt, fbSubmitBtn, fbAllBtn;
     private LinearLayout profileScreen, profInner;
     private ScrollView profScroll;
     private TextView profStatusTxt, profLoginBtn, profCodeBig, profLogin, profName;
@@ -185,6 +185,8 @@ public class MainActivity extends Activity {
     // 我的反馈记录
     private LinearLayout mineScreen;
     private ListView mineList;
+    private TextView mineHeader;
+    private boolean mineAllMode = false;   // true=查看仓库全部反馈（仅项目所有者）
     private final List<JSONObject> mineIssues = new ArrayList<JSONObject>();
     private final List<String[]> mineRows = new ArrayList<String[]>();
     private FrameLayout progBox;
@@ -1003,9 +1005,10 @@ public class MainActivity extends Activity {
 
         mineScreen = newScreen();
         mineList = makeList();
-        mineList.addHeaderView(makeBackHeader("‹ 返回反馈", new View.OnClickListener() {
+        mineHeader = makeBackHeader("‹ 返回反馈", new View.OnClickListener() {
             public void onClick(View v) { showScreen(S_FEEDBACK); }
-        }));
+        });
+        mineList.addHeaderView(mineHeader);
         mineScreen.addView(mineList, lw());
         mineList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
@@ -3304,6 +3307,8 @@ public class MainActivity extends Activity {
                     showScreen(S_PROFILE);
                     return;
                 }
+                mineAllMode = false;
+                if (mineHeader != null) mineHeader.setText("‹ 返回反馈");
                 showScreen(S_MYFEEDBACK);
                 loadMyIssues();
             }
@@ -3311,6 +3316,33 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams mlp = wrap();
         mlp.topMargin = dp(8);
         feedbackInner.addView(mineBtn, mlp);
+
+        // 仅项目所有者（@hnxy114514）可见：查看仓库里所有人的反馈（含已/未处理）
+        fbAllBtn = new TextView(this);
+        fbAllBtn.setText("查看全部反馈");
+        fbAllBtn.setTextSize(m.backSize - 1f);
+        fbAllBtn.setTypeface(Typeface.DEFAULT_BOLD);
+        fbAllBtn.setGravity(Gravity.CENTER);
+        fbAllBtn.setPadding(dp(10), dp(9), dp(10), dp(9));
+        fbAllBtn.setTextColor(0xFF4FC3F7);
+        fbAllBtn.setBackgroundDrawable(pill(0xFF10222B));
+        fbAllBtn.setVisibility(View.GONE);
+        fbAllBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (ghToken == null) {
+                    toast("请先在个人主页登录 GitHub");
+                    showScreen(S_PROFILE);
+                    return;
+                }
+                mineAllMode = true;
+                if (mineHeader != null) mineHeader.setText("‹ 全部反馈");
+                showScreen(S_MYFEEDBACK);
+                loadMyIssues();
+            }
+        });
+        LinearLayout.LayoutParams allLp = wrap();
+        allLp.topMargin = dp(6);
+        feedbackInner.addView(fbAllBtn, allLp);
     }
 
     private void updateFeedbackUi() {
@@ -3322,7 +3354,13 @@ public class MainActivity extends Activity {
             fbStatusTxt.setText("已登录 " + (ghLogin != null ? "@" + ghLogin : "GitHub"));
             fbStatusTxt.setTextColor(C_SUB);
         }
+        if (fbAllBtn != null) fbAllBtn.setVisibility(isAdmin() ? View.VISIBLE : View.GONE);
         updateTypeButtons();
+    }
+
+    /** 项目所有者本人（@hnxy114514）可查看全部反馈。 */
+    private boolean isAdmin() {
+        return "hnxy114514".equalsIgnoreCase(ghLogin);
     }
 
     private void updateProfileUi() {
@@ -3754,11 +3792,13 @@ public class MainActivity extends Activity {
         mineRows.add(new String[]{"正在加载…", "", "#FF8A8A8A"});
         mineList.setAdapter(pairAdapter(mineRows));
         final String login = ghLogin;
+        final boolean all = mineAllMode;
         new Thread(new Runnable() {
             public void run() {
                 try {
-                    String url = "https://api.github.com/repos/" + REPO + "/issues?state=all&per_page=40"
-                            + (login != null && login.length() > 0 ? "&creator=" + login : "");
+                    String url = "https://api.github.com/repos/" + REPO + "/issues?state=all&per_page="
+                            + (all ? "100" : "40")
+                            + (!all && login != null && login.length() > 0 ? "&creator=" + login : "");
                     JSONArray arr = new JSONArray(httpGetAuthed(url));
                     final List<JSONObject> items = new ArrayList<JSONObject>();
                     final List<String[]> rows = new ArrayList<String[]>();
@@ -3777,7 +3817,7 @@ public class MainActivity extends Activity {
                             mineIssues.addAll(items);
                             mineRows.clear();
                             if (rows.isEmpty()) {
-                                mineRows.add(new String[]{"还没有提交过反馈", "", "#FF8A8A8A"});
+                                mineRows.add(new String[]{all ? "暂无反馈" : "还没有提交过反馈", "", "#FF8A8A8A"});
                             } else {
                                 mineRows.addAll(rows);
                             }
