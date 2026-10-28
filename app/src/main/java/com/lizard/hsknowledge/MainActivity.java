@@ -145,12 +145,14 @@ public class MainActivity extends Activity {
     private float listSizeSp = 15f;
     private boolean isRound = false;
     // 右滑返回手势（设置里可关）
+    private static final float PREV_PARALLAX = 0.32f;  // 预览页的起始左移比例（视差）
     private boolean swipeBack = true;
     private boolean swipeTracking = false;
     private boolean swipeActive = false;     // 已进入拖动返回
     private boolean swipeBusy = false;       // 出场动画进行中
     private boolean swipeFromInput = false;  // 起手点在输入框内
-    private View swipeView;                  // 正在被拖动的整页
+    private View swipeView;                  // 正在被拖动的当前页
+    private View swipePrev;                  // 下面露出的上一级页面（预览）
     private float swipeX, swipeY;
     private List<String> orderKeys = new ArrayList<String>();
     private static final String[] DEFAULT_ORDER = {"chinese", "math", "english", "physics", "chem", "bio", "politics", "history", "geography"};
@@ -2080,7 +2082,7 @@ public class MainActivity extends Activity {
             }
         }), wrap());
         TextView swipeHint = new TextView(this);
-        swipeHint.setText("从屏幕左侧 1/4 内向右拖动即返回，页面会跟手滑出；滑不够会弹回。查看大图时不生效，需点「‹ 关闭」。");
+        swipeHint.setText("从屏幕左侧 1/4 内向右拖动：当前页跟手滑出、露出上一页预览，滑到一半以上松手即返回，不够则弹回。查看大图时不生效，需点「‹ 关闭」。");
         swipeHint.setTextSize(m.subtitleSize - 2f);
         swipeHint.setTextColor(C_SUB);
         swipeHint.setPadding(dp(4), dp(2), dp(4), dp(4));
@@ -2329,13 +2331,24 @@ public class MainActivity extends Activity {
         screen = s;
         View[] screens = {subjectScreen, blockScreen, childScreen, listScreen, detailScreen, settingsScreen, searchScreen};
         View target = screens[s];
+        boolean shown = target.getVisibility() == View.VISIBLE && target.getAlpha() > 0.95f
+                && Math.abs(target.getTranslationX()) < dp(4);
         for (int i = 0; i < screens.length; i++) {
             if (i == s) continue;
+            screens[i].animate().cancel();
             screens[i].setVisibility(View.GONE);
+            screens[i].setTranslationX(0f);
+            screens[i].setAlpha(1f);
         }
+        target.animate().cancel();
         target.setVisibility(View.VISIBLE);
-        target.setAlpha(0f);
-        target.animate().alpha(1f).setDuration(180).start();
+        target.setTranslationX(0f);
+        if (shown) {
+            target.setAlpha(1f);
+        } else {
+            target.setAlpha(0f);
+            target.animate().alpha(1f).setDuration(180).start();
+        }
 
         if (s == S_SUBJECT) {
             List<String> names = new ArrayList<String>();
@@ -2364,12 +2377,37 @@ public class MainActivity extends Activity {
     /** 返回上一级（实体键与右滑手势共用）。 */
     private void handleBack() {
         if (fullscreenView != null) { closeFullscreen(); return; }
-        if (screen == S_DETAIL) showScreen(detailBack);
-        else if (screen == S_ITEM) showScreen(S_CHILD);
-        else if (screen == S_CHILD) showScreen(S_BLOCK);
-        else if (screen == S_BLOCK) showScreen(S_SUBJECT);
-        else if (screen == S_SETTINGS) showScreen(S_SUBJECT);
-        else if (screen == S_SEARCH) showScreen(S_SUBJECT);
+        int t = backTarget();
+        if (t >= 0) showScreen(t);
+    }
+
+    /** 当前页的上一级页面（主页返回 -1）。 */
+    private int backTarget() {
+        if (screen == S_DETAIL) return detailBack;
+        if (screen == S_ITEM) return S_CHILD;
+        if (screen == S_CHILD) return S_BLOCK;
+        if (screen == S_BLOCK) return S_SUBJECT;
+        if (screen == S_SETTINGS) return S_SUBJECT;
+        if (screen == S_SEARCH) return S_SUBJECT;
+        return -1;
+    }
+
+    private View screenView(int s) {
+        switch (s) {
+            case S_SUBJECT: return subjectScreen;
+            case S_BLOCK: return blockScreen;
+            case S_CHILD: return childScreen;
+            case S_ITEM: return listScreen;
+            case S_DETAIL: return detailScreen;
+            case S_SETTINGS: return settingsScreen;
+            case S_SEARCH: return searchScreen;
+            default: return null;
+        }
+    }
+
+    /** 拖动预览时把下载进度卡重新提到最上层。 */
+    private void ensureOverlaysOnTop() {
+        if (progBox != null && progBox.getVisibility() == View.VISIBLE) progBox.bringToFront();
     }
 
     @Override
@@ -2392,13 +2430,17 @@ public class MainActivity extends Activity {
                         swipeActive = true;
                         swipeView = currentScreenView();
                         swipeView.animate().cancel();
+                        preparePrev(swipeView);
                     }
                 }
                 if (swipeActive && swipeView != null) {
                     float d = Math.max(0f, dx);
-                    swipeView.setTranslationX(d * 0.9f);          // 页面跟手右移
                     float w = Math.max(1f, swipeView.getWidth());
-                    swipeView.setAlpha(1f - Math.min(0.55f, d / w * 1.1f));
+                    swipeView.setTranslationX(d);                  // 当前页跟手右移
+                    if (swipePrev != null) {                       // 上一级页面从左侧淡入式跟进
+                        float prog = Math.min(1f, d / w);
+                        swipePrev.setTranslationX(-w * PREV_PARALLAX * (1f - prog));
+                    }
                     return true;
                 }
             } else if (action == MotionEvent.ACTION_UP) {
@@ -2455,14 +2497,35 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 松手过阈值：整页向右滑出并淡出，结束后再切到上一级。 */
+    /** 拖动开始时把上一级页面放到当前页下面，并左移一点做视差预览。 */
+    private void preparePrev(View cur) {
+        int t = backTarget();
+        View prev = (t >= 0) ? screenView(t) : null;
+        float w = (root != null && root.getWidth() > 0) ? root.getWidth() : cur.getWidth();
+        if (prev != null && prev != cur) {
+            prev.animate().cancel();
+            prev.setVisibility(View.VISIBLE);
+            prev.setAlpha(1f);
+            prev.setTranslationX(-w * PREV_PARALLAX);
+            prev.bringToFront();      // 先放下面一层
+            swipePrev = prev;
+        } else {
+            swipePrev = null;
+        }
+        cur.bringToFront();           // 当前页始终在最上层
+        ensureOverlaysOnTop();
+    }
+
+    /** 松手过阈值：当前页滑出、预览页归位，随后真正切页。 */
     private void finishSwipe() {
         final View v = swipeView;
+        final View prev = swipePrev;
         swipeView = null;
+        swipePrev = null;
         if (v == null) return;
         swipeBusy = true;
         float w = Math.max(v.getWidth(), dp(80));
-        v.animate().translationX(w).alpha(0.1f).setDuration(160)
+        v.animate().translationX(w).alpha(0.85f).setDuration(170)
                 .withEndAction(new Runnable() {
                     public void run() {
                         v.setTranslationX(0f);
@@ -2471,14 +2534,36 @@ public class MainActivity extends Activity {
                         handleBack();
                     }
                 }).start();
+        if (prev != null) {
+            prev.animate().translationX(0f).setDuration(170).start();
+        }
     }
 
-    /** 没滑够：回弹复位。 */
+    /** 没滑够：两页同时回弹，预览页缩回后隐藏。 */
     private void resetSwipe() {
         final View v = swipeView;
+        final View prev = swipePrev;
         swipeView = null;
+        swipePrev = null;
         if (v == null) return;
-        v.animate().translationX(0f).alpha(1f).setDuration(150).start();
+        swipeBusy = true;
+        float w = Math.max(v.getWidth(), dp(80));
+        v.animate().translationX(0f).alpha(1f).setDuration(160)
+                .withEndAction(new Runnable() {
+                    public void run() {
+                        swipeBusy = false;
+                        ensureOverlaysOnTop();
+                    }
+                }).start();
+        if (prev != null) {
+            prev.animate().translationX(-w * PREV_PARALLAX).setDuration(160)
+                    .withEndAction(new Runnable() {
+                        public void run() {
+                            prev.setVisibility(View.GONE);
+                            prev.setTranslationX(0f);
+                        }
+                    }).start();
+        }
     }
 
 }
