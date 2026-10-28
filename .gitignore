@@ -24,3 +24,7 @@ Thumbs.db
 
 # 构建副产品（数据包备份，仅本地保留）
 /cloud/update.json
+
+# Python 缓存（含子目录）
+**/__pycache__/
+*.pyc
