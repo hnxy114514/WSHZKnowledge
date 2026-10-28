@@ -44,15 +44,14 @@ for d in ("gen", "obj", "dexout"):
             os.rename(p, dst)
         except OSError:
             shutil.rmtree(p, ignore_errors=True)
-# 上一轮改名留下的归档只保留最近 3 份，免得 build 目录无限涨
+# 归档只增不减：删它们要一次删上百个文件，容易被环境的批量删除保护拦下，
+# 构建失败在清理这一步太不值当。超过 5 次构建就提醒一句，由人决定要不要清。
 old_root = os.path.join(build, "_old")
 if os.path.isdir(old_root):
-    runs = sorted(os.listdir(old_root), reverse=True)[3:]
-    for r in runs:
-        try:
-            shutil.rmtree(os.path.join(old_root, r), ignore_errors=True)
-        except Exception:
-            pass          # 清不掉就留着，不影响构建
+    runs = sorted(os.listdir(old_root), reverse=True)
+    if len(runs) > 5:
+        print("提示：build/_old 下已积累 %d 份旧产物归档，可手动删除：%s"
+              % (len(runs), old_root))
 for f in ("classes.dex", "classes.jar", "base.apk", "unsigned.apk", "aligned.apk", "res.zip"):
     p = os.path.join(build, f)
     if os.path.isfile(p):

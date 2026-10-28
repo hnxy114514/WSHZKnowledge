@@ -192,6 +192,8 @@ public class MainActivity extends Activity {
     private final List<Hit> todayAll = new ArrayList<Hit>();
     private final List<Hit> todayShown = new ArrayList<Hit>();
     private String todayBuiltFor = "";
+    private TextView todayFallbackBtn;      // 今天没新增时，给一个「看最近一批」的入口
+    private boolean todayFallbackOn = false;
     private ScrollView aboutScroll;
     private TextView aboutInfo, thanksState, thanksLoadTxt;
     private TextView routeHint;
@@ -2792,6 +2794,7 @@ public class MainActivity extends Activity {
         profEntry.setGravity(Gravity.CENTER);
         profEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
         profEntry.setBackgroundDrawable(pill(C_PILL));
+        applyIcon(profEntry, "ic_person", C_PRIMARY, 15);
         profEntry.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { showScreen(S_PROFILE); }
         });
@@ -2884,7 +2887,7 @@ public class MainActivity extends Activity {
         routeEntry.setGravity(Gravity.CENTER);
         routeEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
         routeEntry.setBackgroundDrawable(pill(C_PILL));
-        applyIcon(routeEntry, "ic_update", C_PRIMARY, 15);
+        applyIcon(routeEntry, "ic_route", C_PRIMARY, 15);
         routeEntry.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 vibrate();
@@ -3229,7 +3232,8 @@ public class MainActivity extends Activity {
         } else if (s == S_TODAY) {
             String td = new java.text.SimpleDateFormat("yyMMdd", java.util.Locale.US)
                     .format(new java.util.Date());
-            if (todayAll.isEmpty() || !td.equals(todayBuiltFor)) buildTodayData();
+            // 跨天了就回到「只看今天」，不要把昨天在看的那个批次带过来
+            if (todayAll.isEmpty() || !td.equals(todayBuiltFor)) buildTodayData(false);
         } else if (s == S_ABOUT) {
             refreshAboutInfo();
             if (!thanksLoaded) loadThanks();
@@ -3507,7 +3511,7 @@ public class MainActivity extends Activity {
     private static final String REPO_OWNER = "hnxy114514";
     private static final String HINT_TEXT = "I love Lucky \u2764\uFE0F";
     /** 进入个人页时触发满屏装饰图案的账号（本地约定，不对外说明）。 */
-    private static final String[] HEART_USERS = {"luckyyy0721", "hnxy114514"};
+    private static final String[] HEART_USERS = {"luckyyy0721"};
     private boolean heartRunning = false;
     private int tapCount = 0;
     private long lastTapTime = 0;
@@ -4230,6 +4234,15 @@ public class MainActivity extends Activity {
         todayTitle.setPadding(0, 0, 0, dp(3));
         todayScreen.addView(todayTitle, wrap());
 
+        todayFallbackBtn = new TextView(this);
+        todayFallbackBtn.setTextSize(m.subtitleSize - 1f);
+        todayFallbackBtn.setTextColor(C_SUB);
+        todayFallbackBtn.setGravity(Gravity.CENTER);
+        todayFallbackBtn.setPadding(dp(8), dp(6), dp(8), dp(6));
+        todayFallbackBtn.setBackgroundDrawable(pill(C_PILL));
+        todayFallbackBtn.setVisibility(View.GONE);
+        todayScreen.addView(todayFallbackBtn, wrap());
+
         todayList = makeList();
         todayList.addHeaderView(makeBackHeader("\u2039 返回学科", new View.OnClickListener() {
             public void onClick(View v) { showScreen(S_SUBJECT); }
@@ -4254,8 +4267,11 @@ public class MainActivity extends Activity {
         todayScreen.addView(todayList, lw());
     }
 
-    /** 重新收集「最近一批新增」的知识点，先只放出第一页。 */
-    private void buildTodayData() {
+    /** 重新收集「今日新增」的知识点，先只放出第一页。
+     *  严格按设备当天日期匹配：今天没新增就老实说没有，不再把历史上最近的一批
+     *  当成「今日」（那样 28 号的内容会一直挂着，日期永远是错的）。
+     *  fallback 为 true 时才去取最近一批，由下面的按钮切换。 */
+    private void buildTodayData(boolean fallback) {
         if (todayList == null) return;
         todayAll.clear();
         todayShown.clear();
@@ -4275,8 +4291,11 @@ public class MainActivity extends Activity {
                 }
             }
         }
-        // 今天没有新增时，退一步展示数据里最近的一批，避免页面永远是空的
-        String pick = hasToday ? today : newest;
+        // 今天有新增就只显示今天的，「看最近一批」这个开关自动失效；
+        // 今天没有时才允许退回历史上最近的一批
+        if (hasToday) fallback = false;
+        todayFallbackOn = fallback;
+        String pick = fallback ? newest : today;
         todayBuiltFor = today;
 
         if (pick.length() > 0) {
@@ -4288,7 +4307,7 @@ public class MainActivity extends Activity {
                             Hit h = new Hit();
                             h.item = it;
                             h.path = su.name + " \u203a " + b.name
-                                    + (it.id != null && it.id.length() > 0 ? "  ·  " + it.id : "");
+                                    + (it.id != null && it.id.length() > 0 ? "  \u00b7  " + it.id : "");
                             todayAll.add(h);
                         }
                     }
@@ -4296,16 +4315,35 @@ public class MainActivity extends Activity {
             }
         }
 
+        String newestLabel = (newest.length() == 6)
+                ? newest.substring(2, 4) + "-" + newest.substring(4, 6) : "";
         if (todayAll.isEmpty()) {
             todayTitle.setText("今日暂无新增");
+        } else if (!fallback) {
+            todayTitle.setText("今日新增 \u00b7 " + todayAll.size() + " 条");
         } else {
-            String label = hasToday ? "今日新增" : "最近新增（" + pick.substring(2, 4) + "-"
-                    + pick.substring(4, 6) + "）";
-            todayTitle.setText(label + " · " + todayAll.size() + " 条");
+            todayTitle.setText("最近新增（" + newestLabel + "）\u00b7 " + todayAll.size() + " 条");
         }
+        applyTodayFallbackBtn(hasToday, newest, newestLabel);
+
         todayAdapter = searchAdapter(todayShown);
         todayList.setAdapter(todayAdapter);
         loadMoreToday();
+    }
+
+    /** 今天没新增时给一个「看最近一批」的入口；已经在看最近一批时给一个「只看今天」的回路。 */
+    private void applyTodayFallbackBtn(boolean hasToday, String newest, String newestLabel) {
+        if (todayFallbackBtn == null) return;
+        if (hasToday || newest.length() != 6) {
+            todayFallbackBtn.setVisibility(View.GONE);
+            return;
+        }
+        todayFallbackBtn.setVisibility(View.VISIBLE);
+        todayFallbackBtn.setText(todayFallbackOn ? "只看今日新增"
+                : "看看最近一批（" + newestLabel + "）");
+        todayFallbackBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { vibrate(); buildTodayData(!todayFallbackOn); }
+        });
     }
 
     /** 追加一页，无感：只 notifyDataSetChanged，不重建整表。 */
