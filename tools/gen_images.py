@@ -903,18 +903,39 @@ def h_war():
 
 
 def e_contour():
-    c = C("等高线地形图", "线越密坡越陡，闭合小圈为山峰或洼地")
-    ox, oy = 320, 250
-    for i, r in enumerate((150, 120, 92, 64, 34)):
-        c.d.ellipse([ox - r * 1.35, oy - r * 0.72, ox + r * 1.35, oy + r * 0.72], outline=(120, 100, 70), width=2)
-    c.circle(ox + 4, oy - 4, 4, (120, 100, 70), (120, 100, 70), 1)
-    c.t(ox + 12, oy - 16, "山峰", 15, True, (120, 100, 70), "lb")
-    # 山谷（等高线凸向高处）
-    c.d.polygon([(ox - 60, oy + 40), (ox - 20, oy - 40), (ox + 20, oy - 40), (ox + 60, oy + 40)], fill="white")
-    c.t(ox + 200, oy - 90, "等高距相同", 15, False, GREY, "lm")
-    c.t(ox - 196, oy + 96, "密集＝坡陡", 15, True, RED, "lm")
-    c.arrow(ox - 120, oy + 60, ox - 60, oy + 30, 2, RED, 10)
-    c.rich(W // 2, H - 40, "山谷等高线凸向高处，山脊等高线凸向低处", 15)
+    c = C("等高线地形图", "同线等高、等高距相同；疏密看坡度，弯曲看山脊山谷")
+    ox, oy = 296, 250
+    dark = (120, 100, 70)
+    steps = 240
+
+    def pt(theta, base):
+        d_up = abs((theta + math.pi / 2 + math.pi) % (2 * math.pi) - math.pi)
+        d_dn = abs((theta - math.pi / 2 + math.pi) % (2 * math.pi) - math.pi)
+        k = 1 + 0.20 * math.exp(-(d_up ** 2) / 0.16) - 0.34 * math.exp(-(d_dn ** 2) / 0.10)
+        return (ox + base * 1.48 * math.cos(theta) * k,
+                oy + base * 0.76 * math.sin(theta) * k)
+
+    for base in (150, 118, 90, 64, 40):
+        pts = [pt(i * 2 * math.pi / steps, base) for i in range(steps + 1)]
+        c.d.line(pts, fill=dark, width=2, joint="curve")
+
+    # 河流：沿山谷向下流出
+    c.d.line([(ox - 2, oy + 26), (ox + 6, oy + 80), (ox - 6, oy + 128), (ox + 2, oy + 168)],
+             fill=(60, 120, 200), width=3, joint="curve")
+    c.t(ox + 14, oy + 152, "河流", 12, False, (60, 120, 200), "lm")
+
+    # 山顶
+    c.rect(ox - 40, oy - 34, ox + 40, oy - 8, fill="white", outline="white", w=0)
+    c.t(ox, oy - 30, "▲ 山顶", 15, True, dark, "ma")
+
+    # 山脊（上方外凸）/ 山谷（下方内凹）
+    c.t(ox, 82, "山脊：等高线凸向低处", 14, True, (170, 70, 60), "ma")
+    c.t(556, 376, "山谷：等高线凸向高处", 14, True, (60, 120, 200), "rm")
+
+    c.t(556, 132, "等高距相同", 13, False, GREY, "rm")
+    c.t(62, 372, "密集＝坡陡", 13, True, RED, "lm")
+    c.arrow(150, 366, 176, 340, 2, RED, 9)
+    c.rich(W // 2, H - 30, "等高线重合处为陡崖；闭合圈内大外小为山峰", 14)
     save(c, "e_contour", acc)
 
 
