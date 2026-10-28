@@ -2609,7 +2609,7 @@ public class MainActivity extends Activity {
 
     // ================= 反馈（GitHub Device Flow + Issues） =================
     /** 在 GitHub 创建 OAuth App 后填这里（client_id 不敏感，可随 APK 分发）。 */
-    private static final String GH_CLIENT_ID = "";
+    private static final String GH_CLIENT_ID = "Ov23liuXn1Lh4Cy0UpcS";
     private static final String GH_DEVICE_CODE = "https://github.com/login/device/code";
     private static final String GH_ACCESS_TOKEN = "https://github.com/login/oauth/access_token";
     private static final String GH_USER = "https://api.github.com/user";
