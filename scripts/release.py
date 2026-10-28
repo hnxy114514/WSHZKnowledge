@@ -17,7 +17,7 @@ import urllib.request
 
 REPO = "hnxy114514/WSHZKnowledge"
 API = "https://api.github.com/repos/" + REPO
-APK = "汇总知识.apk"
+APK = "build/汇总知识.apk"
 MANIFEST = "app/src/main/AndroidManifest.xml"
 
 
@@ -45,6 +45,9 @@ def http(url, method="GET", data=None, headers=None):
 
 
 def main():
+    # 本脚本位于 scripts/ 下，先定位到项目根（与调用时的 cwd 无关）
+    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    os.chdir(ROOT)
     token = os.environ.get("GITHUB_TOKEN")
     ks_pass = os.environ.get("KS_PASS")
     if not token:
@@ -64,7 +67,7 @@ def main():
     tag = "v" + ver
 
     print("== 1. 构建 %s ==" % tag)
-    subprocess.check_call(["bash", "build.sh"], env={**os.environ, "KS_PASS": ks_pass})
+    subprocess.check_call(["bash", "scripts/build.sh"], env={**os.environ, "KS_PASS": ks_pass})
 
     print("== 2. 创建 Release %s ==" % tag)
     payload = json.dumps({
