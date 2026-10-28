@@ -2801,7 +2801,7 @@ public class MainActivity extends Activity {
     /** Device Flow：手表只显示 8 位码，在手机浏览器授权即可。 */
     private void startDeviceLogin() {
         if (GH_CLIENT_ID.length() == 0) {
-            toast("反馈功能尚未启用（缺少 OAuth client_id）");
+            toast("登录尚未启用：还差应用的 client_id，配好后即可用");
             return;
         }
         loginRunning = true;
