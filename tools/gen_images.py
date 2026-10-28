@@ -530,27 +530,6 @@ def c_atom():
     save(c, "c_atom", acc)
 
 
-def c_table():
-    c = C("元素周期表结构", "7 个周期、16 个族，金属在左、非金属在右")
-    x0, y0, cw, ch = 120, 152, 30, 24
-    for r in range(7):
-        for col in range(18):
-            x = x0 + col * cw
-            y = y0 + r * ch
-            c.rect(x, y, x + cw - 2, y + ch - 2, (238, 242, 248), (170, 178, 190), 1, 2)
-    # 过渡金属 d 区（第 3~12 族，第 4~7 周期）
-    c.rect(x0 + 2 * cw, y0 + 3 * ch, x0 + 12 * cw - 2, y0 + 7 * ch - 2, (244, 240, 230), (160, 130, 60), 2, 2)
-    c.t(x0 + 7 * cw, y0 + 3 * ch + 8, "过渡金属（d 区）", 14, True, (140, 100, 40), "mt")
-    # 标注区
-    c.rect(x0, y0, x0 + 2 * cw - 2, y0 + 7 * ch - 2, None, (198, 58, 58), 2, 2)
-    c.rect(x0 + 12 * cw, y0, x0 + 18 * cw - 2, y0 + 7 * ch - 2, None, (44, 96, 178), 2, 2)
-    c.t(x0 + cw, y0 + 7 * ch + 22, "金属区", 16, True, RED, "ma")
-    c.t(x0 + 15 * cw, y0 + 7 * ch + 22, "非金属区", 16, True, BLUE, "ma")
-    c.t(x0 - 10, y0 + 6, "ⅠA", 15, True, (120, 120, 120), "rm")
-    c.rich(W // 2, H - 40, "同周期从左到右非金属性增强；镧系、锕系另列两行（57–71、89–103）", 15)
-    save(c, "c_table", acc)
-
-
 def c_bond():
     c = C("离子键与共价键", "电子式：离子键用方括号与电荷，共价键用共用电子对")
     c.t(320, 132, "NaCl（离子键）", 20, True, RED, "mm")
@@ -1323,7 +1302,7 @@ JOBS = [m_quad, m_trig, m_exp, m_log, m_deriv, m_unit, m_hyper, m_parabola, m_so
         m_seq, m_prob, m_vector, m_deriv2,
         p_vt, p_slope, p_projectile, p_circular, p_efield, p_circuit, p_lorentz, p_refract, p_wave, p_transformer, p_gas,
         p_equilibrium, p_momentum, p_interference, p_em, p_ac, p_capacitor,
-        c_table, c_bond, c_cell, c_electro, c_ethanol, c_titration, c_mole,
+        c_bond, c_cell, c_electro, c_ethanol, c_titration, c_mole,
         b_cell, b_photo, b_resp, b_dna, b_meiosis, b_reflex, b_ecosys,
         g_curve, h_timeline, h_modern, h_war,
         e_contour, e_globe, e_pressure, e_water, e_plate, e_monsoon,
