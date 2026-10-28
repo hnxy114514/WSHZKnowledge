@@ -146,7 +146,7 @@ public class MainActivity extends Activity {
     private static final String[] FB_TYPES = {"内容有误", "公式显示", "闪退卡顿", "功能建议"};
     private LinearLayout feedbackScreen, feedbackInner;
     private ScrollView feedbackScroll;
-    private TextView fbStatusTxt, fbLoginBtn, fbSubmitBtn;
+    private TextView fbStatusTxt, fbLoginBtn, fbSubmitBtn, fbCodeBig;
     private EditText fbDesc;
     private final TextView[] fbTypeBtns = new TextView[4];
     private int fbType = 0;
@@ -2674,6 +2674,18 @@ public class MainActivity extends Activity {
         });
         feedbackInner.addView(fbLoginBtn, wrap());
 
+        fbCodeBig = new TextView(this);
+        fbCodeBig.setTextSize(m.titleSize + 4f);
+        fbCodeBig.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        fbCodeBig.setTextColor(C_PRIMARY);
+        fbCodeBig.setGravity(Gravity.CENTER);
+        fbCodeBig.setPadding(dp(8), dp(8), dp(8), dp(8));
+        fbCodeBig.setBackgroundDrawable(pill(0xFF14384A));
+        fbCodeBig.setVisibility(View.GONE);
+        LinearLayout.LayoutParams codeLp = wrap();
+        codeLp.topMargin = dp(6);
+        feedbackInner.addView(fbCodeBig, codeLp);
+
         feedbackInner.addView(sectionHeader("类型"), wrap());
         for (int row = 0; row < 2; row++) {
             LinearLayout line = new LinearLayout(this);
@@ -2754,19 +2766,24 @@ public class MainActivity extends Activity {
             if (fbCode == null) {
                 fbStatusTxt.setText("正在获取登录码…");
                 fbLoginBtn.setText("请稍候…");
+                fbCodeBig.setVisibility(View.GONE);
             } else {
-                fbStatusTxt.setText("在浏览器输入 " + fbCode + " 并点 Authorize");
-                fbLoginBtn.setText("打开浏览器授权");
+                fbStatusTxt.setText("手机浏览器打开 github.com/login/device 输入");
+                fbLoginBtn.setText("打开本机浏览器");
+                fbCodeBig.setText(fbCode);
+                fbCodeBig.setVisibility(View.VISIBLE);
             }
             fbLoginBtn.setTextColor(C_PRIMARY);
             updateTypeButtons();
             return;
         }
+        fbCodeBig.setVisibility(View.GONE);
         if (ghToken == null) {
             fbStatusTxt.setText("尚未登录 GitHub，登录后才能提交");
             fbLoginBtn.setText("登录 GitHub");
             fbLoginBtn.setTextColor(C_PRIMARY);
         } else {
+            fbCodeBig.setVisibility(View.GONE);
             fbStatusTxt.setText("已登录 " + (ghLogin != null ? "@" + ghLogin : "GitHub"));
             fbLoginBtn.setText("退出登录");
             fbLoginBtn.setTextColor(C_SUB);
@@ -3027,14 +3044,14 @@ public class MainActivity extends Activity {
         box.addView(codeTxt, wrap());
 
         TextView copied = new TextView(this);
-        copied.setText("已复制到剪贴板，可直接粘贴");
+        copied.setText("手机浏览器打开 github.com/login/device 输入此码");
         copied.setTextSize(m.subtitleSize - 2.5f);
         copied.setTextColor(C_SUB);
         copied.setGravity(Gravity.CENTER);
         box.addView(copied, wrap());
 
         TextView open = new TextView(this);
-        open.setText("打开浏览器授权");
+        open.setText("用本机浏览器试试");
         open.setTextSize(m.backSize);
         open.setTypeface(Typeface.DEFAULT_BOLD);
         open.setTextColor(C_PRIMARY);
@@ -3050,6 +3067,14 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams olp = wrap();
         olp.topMargin = dp(9);
         box.addView(open, olp);
+
+        TextView tip = new TextView(this);
+        tip.setText("已复制到剪贴板。手表浏览器可能点不动 Authorize，用手机更稳");
+        tip.setTextSize(m.subtitleSize - 3f);
+        tip.setTextColor(C_SUB);
+        tip.setGravity(Gravity.CENTER);
+        tip.setPadding(0, dp(4), 0, 0);
+        box.addView(tip, wrap());
 
         TextView close = new TextView(this);
         close.setText("稍后再说");
