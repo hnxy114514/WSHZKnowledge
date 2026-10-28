@@ -147,6 +147,7 @@ public class MainActivity extends Activity {
     private LinearLayout feedbackScreen, feedbackInner;
     private ScrollView feedbackScroll;
     private TextView fbStatusTxt, fbLoginBtn, fbSubmitBtn, fbCodeBig;
+    private ImageView fbQr;
     private EditText fbDesc;
     private final TextView[] fbTypeBtns = new TextView[4];
     private int fbType = 0;
@@ -2656,6 +2657,31 @@ public class MainActivity extends Activity {
         fbStatusTxt.setPadding(0, dp(4), 0, dp(5));
         feedbackInner.addView(fbStatusTxt, wrap());
 
+        fbQr = new ImageView(this);
+        fbQr.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        fbQr.setVisibility(View.GONE);
+        try {
+            InputStream qs = getAssets().open("qr_login.png");
+            fbQr.setImageBitmap(BitmapFactory.decodeStream(qs));
+            qs.close();
+        } catch (Exception ignored) { }
+        LinearLayout.LayoutParams qlp = new LinearLayout.LayoutParams(dp(112), dp(112));
+        qlp.gravity = Gravity.CENTER_HORIZONTAL;
+        qlp.topMargin = dp(4);
+        feedbackInner.addView(fbQr, qlp);
+
+        fbCodeBig = new TextView(this);
+        fbCodeBig.setTextSize(m.titleSize + 4f);
+        fbCodeBig.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        fbCodeBig.setTextColor(C_PRIMARY);
+        fbCodeBig.setGravity(Gravity.CENTER);
+        fbCodeBig.setPadding(dp(8), dp(8), dp(8), dp(8));
+        fbCodeBig.setBackgroundDrawable(pill(0xFF14384A));
+        fbCodeBig.setVisibility(View.GONE);
+        LinearLayout.LayoutParams codeLp = wrap();
+        codeLp.topMargin = dp(6);
+        feedbackInner.addView(fbCodeBig, codeLp);
+
         fbLoginBtn = new TextView(this);
         fbLoginBtn.setTextSize(m.backSize);
         fbLoginBtn.setTypeface(Typeface.DEFAULT_BOLD);
@@ -2672,19 +2698,9 @@ public class MainActivity extends Activity {
                 if (ghToken == null) startDeviceLogin(); else logoutGitHub();
             }
         });
-        feedbackInner.addView(fbLoginBtn, wrap());
-
-        fbCodeBig = new TextView(this);
-        fbCodeBig.setTextSize(m.titleSize + 4f);
-        fbCodeBig.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        fbCodeBig.setTextColor(C_PRIMARY);
-        fbCodeBig.setGravity(Gravity.CENTER);
-        fbCodeBig.setPadding(dp(8), dp(8), dp(8), dp(8));
-        fbCodeBig.setBackgroundDrawable(pill(0xFF14384A));
-        fbCodeBig.setVisibility(View.GONE);
-        LinearLayout.LayoutParams codeLp = wrap();
-        codeLp.topMargin = dp(6);
-        feedbackInner.addView(fbCodeBig, codeLp);
+        LinearLayout.LayoutParams loginLp = wrap();
+        loginLp.topMargin = dp(6);
+        feedbackInner.addView(fbLoginBtn, loginLp);
 
         feedbackInner.addView(sectionHeader("类型"), wrap());
         for (int row = 0; row < 2; row++) {
@@ -2767,17 +2783,20 @@ public class MainActivity extends Activity {
                 fbStatusTxt.setText("正在获取登录码…");
                 fbLoginBtn.setText("请稍候…");
                 fbCodeBig.setVisibility(View.GONE);
+                fbQr.setVisibility(View.GONE);
             } else {
-                fbStatusTxt.setText("手机浏览器打开 github.com/login/device 输入");
-                fbLoginBtn.setText("打开本机浏览器");
+                fbStatusTxt.setText("手机扫下面二维码，输入这个码授权");
+                fbLoginBtn.setText("或用本机浏览器打开");
                 fbCodeBig.setText(fbCode);
                 fbCodeBig.setVisibility(View.VISIBLE);
+                fbQr.setVisibility(View.VISIBLE);
             }
             fbLoginBtn.setTextColor(C_PRIMARY);
             updateTypeButtons();
             return;
         }
         fbCodeBig.setVisibility(View.GONE);
+        fbQr.setVisibility(View.GONE);
         if (ghToken == null) {
             fbStatusTxt.setText("尚未登录 GitHub，登录后才能提交");
             fbLoginBtn.setText("登录 GitHub");
