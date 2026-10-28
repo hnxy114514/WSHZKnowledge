@@ -820,11 +820,11 @@ public class MainActivity extends Activity {
         // 全局搜索页
         searchTitle = new TextView(this);
         searchTitle.setText("搜索全部知识点");
-        searchTitle.setTextSize(m.titleSize);
+        searchTitle.setTextSize(m.subtitleSize + 2f);
         searchTitle.setTypeface(Typeface.DEFAULT_BOLD);
         searchTitle.setTextColor(C_PRIMARY);
         searchTitle.setGravity(Gravity.CENTER);
-        searchTitle.setPadding(0, 0, 0, dp(4));
+        searchTitle.setPadding(0, 0, 0, dp(3));
         searchScreen.addView(searchTitle, wrap());
         gSearchBox = new EditText(this);
         gSearchBox.setHint("输入关键词（如 导数、电场、光合作用）…");
@@ -834,10 +834,32 @@ public class MainActivity extends Activity {
         gSearchBox.setSingleLine(true);
         gSearchBox.setBackgroundDrawable(pill(C_PILL));
         gSearchBox.setPadding(dp(12), dp(8), dp(12), dp(8));
+        LinearLayout searchBar = new LinearLayout(this);
+        searchBar.setOrientation(LinearLayout.HORIZONTAL);
+        searchBar.setGravity(Gravity.CENTER_VERTICAL);
+        searchBar.addView(gSearchBox, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView clearBtn = new TextView(this);
+        clearBtn.setText("✕");
+        clearBtn.setTextSize(m.subtitleSize);
+        clearBtn.setTypeface(Typeface.DEFAULT_BOLD);
+        clearBtn.setTextColor(C_SUB);
+        clearBtn.setGravity(Gravity.CENTER);
+        clearBtn.setBackgroundDrawable(pill(C_PILL));
+        LinearLayout.LayoutParams clrp = new LinearLayout.LayoutParams(dp(40), dp(40));
+        clrp.leftMargin = dp(6);
+        clearBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                gSearchBox.setText("");
+            }
+        });
+        searchBar.addView(clearBtn, clrp);
+
         LinearLayout.LayoutParams gsblp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         gsblp.bottomMargin = dp(6);
-        searchScreen.addView(gSearchBox, gsblp);
+        searchScreen.addView(searchBar, gsblp);
         gSearchBox.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
             public void onTextChanged(CharSequence s, int a, int b, int c) { }
@@ -850,7 +872,8 @@ public class MainActivity extends Activity {
         searchScreen.addView(searchList, lw());
         searchList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                if (pos == 0) return;   // 返回键 header
+                if (pos == 0) return;                       // 返回键 header
+                if (pos - 1 >= searchHits.size()) return;   // 空提示行
                 Hit h = searchHits.get(pos - 1);
                 openDetail(h.item.t, h.item.sec, h.path, S_SEARCH, h.item.img);
             }
@@ -1028,16 +1051,80 @@ public class MainActivity extends Activity {
     private void refreshGlobalSearch() {
         String q = gSearchBox.getText().toString().trim();
         searchHits.clear();
-        List<String> names = new ArrayList<String>();
-        for (Hit h : allHits) {
-            String title = h.item.t;
-            String blob = title + " " + plain(h.item.sec);
-            if (q.length() == 0 || blob.toLowerCase().contains(q.toLowerCase())) {
-                searchHits.add(h);
-                names.add(title + " ｜ " + h.path);
-            }
+        if (q.length() == 0) {
+            searchTitle.setText("搜索全部知识点");
+            List<String> tip = new ArrayList<String>();
+            tip.add("输入关键词开始搜索");
+            searchList.setAdapter(stringAdapter(tip, C_SUB));
+            return;
         }
-        searchList.setAdapter(stringAdapter(names, 0xFFF0F0F0));
+        String ql = q.toLowerCase();
+        for (Hit h : allHits) {
+            String blob = (h.item.t + " " + plain(h.item.sec)).toLowerCase();
+            if (blob.contains(ql)) searchHits.add(h);
+        }
+        searchTitle.setText(searchHits.size() == 0 ? "没有找到「" + q + "」"
+                : "命中 " + searchHits.size() + " 条 · " + q);
+        searchList.setAdapter(searchAdapter(searchHits));
+    }
+
+    /** 搜索结果的列表项：标题占主位，路径小字排在下面，避免挤在一行看不清。 */
+    private ArrayAdapter<Hit> searchAdapter(final List<Hit> data) {
+        return new ArrayAdapter<Hit>(this, 0, data) {
+            @Override
+            public View getView(int position, View convertView, ViewGroup parent) {
+                LinearLayout box;
+                TextView title, path;
+                if (convertView instanceof LinearLayout) {
+                    box = (LinearLayout) convertView;
+                    title = (TextView) box.getChildAt(0);
+                    path = (TextView) box.getChildAt(1);
+                } else {
+                    box = new LinearLayout(MainActivity.this);
+                    box.setOrientation(LinearLayout.VERTICAL);
+                    box.setGravity(Gravity.CENTER);
+                    box.setPadding(dp(10), dp(8), dp(10), dp(8));
+                    GradientDrawable content = pill(C_PILL);
+                    GradientDrawable mask = new GradientDrawable();
+                    mask.setColor(Color.WHITE);
+                    mask.setCornerRadius(dp(13));
+                    try {
+                        box.setBackground(new RippleDrawable(ColorStateList.valueOf(0x334FC3F7), content, mask));
+                    } catch (Exception ignored) {
+                        box.setBackgroundDrawable(content);
+                    }
+                    title = new TextView(MainActivity.this);
+                    title.setTextSize(listSizeSp);
+                    title.setTextColor(0xFFF0F0F0);
+                    title.setTypeface(Typeface.DEFAULT_BOLD);
+                    title.setGravity(Gravity.CENTER);
+                    title.setMaxLines(2);
+                    title.setEllipsize(TextUtils.TruncateAt.END);
+                    box.addView(title, wrap());
+
+                    path = new TextView(MainActivity.this);
+                    path.setTextSize(m.subtitleSize - 2f);
+                    path.setTextColor(C_SUB);
+                    path.setGravity(Gravity.CENTER);
+                    path.setMaxLines(1);
+                    path.setEllipsize(TextUtils.TruncateAt.END);
+                    path.setPadding(0, dp(2), 0, 0);
+                    box.addView(path, wrap());
+                }
+                Hit h = getItem(position);
+                title.setText(applyMarkup(h.item.t));
+                path.setText(shortPath(h.path));
+                return box;
+            }
+        };
+    }
+
+    /** 路径只留「科目 › 章」，节名省掉，给标题腾地方。 */
+    private String shortPath(String p) {
+        if (p == null || p.length() == 0) return "";
+        String[] seg = p.split(" › ");
+        if (seg.length >= 3) return seg[0] + " › " + seg[1];
+        return p;
     }
 
     private String plain(List<Section> secs) {
@@ -2014,7 +2101,16 @@ public class MainActivity extends Activity {
                 }
             }
         }
-        about.setText("汇总知识 v14.0\n屏幕：" + (m.round ? "圆形（已启用圆形安全区）" : "方形")
+        String verName = "?";
+        int verCode = 0;
+        try {
+            android.content.pm.PackageInfo pi =
+                    getPackageManager().getPackageInfo(getPackageName(), 0);
+            verName = pi.versionName;
+            verCode = pi.versionCode;
+        } catch (Exception ignored) { }
+        about.setText("腕上知识汇总 v" + verName + "（build " + verCode + "）"
+                + "\n屏幕：" + (m.round ? "圆形（已启用圆形安全区）" : "方形")
                 + "\n知识点 " + itemCount + " 条 · 配图 " + imgCount + " 张");
         about.setTextSize(m.subtitleSize - 1f);
         about.setTextColor(C_SUB);
@@ -2194,7 +2290,7 @@ public class MainActivity extends Activity {
         } else if (s == S_SETTINGS) {
             renderSettings();
         } else if (s == S_SEARCH) {
-            gSearchBox.setText("");
+            // 保留上次输入（只有点 ✕ 才清空），从详情返回时能接着看结果
             refreshGlobalSearch();
         }
     }
