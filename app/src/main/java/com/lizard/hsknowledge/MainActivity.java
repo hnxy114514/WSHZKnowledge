@@ -2181,10 +2181,10 @@ public class MainActivity extends Activity {
         }
         if (grp.type == 4) {
             float[] in = measList(grp.kids.get(0), p, size);
-            float hook = size * 0.32f;
+            float hook = size * 0.42f;
             float w = hook + in[0] + size * 0.12f;
             float asc = in[1] + size * 0.18f;
-            float desc = Math.max(in[2], size * 0.06f) + size * 0.07f;
+            float desc = Math.max(in[2], size * 0.06f) + size * 0.10f;
             return new float[]{w, asc, desc};
         }
         if (grp.type == 6) {
@@ -2260,17 +2260,24 @@ public class MainActivity extends Activity {
             drawCentered(c, p, t.kids.get(1), cx, barY + gap + b[1], s2, color);
         } else if (t.type == 4) {
             float[] in = measList(t.kids.get(0), p, size);
-            float hook = size * 0.32f;
+            float hook = size * 0.42f;
             float innerX = x + hook;
             drawList(c, p, t.kids.get(0), innerX, base, size, color);
-            // 根号：一个连续 Path 把「勾」与「顶部横线」连成一体，比例随内容高度伸缩
+            // 根号一笔画完：顶部短横 → 向左下撇到最低点 → 从最低点回笔升到顶部 → 长横线盖住被开方数。
+            // 关键是不能省掉「回笔」那一笔，少了它就只剩「一捺加一横」，根本不像根号。
             float top = base - in[1] - size * 0.12f;
             float bot = base + Math.max(in[2], size * 0.06f) + size * 0.08f;
+            float x0 = x;                                   // 短横左端
+            float xs = x + hook * 0.30f;                    // 短横右端，撇从这开始
+            float xl = x + hook * 0.10f;                    // 最低点
+            float xr = x + hook * 0.62f;                    // 回笔升回顶部，长横线从这起
+            float right = innerX + in[0] + size * 0.10f;    // 长横线右端
             Path rad = new Path();
-            rad.moveTo(x + hook * 0.78f, bot);
-            rad.lineTo(x + hook * 0.12f, top + size * 0.10f);
-            rad.lineTo(x + hook * 0.44f, top);
-            rad.lineTo(innerX + in[0] + size * 0.08f, top);
+            rad.moveTo(x0, top);
+            rad.lineTo(xs, top);
+            rad.lineTo(xl, bot);
+            rad.lineTo(xr, top);
+            rad.lineTo(right, top);
             Paint.Style oldStyle = p.getStyle();
             Paint.Cap oldCap = p.getStrokeCap();
             Paint.Join oldJoin = p.getStrokeJoin();
@@ -2309,12 +2316,30 @@ public class MainActivity extends Activity {
     private class InlineSpan extends ReplacementSpan {
         private final Inl root;
         private final int script;      // 0 正常 1 上标 2 下标
+        private final boolean hi;      // 落在「重点标亮」范围内：用高亮色 + 加粗绘制
 
-        InlineSpan(Inl root) { this(root, 0); }
+        InlineSpan(Inl root) { this(root, 0, false); }
 
-        InlineSpan(Inl root, int script) {
+        InlineSpan(Inl root, int script) { this(root, script, false); }
+
+        InlineSpan(Inl root, int script, boolean hi) {
             this.root = root;
             this.script = script;
+            this.hi = hi;
+        }
+
+        /** 公式是自绘的 ReplacementSpan，不会自动继承 ForegroundColorSpan/StyleSpan，
+         *  所以标亮状态必须显式带进来，否则分式、根式不会被标亮。 */
+        private void applyHi(Paint paint) {
+            if (hi) {
+                paint.setColor(C_HI);
+                paint.setFakeBoldText(true);
+            }
+        }
+
+        private void clearHi(Paint paint, int color, boolean bold) {
+            paint.setColor(color);
+            paint.setFakeBoldText(bold);
         }
 
         private float sizeOf(float orig) {
@@ -2330,9 +2355,13 @@ public class MainActivity extends Activity {
         @Override
         public int getSize(Paint paint, CharSequence text, int start, int end, Paint.FontMetricsInt fm) {
             float orig = paint.getTextSize();
+            int oc = paint.getColor();
+            boolean ob = paint.isFakeBoldText();
+            applyHi(paint);
             float size = sizeOf(orig);
             float[] m = measList(root, paint, size);
             paint.setTextSize(orig);
+            clearHi(paint, oc, ob);
             if (fm != null) {
                 float up = m[1], dn = m[2];
                 if (script == 1) {
@@ -2355,15 +2384,22 @@ public class MainActivity extends Activity {
                          int top, int y, int bottom, Paint paint) {
             float orig = paint.getTextSize();
             int color = paint.getColor();
-            drawInl(canvas, paint, root, x, baseOf(orig, y), sizeOf(orig), color);
+            boolean ob = paint.isFakeBoldText();
+            applyHi(paint);
+            drawInl(canvas, paint, root, x, baseOf(orig, y), sizeOf(orig), paint.getColor());
             paint.setTextSize(orig);
-            paint.setColor(color);
+            clearHi(paint, color, ob);
             paint.setTextAlign(Paint.Align.LEFT);
             paint.setStyle(Paint.Style.FILL);
         }
     }
 
     private SpannableStringBuilder applyMarkup(String src) {
+        return applyMarkup(src, false);
+    }
+
+    /** @param hl 当前是否处在 **重点标亮** 内；公式不会自动继承颜色 span，需显式传递。 */
+    private SpannableStringBuilder applyMarkup(String src, boolean hl) {
         SpannableStringBuilder ssb = new SpannableStringBuilder();
         String txt = latexToText(src);
         int i = 0, n = txt.length();
@@ -2375,7 +2411,7 @@ public class MainActivity extends Activity {
                     Inl root = Inl.group(parseInl(txt.substring(i, b[1] + 1)));
                     int st = ssb.length();
                     ssb.append('\u00A0');
-                    ssb.setSpan(new InlineSpan(root), st, ssb.length(),
+                    ssb.setSpan(new InlineSpan(root, 0, hl), st, ssb.length(),
                             Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                     i = b[1] + 1;
                     continue;
@@ -2389,7 +2425,7 @@ public class MainActivity extends Activity {
                     Inl root = Inl.group(parseInl(txt.substring(i, e + 1)));
                     int st = ssb.length();
                     ssb.append('\u00A0');
-                    ssb.setSpan(new InlineSpan(root), st, ssb.length(),
+                    ssb.setSpan(new InlineSpan(root, 0, hl), st, ssb.length(),
                             Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                     i = e + 1;
                     continue;
@@ -2430,7 +2466,7 @@ public class MainActivity extends Activity {
                 if (hasBlock) {
                     Inl root = Inl.group(parseInl(inner));
                     ssb.append('\u00A0');
-                    ssb.setSpan(new InlineSpan(root, sup ? 1 : 2), start, ssb.length(),
+                    ssb.setSpan(new InlineSpan(root, sup ? 1 : 2, hl), start, ssb.length(),
                             Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                     i = next;
                     continue;
@@ -2444,8 +2480,8 @@ public class MainActivity extends Activity {
                 int end = txt.indexOf("**", i + 2);
                 if (end < 0) { ssb.append(c); i++; continue; }
                 String inner = txt.substring(i + 2, end);
-                // 递归处理重点内容内的上下标，再整体加粗 + 高亮色
-                SpannableStringBuilder innerSb = applyMarkup(inner);
+                // 递归处理重点内容内的分式、根式与上下标，再整体加粗 + 高亮色
+                SpannableStringBuilder innerSb = applyMarkup(inner, true);
                 int start = ssb.length();
                 ssb.append(innerSb);
                 ssb.setSpan(new StyleSpan(Typeface.BOLD), start, ssb.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
@@ -3145,7 +3181,7 @@ public class MainActivity extends Activity {
             android.util.Base64.decode("bHVja3l5eTA3MjE=", android.util.Base64.NO_WRAP));
     private static final String REPO_OWNER = "hnxy114514";
     private static final String HINT_TEXT = "I love Lucky \u2764\uFE0F";
-    /** 进入个人页时触发满屏爱心的账号（当前含测试账号）。 */
+    /** 进入个人页时触发满屏装饰图案的账号（本地约定，不对外说明）。 */
     private static final String[] HEART_USERS = {"luckyyy0721", "hnxy114514"};
     private boolean heartRunning = false;
     private int tapCount = 0;
@@ -3493,7 +3529,7 @@ public class MainActivity extends Activity {
         return out;
     }
 
-    /** 登录账号命中名单时，飘一次满屏爱心（纯视觉，不拦触摸）。 */
+    /** 登录账号命中名单时，飘一次满屏装饰图案（纯视觉，不拦触摸）。 */
     private void maybePlayHearts() {
         if (heartRunning) return;
         if (ghToken == null) return;                            // 未登录不触发
@@ -3506,7 +3542,28 @@ public class MainActivity extends Activity {
         playHearts();
     }
 
-    /** 在根布局上盖一层不接收触摸的浮层，撒一把向上飘的爱心，播完自动移除。 */
+    /** 满屏装饰图案可用的彩色字形（系统缺字形的会被探测筛掉，避免豆腐块）。 */
+    // 在根布局上盖一层不接收触摸的浮层，撒一把向上飘的图案，播完自动移除。
+    private static final String[] HEART_EMOJI = {
+            "\u2764\uFE0F",                 // ❤️
+            "\uD83D\uDC95",                 // 💕
+            "\uD83D\uDC97",                 // 💗
+            "\uD83D\uDC96",                 // 💖
+            "\uD83D\uDC9D",                 // 💝
+            "\uD83D\uDC98",                 // 💘
+            "\uD83D\uDC9E",                 // 💞
+            "\u2763\uFE0F",                 // ❣️
+            "\uD83D\uDC93",                 // 💓
+            "\uD83D\uDC9F",                 // 💟
+            "\uD83D\uDC9B",                 // 💛
+            "\uD83D\uDC9A",                 // 💚
+            "\uD83D\uDC99",                 // 💙
+            "\uD83D\uDC9C",                 // 💜
+            "\uD83E\uDDE1",                 // 🧡
+            "\uD83E\uDD0D",                 // 🤍
+            "\uD83E\uDE77",                 // 🩷
+    };
+
     private void playHearts() {
         final FrameLayout layer = new FrameLayout(this);
         layer.setClickable(false);
@@ -3518,24 +3575,51 @@ public class MainActivity extends Activity {
 
         final int w = root.getWidth() > 0 ? root.getWidth() : getResources().getDisplayMetrics().widthPixels;
         final int h = root.getHeight() > 0 ? root.getHeight() : getResources().getDisplayMetrics().heightPixels;
-        final String[] kinds = {"\u2764\uFE0F", "\uD83D\uDC97", "\uD83D\uDC96", "\uD83D\uDC95", "\uD83D\uDC93"};
+
+        // emoji 字形比常规字体行高大，View 方框必须明显大于字号，否则上下会被裁掉一半。
+        final java.util.List<String> glyphs = new java.util.ArrayList<String>();
+        Paint probe = new Paint();
+        for (int i = 0; i < HEART_EMOJI.length; i++) {
+            if (Build.VERSION.SDK_INT < 23 || probe.hasGlyph(HEART_EMOJI[i])) glyphs.add(HEART_EMOJI[i]);
+        }
+        final boolean useEmoji = !glyphs.isEmpty();
+        final int heartRes = useEmoji ? 0
+                : getResources().getIdentifier("ic_favorite", "drawable", getPackageName());
+        final int[] palette = {0xFFFF4F6D, 0xFFFF7A94, 0xFFF06292, 0xFFFF5E7E,
+                0xFFE0609B, 0xFFFF93AE, 0xFFFFC2CF};
         final java.util.Random rnd = new java.util.Random();
         final int count = 26;
         heartRunning = true;
 
         for (int i = 0; i < count; i++) {
-            final TextView tv = new TextView(this);
-            tv.setText(kinds[rnd.nextInt(kinds.length)]);
-            tv.setTextSize(13 + rnd.nextInt(14));
-            tv.setAlpha(0f);
-            tv.setClickable(false);
-            tv.setFocusable(false);
+            int sz = dp(14 + rnd.nextInt(15));          // 14~28dp，视觉大小
+            int box = Math.round(sz * 1.7f);            // 方框比字号大 70%，留给字形余量
+            final View heart;
+            if (useEmoji) {
+                TextView tv = new TextView(this);
+                tv.setText(glyphs.get(rnd.nextInt(glyphs.size())));
+                tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, dp(sz));
+                tv.setGravity(android.view.Gravity.CENTER);
+                tv.setIncludeFontPadding(false);
+                tv.setSingleLine(true);
+                heart = tv;
+            } else {
+                ImageView iv = new ImageView(this);
+                if (heartRes != 0) iv.setImageResource(heartRes);
+                try {
+                    iv.setImageTintList(ColorStateList.valueOf(palette[rnd.nextInt(palette.length)]));
+                } catch (Exception ignored) { }
+                heart = iv;
+                box = sz;
+            }
+            heart.setAlpha(0f);
+            heart.setClickable(false);
+            heart.setFocusable(false);
 
-            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.leftMargin = rnd.nextInt(Math.max(1, w - dp(34)));
-            lp.topMargin = h - dp(18);
-            layer.addView(tv, lp);
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(box), dp(box));
+            lp.leftMargin = rnd.nextInt(Math.max(1, w - dp(box)));
+            lp.topMargin = h - dp(16);
+            layer.addView(heart, lp);
 
             float rise = h * (0.55f + rnd.nextFloat() * 0.75f);
             float drift = (rnd.nextFloat() - 0.5f) * dp(40);
@@ -3543,12 +3627,12 @@ public class MainActivity extends Activity {
             long dur = 2600 + rnd.nextInt(1500);
             float rot = (rnd.nextFloat() - 0.5f) * 46f;
 
-            tv.animate().setStartDelay(delay).setDuration(dur)
+            heart.animate().setStartDelay(delay).setDuration(dur)
                     .alpha(1f).translationY(-rise).translationX(drift).rotation(rot)
                     .setInterpolator(new android.view.animation.DecelerateInterpolator())
                     .withEndAction(new Runnable() {
                         public void run() {
-                            tv.animate().alpha(0f).setDuration(420).start();
+                            heart.animate().alpha(0f).setDuration(420).start();
                         }
                     }).start();
         }
@@ -3560,6 +3644,8 @@ public class MainActivity extends Activity {
             }
         }, 1500 + 4100 + 500);
     }
+
+
 
     /** 给文本按钮加左侧矢量图标（Material Icons，随主题色 tint）。 */
     private void applyIcon(TextView tv, String name, int color, int sizeDp) {
