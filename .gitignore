@@ -31,3 +31,7 @@ Thumbs.db
 
 # 发布凭据（GitHub token / 签名密码，本地复用，绝不入库）
 .publish_env
+
+# 本地备忘（含发布凭据明文，仅本机留存，绝不入库）
+工作技巧.txt
+工作要求.txt
