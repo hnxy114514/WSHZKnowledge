@@ -147,6 +147,7 @@ public class MainActivity extends Activity {
     private int fbType = 0;
     private String fbDraft = "";
     private String ghToken, ghLogin;
+    private String fbCode, fbCodeUrl;
     private String lastPath = "";
     private FrameLayout progBox;
     private View progFill;
@@ -2651,6 +2652,11 @@ public class MainActivity extends Activity {
         fbLoginBtn.setBackgroundDrawable(pill(C_PILL));
         fbLoginBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                if (loginRunning) {
+                    if (fbCodeUrl != null) openBrowser(fbCodeUrl);
+                    else toast("正在获取登录码…");
+                    return;
+                }
                 if (ghToken == null) startDeviceLogin(); else logoutGitHub();
             }
         });
@@ -2732,6 +2738,18 @@ public class MainActivity extends Activity {
 
     private void updateFeedbackUi() {
         if (fbStatusTxt == null) return;
+        if (loginRunning) {
+            if (fbCode == null) {
+                fbStatusTxt.setText("正在获取登录码…");
+                fbLoginBtn.setText("请稍候…");
+            } else {
+                fbStatusTxt.setText("在浏览器输入 " + fbCode + " 并点 Authorize");
+                fbLoginBtn.setText("打开浏览器授权");
+            }
+            fbLoginBtn.setTextColor(C_PRIMARY);
+            updateTypeButtons();
+            return;
+        }
         if (ghToken == null) {
             fbStatusTxt.setText("尚未登录 GitHub，登录后才能提交");
             fbLoginBtn.setText("登录 GitHub");
@@ -2787,7 +2805,9 @@ public class MainActivity extends Activity {
             return;
         }
         loginRunning = true;
-        progressShow("正在获取登录码…", "连接 GitHub", -1);
+        fbCode = null;
+        fbCodeUrl = null;
+        updateFeedbackUi();
         new Thread(new Runnable() {
             public void run() {
                 try {
@@ -2796,15 +2816,24 @@ public class MainActivity extends Activity {
                             "application/x-www-form-urlencoded", null));
                     final String device = o.optString("device_code", "");
                     final String code = o.optString("user_code", "");
+                    String complete = o.optString("verification_uri_complete", "");
                     int interval = Math.max(5, o.optInt("interval", 5));
                     if (device.length() == 0) {
                         throw new Exception(o.optString("error_description", "获取登录码失败"));
                     }
-                    progressShow("输入码 " + code, "手机浏览器打开 github.com/login/device", -1);
+                    fbCode = code;
+                    fbCodeUrl = (complete.length() > 0) ? complete
+                            : "https://github.com/login/device?user_code=" + code;
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            updateFeedbackUi();
+                            openBrowser(fbCodeUrl);
+                        }
+                    });
                     pollDeviceToken(device, interval);
                 } catch (final Exception e) {
                     loginRunning = false;
-                    progressHide();
+                    updateFeedbackUi();
                     toast("登录失败：" + e.getMessage());
                 }
             }
@@ -2836,7 +2865,7 @@ public class MainActivity extends Activity {
                 if ("slow_down".equals(err)) { interval += 5; continue; }
                 if ("authorization_pending".equals(err)) continue;
                 loginRunning = false;
-                progressHide();
+                updateFeedbackUi();
                 toast("登录未完成：" + ("access_denied".equals(err) ? "已取消授权" : err));
                 return;
             } catch (Exception ignored) {
@@ -2844,8 +2873,8 @@ public class MainActivity extends Activity {
             }
         }
         loginRunning = false;
-        progressHide();
-        if (ghToken == null) toast("登录超时，请重试");
+        updateFeedbackUi();
+        if (ghToken == null) toast("登录超时，可再点一次登录");
     }
 
     private void fetchGitHubLogin() {
@@ -2855,9 +2884,8 @@ public class MainActivity extends Activity {
                 try {
                     login = new JSONObject(httpGetAuthed(GH_USER)).optString("login", "");
                 } catch (Exception ignored) { }
-                saveGitHub(ghToken, login);
                 loginRunning = false;
-                progressHide();
+                saveGitHub(ghToken, login);
                 toast(login == null ? "已登录 GitHub" : "已登录 @" + login);
             }
         }).start();
@@ -2944,6 +2972,16 @@ public class MainActivity extends Activity {
             return getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
         } catch (Exception e) {
             return 0;
+        }
+    }
+
+    private void openBrowser(String url) {
+        try {
+            Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+        } catch (Exception e) {
+            toast("没找到浏览器，请在手机上打开 github.com/login/device");
         }
     }
 
