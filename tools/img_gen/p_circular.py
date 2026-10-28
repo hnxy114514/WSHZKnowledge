@@ -33,4 +33,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "p_circular")
+    save(build(), "物理_4.2_向心力")

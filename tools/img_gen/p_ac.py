@@ -28,4 +28,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "p_ac")
+    save(build(), "物理_11.1_正弦式交变电流")

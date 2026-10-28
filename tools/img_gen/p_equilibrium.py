@@ -43,4 +43,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "p_equilibrium")
+    save(build(), "物理_2.2_共点力平衡")

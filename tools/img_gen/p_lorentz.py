@@ -35,4 +35,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "p_lorentz")
+    save(build(), "物理_9.2_洛伦兹力")

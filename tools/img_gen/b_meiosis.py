@@ -38,4 +38,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "b_meiosis")
+    save(build(), "生物_6.1_分离定律")

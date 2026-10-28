@@ -75,4 +75,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "p_slope")
+    save(build(), "物理_2.3_受力分析")

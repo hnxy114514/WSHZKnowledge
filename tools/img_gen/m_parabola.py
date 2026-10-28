@@ -28,4 +28,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "m_parabola")
+    save(build(), "数学_9.5_定义")

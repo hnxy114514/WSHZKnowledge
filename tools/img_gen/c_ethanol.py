@@ -28,4 +28,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "c_ethanol")
+    save(build(), "化学_9.2_醇与酚")

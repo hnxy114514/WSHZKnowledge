@@ -36,4 +36,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "p_projectile")
+    save(build(), "物理_4.1_平抛")

@@ -49,4 +49,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "p_circuit")
+    save(build(), "物理_8.1_串并联")

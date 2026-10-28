@@ -28,4 +28,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "m_quad")
+    save(build(), "数学_3.1_二次函数")

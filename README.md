@@ -24,18 +24,18 @@ WSHZKnowledge/
 │   │   ├── chinese.py / math.py / english.py /
 │   │   ├── physics.py / chem.py / bio.py /
 │   │   └── politics.py / history.py / geography.py
-│   ├── highlights.py                   人工标注的重点片段清单（key = 科目+标题）
 │   ├── build_authored.py               构建数据：subjects → assets/data + cloud/update.json
 │   ├── img_gen/                       配图生成（每张图一个脚本 + 共享 common.py）
 │   │   ├── common.py                   公式排版库（LaTeX 解析 + 分式/根号绘制）+ 颜色/coords/save
 │   │   ├── <图片名>.py                 每张配图一个脚本，单独运行只生成那一张
 │   │   └── gen_all.py                  一键重新生成全部在用配图
-│   ├── gen_icon.py                     生成应用图标
+│   ├── make_icon.py                    生成应用图标（表盘 + Emoji 书本，输出 5 个 dpi）
+│   └── emoji_src/open_book.png          图标用的书本 Emoji 源图（Fluent Emoji, MIT）
 │   └── _archive/                       历史旧源归档（只读，不再参与构建）
 │
 ├── cloud/update.json                   完整数据包备份（构建副产品，App 已不读取，仅存档）
-├── build.sh                           无 Gradle 构建脚本（aapt2 + javac + d8 + apksigner）
-├── release.py                         一键发布：构建 + 创建 Release + 上传 APK
+├── scripts/build.sh                   无 Gradle 构建脚本（aapt2 + javac + d8 + apksigner）
+├── scripts/release.py                 一键发布：构建 + 创建 Release + 上传 APK
 ├── .gitignore                          排除签名密钥、产物、缓存、归档
 └── README.md                           本文件
 ```
@@ -216,3 +216,4 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
 - `app/src/main/assets/data/` 和 `assets/img/` 都是**生成物**，不要手改，改源文件后重新构建。
 - 签名密钥 `release.keystore` 和 GitHub Token 都**不能入库、不能外泄**。
 - 发布新版本必须同时改 `versionName` 并推代码，否则 App 检测不到更新。
+- **素材署名**：应用图标中的书本图形取自 Microsoft Fluent Emoji（MIT License），由 `tools/make_icon.py` 合成圆形表盘后输出。

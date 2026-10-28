@@ -34,4 +34,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "c_cell")
+    save(build(), "化学_6.2_原电池")

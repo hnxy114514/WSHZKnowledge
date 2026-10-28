@@ -29,4 +29,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "g_curve")
+    save(build(), "政治_1.1_影响价格的因素")

@@ -126,7 +126,7 @@ public class MainActivity extends Activity {
 
     // ---------- 导航 ----------
     private static final int S_SUBJECT = 0, S_BLOCK = 1, S_CHILD = 2, S_ITEM = 3, S_DETAIL = 4, S_SETTINGS = 5,
-            S_SEARCH = 6, S_FEEDBACK = 7, S_MYFEEDBACK = 8, S_PROFILE = 9, S_CHANGELOG = 10;
+            S_SEARCH = 6, S_FEEDBACK = 7, S_MYFEEDBACK = 8, S_PROFILE = 9, S_CHANGELOG = 10, S_ABOUT = 11;
     private int screen = S_SUBJECT;
     private Subject curSubject;
     private Block curBlock;
@@ -170,10 +170,16 @@ public class MainActivity extends Activity {
     private String lastPath = "";
     private boolean subjectDirty = true;
     private String lastQuery = null;
-    private final int[] savedPos = new int[11];
-    private final int[] savedTop = new int[11];
-    private final boolean[] hasSaved = new boolean[11];
-    private final boolean[] restoreNext = new boolean[11];
+    private final int[] savedPos = new int[12];
+    private final int[] savedTop = new int[12];
+    private final boolean[] hasSaved = new boolean[12];
+    private final boolean[] restoreNext = new boolean[12];
+
+    // 关于 / 感谢名单
+    private LinearLayout aboutScreen;
+    private ListView aboutList;
+    private final List<String[]> thanksRows = new ArrayList<String[]>();
+    private boolean thanksLoaded = false;
 
     // 更新日志
     private LinearLayout changelogScreen, changelogInner, changelogList;
@@ -1028,6 +1034,10 @@ public class MainActivity extends Activity {
         changelogScreen = newScreen();
         buildChangelogScreen();
         root.addView(changelogScreen, fp());
+
+        aboutScreen = newScreen();
+        buildAboutScreen();
+        root.addView(aboutScreen, fp());
 
         // 主页
         subjectList = makeList();
@@ -2523,51 +2533,27 @@ public class MainActivity extends Activity {
         }
 
         settingsInner.addView(sectionHeader("关于"), wrap());
-        TextView about = new TextView(this);
-        int itemCount = 0, imgCount = 0;
-        for (Subject su : subjects) {
-            for (Block bl : su.blocks) {
-                for (Child ch : bl.children) {
-                    for (Item it : ch.items) {
-                        itemCount++;
-                        if (it.img != null && it.img.length() > 0) imgCount++;
-                    }
-                }
-            }
-        }
-        String verName = appVersion();
-        int verCode = appVersionCode();
-        about.setText("腕上知识汇总 v" + verName + "（build " + verCode + "）"
-                + "\n作者：@hnxy114514"
-                + "\n屏幕：" + (m.round ? "圆形（已启用圆形安全区）" : "方形")
-                + "\n知识点 " + itemCount + " 条 · 配图 " + imgCount + " 张");
-        about.setTextSize(m.subtitleSize - 1f);
-        about.setTextColor(C_SUB);
-        about.setPadding(dp(4), dp(4), dp(4), dp(4));
-        settingsInner.addView(about, wrap());
-
-        TextView logBtn = new TextView(this);
-        logBtn.setText("更新日志");
-        logBtn.setTextSize(m.backSize);
-        logBtn.setTextColor(C_PRIMARY);
-        logBtn.setGravity(Gravity.CENTER);
-        logBtn.setPadding(dp(10), dp(10), dp(10), dp(10));
-        logBtn.setBackgroundDrawable(pill(C_PILL));
-        logBtn.setOnClickListener(new View.OnClickListener() {
+        TextView aboutEntry = new TextView(this);
+        aboutEntry.setText("关于本应用");
+        aboutEntry.setTextSize(m.backSize);
+        aboutEntry.setTypeface(Typeface.DEFAULT_BOLD);
+        aboutEntry.setTextColor(C_PRIMARY);
+        aboutEntry.setGravity(Gravity.CENTER);
+        aboutEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
+        aboutEntry.setBackgroundDrawable(pill(C_PILL));
+        aboutEntry.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                changelogBack = S_SETTINGS;
-                showScreen(S_CHANGELOG);
+                vibrate();
+                showScreen(S_ABOUT);
             }
         });
-        LinearLayout.LayoutParams logLp = wrap();
-        logLp.topMargin = dp(8);
-        settingsInner.addView(logBtn, logLp);
-        TextView logHint = new TextView(this);
-        logHint.setText("每次更新改了什么，按版本倒序都记在这里。");
-        logHint.setTextSize(m.subtitleSize - 2f);
-        logHint.setTextColor(C_SUB);
-        logHint.setPadding(dp(4), dp(3), dp(4), dp(2));
-        settingsInner.addView(logHint, wrap());
+        settingsInner.addView(aboutEntry, wrap());
+        TextView aboutHint = new TextView(this);
+        aboutHint.setText("版本信息、更新日志、感谢名单。");
+        aboutHint.setTextSize(m.subtitleSize - 2f);
+        aboutHint.setTextColor(C_SUB);
+        aboutHint.setPadding(dp(4), dp(3), dp(4), dp(2));
+        settingsInner.addView(aboutHint, wrap());
 
         TextView reset = new TextView(this);
         reset.setText("恢复默认设置");
@@ -2774,7 +2760,7 @@ public class MainActivity extends Activity {
         }
         screen = s;
         View[] screens = {subjectScreen, blockScreen, childScreen, listScreen, detailScreen, settingsScreen,
-                searchScreen, feedbackScreen, mineScreen, profileScreen, changelogScreen};
+                searchScreen, feedbackScreen, mineScreen, profileScreen, changelogScreen, aboutScreen};
         View target = screens[s];
         boolean shown = target.getVisibility() == View.VISIBLE && target.getAlpha() > 0.95f
                 && Math.abs(target.getTranslationX()) < dp(4);
@@ -2822,6 +2808,8 @@ public class MainActivity extends Activity {
         } else if (s == S_PROFILE) {
             updateProfileUi();
             if (ghToken != null) loadProfileFromGitHub();
+        } else if (s == S_ABOUT) {
+            if (!thanksLoaded) loadThanks();
         } else if (s == S_CHANGELOG) {
             if (!changelogFilled) fillChangelog();
         }
@@ -2845,6 +2833,7 @@ public class MainActivity extends Activity {
             case S_ITEM: return itemList;
             case S_SEARCH: return searchList;
             case S_MYFEEDBACK: return mineList;
+            case S_ABOUT: return aboutList;
             default: return null;
         }
     }
@@ -2882,6 +2871,7 @@ public class MainActivity extends Activity {
         if (screen == S_MYFEEDBACK) return S_FEEDBACK;
         if (screen == S_PROFILE) return S_SETTINGS;
         if (screen == S_CHANGELOG) return changelogBack == S_CHANGELOG ? S_SETTINGS : changelogBack;
+        if (screen == S_ABOUT) return S_SETTINGS;
         return -1;
     }
 
@@ -2895,6 +2885,7 @@ public class MainActivity extends Activity {
             case S_SETTINGS: return settingsScreen;
             case S_SEARCH: return searchScreen;
             case S_CHANGELOG: return changelogScreen;
+            case S_ABOUT: return aboutScreen;
             default: return null;
         }
     }
@@ -2991,6 +2982,7 @@ public class MainActivity extends Activity {
             case S_MYFEEDBACK: return mineScreen;
             case S_PROFILE: return profileScreen;
             case S_CHANGELOG: return changelogScreen;
+            case S_ABOUT: return aboutScreen;
             default: return subjectScreen;
         }
     }
@@ -3073,6 +3065,185 @@ public class MainActivity extends Activity {
     private static final String GH_ISSUES = "https://api.github.com/repos/" + REPO + "/issues";
 
     private boolean loginRunning = false;
+
+    // ================= 关于 / 感谢名单 =================
+    /** 致谢名单的置顶对象（本地约定，源码里不做明文标注）。 */
+    private static final String THANKS_PINNED = new String(
+            android.util.Base64.decode("bHVja3l5eTA3MjE=", android.util.Base64.NO_WRAP));
+    private static final String REPO_OWNER = "hnxy114514";
+
+    private void buildAboutScreen() {
+        aboutList = makeList();
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.VERTICAL);
+        head.addView(makeBack("‹ 返回设置", new View.OnClickListener() {
+            public void onClick(View v) { showScreen(S_SETTINGS); }
+        }), wrapM());
+
+        TextView title = new TextView(this);
+        title.setText("关于");
+        title.setTextSize(m.titleSize);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(C_PRIMARY);
+        title.setGravity(Gravity.CENTER);
+        head.addView(title, wrap());
+
+        int itemCount = 0, imgCount = 0;
+        for (Subject su : subjects) {
+            for (Block bl : su.blocks) {
+                for (Child ch : bl.children) {
+                    for (Item it : ch.items) {
+                        itemCount++;
+                        if (it.img != null && it.img.length() > 0) imgCount++;
+                    }
+                }
+            }
+        }
+        TextView info = new TextView(this);
+        info.setText("腕上知识汇总 v" + appVersion() + "（build " + appVersionCode() + "）"
+                + "\n作者：@" + REPO_OWNER
+                + "\n屏幕：" + (m.round ? "圆形（已启用圆形安全区）" : "方形")
+                + "\n共 " + subjects.size() + " 科 · 知识点 " + itemCount + " 条 · 配图 " + imgCount + " 张");
+        info.setTextSize(m.subtitleSize - 1f);
+        info.setTextColor(C_SUB);
+        info.setGravity(Gravity.CENTER);
+        info.setPadding(dp(8), dp(9), dp(8), dp(9));
+        info.setBackgroundDrawable(pill(C_PILL));
+        LinearLayout.LayoutParams ilp = wrap();
+        ilp.topMargin = dp(6);
+        head.addView(info, ilp);
+
+        TextView logEntry = new TextView(this);
+        logEntry.setText("更新日志");
+        logEntry.setTextSize(m.backSize);
+        logEntry.setTextColor(C_PRIMARY);
+        logEntry.setGravity(Gravity.CENTER);
+        logEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
+        logEntry.setBackgroundDrawable(pill(C_PILL));
+        logEntry.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                changelogBack = S_ABOUT;
+                showScreen(S_CHANGELOG);
+            }
+        });
+        LinearLayout.LayoutParams llp = wrap();
+        llp.topMargin = dp(6);
+        head.addView(logEntry, llp);
+
+        head.addView(sectionHeader("感谢名单"), wrap());
+        TextView tip = new TextView(this);
+        tip.setText("以下朋友提交的反馈被采纳，特此致谢（按采纳数量排序）");
+        tip.setTextSize(m.subtitleSize - 2f);
+        tip.setTextColor(C_SUB);
+        tip.setPadding(dp(4), dp(2), dp(4), dp(4));
+        head.addView(tip, wrap());
+
+        aboutList.addHeaderView(head);
+        aboutList.setAdapter(pairAdapter(thanksRows));
+    }
+
+    /** 拉取已采纳的反馈，按提交人聚合后排序（自己提交的不计入）。 */
+    private void loadThanks() {
+        thanksRows.clear();
+        thanksRows.add(new String[]{"正在加载…", "", "#FF8A8A8A"});
+        aboutList.setAdapter(pairAdapter(thanksRows));
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    String url = GH_ISSUES + "?state=closed&per_page=100";
+                    JSONArray arr = new JSONArray(httpGetPublic(url));
+                    final Map<String, Integer> cnt = new HashMap<String, Integer>();
+                    for (int i = 0; i < arr.length(); i++) {
+                        JSONObject o = arr.optJSONObject(i);
+                        if (o == null || o.has("pull_request")) continue;
+                        boolean accepted = false;
+                        JSONArray labels = o.optJSONArray("labels");
+                        if (labels != null) {
+                            for (int k = 0; k < labels.length(); k++) {
+                                Object lo = labels.opt(k);
+                                String name = (lo instanceof JSONObject)
+                                        ? ((JSONObject) lo).optString("name", "") : String.valueOf(lo);
+                                if (name.contains("已修复") || name.contains("已处理")) {
+                                    accepted = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!accepted) continue;
+                        JSONObject u = o.optJSONObject("user");
+                        String login = (u == null) ? null : u.optString("login", "");
+                        if (login == null || login.length() == 0) continue;
+                        if (login.equalsIgnoreCase(REPO_OWNER)) continue;   // 自己的不算致谢对象
+                        Integer old = cnt.get(login);
+                        cnt.put(login, old == null ? 1 : old + 1);
+                    }
+
+                    List<Map.Entry<String, Integer>> list =
+                            new ArrayList<Map.Entry<String, Integer>>(cnt.entrySet());
+                    java.util.Collections.sort(list, new java.util.Comparator<Map.Entry<String, Integer>>() {
+                        public int compare(Map.Entry<String, Integer> a, Map.Entry<String, Integer> b) {
+                            boolean pa = a.getKey().equalsIgnoreCase(THANKS_PINNED);
+                            boolean pb = b.getKey().equalsIgnoreCase(THANKS_PINNED);
+                            if (pa != pb) return pa ? -1 : 1;       // 指定的人永远置顶
+                            int c = b.getValue() - a.getValue();     // 采纳多的在前
+                            if (c != 0) return c;
+                            return a.getKey().compareToIgnoreCase(b.getKey());
+                        }
+                    });
+
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            thanksRows.clear();
+                            if (list.isEmpty()) {
+                                thanksRows.add(new String[]{"还没有采纳的反馈", "", "#FF8A8A8A"});
+                            } else {
+                                for (int i = 0; i < list.size(); i++) {
+                                    Map.Entry<String, Integer> e = list.get(i);
+                                    String color = (i == 0) ? "#FFFFC24B" : "#FF9CC4E6";
+                                    thanksRows.add(new String[]{
+                                            (i + 1) + ". @" + e.getKey(),
+                                            "采纳 " + e.getValue() + " 条",
+                                            color});
+                                }
+                            }
+                            aboutList.setAdapter(pairAdapter(thanksRows));
+                            thanksLoaded = true;
+                        }
+                    });
+                } catch (final Exception ex) {
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            thanksRows.clear();
+                            thanksRows.add(new String[]{"名单加载失败，请检查网络", "", "#FFE57373"});
+                            aboutList.setAdapter(pairAdapter(thanksRows));
+                        }
+                    });
+                }
+            }
+        }).start();
+    }
+
+    /** 无需登录的 GitHub 读取（公开仓库）。 */
+    private String httpGetPublic(String url) throws Exception {
+        java.net.HttpURLConnection cn = (java.net.HttpURLConnection) new URL(url).openConnection();
+        try {
+            cn.setConnectTimeout(8000);
+            cn.setReadTimeout(12000);
+            cn.setRequestProperty("Accept", "application/vnd.github+json");
+            cn.setRequestProperty("User-Agent", "HZKnowledge-Android");
+            java.io.InputStream is = cn.getInputStream();
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] b = new byte[4096];
+            int n;
+            while ((n = is.read(b)) > 0) bos.write(b, 0, n);
+            is.close();
+            return new String(bos.toByteArray(), "UTF-8");
+        } finally {
+            cn.disconnect();
+        }
+    }
 
     // ================= 更新日志 =================
     private void buildChangelogScreen() {

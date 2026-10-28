@@ -27,4 +27,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "p_gas")
+    save(build(), "物理_12.2_实验定律")

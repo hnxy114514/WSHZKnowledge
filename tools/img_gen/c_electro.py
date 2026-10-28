@@ -30,4 +30,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "c_electro")
+    save(build(), "化学_6.2_电解")

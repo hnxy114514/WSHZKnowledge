@@ -29,4 +29,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "c_argue")
+    save(build(), "语文_4.1_结构")

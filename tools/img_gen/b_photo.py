@@ -34,4 +34,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "b_photo")
+    save(build(), "生物_3.2_光反应")

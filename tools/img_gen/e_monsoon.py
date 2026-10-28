@@ -30,4 +30,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "e_monsoon")
+    save(build(), "地理_3.2_成因分析")

@@ -31,4 +31,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "m_prob")
+    save(build(), "数学_13.1_古典概型")

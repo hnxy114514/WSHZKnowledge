@@ -39,4 +39,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "p_em")
+    save(build(), "物理_10.1_楞次定律")

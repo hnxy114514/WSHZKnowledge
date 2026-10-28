@@ -42,4 +42,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "b_dna")
+    save(build(), "生物_5.3_中心法则")

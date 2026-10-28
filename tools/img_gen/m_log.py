@@ -28,4 +28,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "m_log")
+    save(build(), "数学_4.2_对数函数")

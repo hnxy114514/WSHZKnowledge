@@ -33,4 +33,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "p_capacitor")
+    save(build(), "物理_7.2_电容器")

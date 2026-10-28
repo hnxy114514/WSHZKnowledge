@@ -37,4 +37,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "e_plate")
+    save(build(), "地理_4.2_内力作用")

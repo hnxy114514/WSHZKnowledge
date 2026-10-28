@@ -28,4 +28,4 @@ def build():
 
 
 if __name__ == "__main__":
-    save(build(), "p_wave")
+    save(build(), "物理_13.2_波的图象")
