@@ -21,3 +21,6 @@ release.keystore
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# 构建副产品（数据包备份，仅本地保留）
+/cloud/update.json

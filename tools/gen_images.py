@@ -1294,11 +1294,11 @@ def m_deriv2():
 
 
 # ===================== 执行 =====================
-JOBS = [m_quad, m_trig, m_exp, m_log, m_deriv, m_unit, m_ellipse, m_hyper, m_parabola, m_solid, m_normal,
+JOBS = [m_quad, m_trig, m_exp, m_log, m_deriv, m_unit, m_hyper, m_parabola, m_solid, m_normal,
         m_seq, m_prob, m_vector, m_deriv2,
         p_vt, p_slope, p_projectile, p_circular, p_efield, p_circuit, p_lorentz, p_refract, p_wave, p_transformer, p_gas,
         p_equilibrium, p_momentum, p_interference, p_em, p_ac, p_capacitor,
-        c_atom, c_table, c_bond, c_cell, c_electro, c_ethanol, c_equil, c_titration, c_mole,
+        c_table, c_bond, c_cell, c_electro, c_ethanol, c_titration, c_mole,
         b_cell, b_photo, b_resp, b_dna, b_meiosis, b_reflex, b_ecosys,
         g_curve, h_timeline, h_modern, h_war,
         e_contour, e_globe, e_pressure, e_water, e_plate, e_monsoon,

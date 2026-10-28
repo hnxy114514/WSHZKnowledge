@@ -161,6 +161,7 @@ public class MainActivity extends Activity {
     private AlertDialog codeDialog;
     private boolean pendingInstall = false;
     private volatile boolean downloadCancel = false;
+    private boolean foreground = false;
     private String lastPath = "";
     private boolean subjectDirty = true;
     private String lastQuery = null;
@@ -398,13 +399,19 @@ public class MainActivity extends Activity {
                                         runOnUiThread(new Runnable() {
                                             public void run() {
                                                 progressHide();
+                                                pendingInstall = true;
                                                 if (Build.VERSION.SDK_INT >= 26
                                                         && !getPackageManager().canRequestPackageInstalls()) {
-                                                    pendingInstall = true;
                                                     requestInstallPermission();
                                                     toast("开启「允许安装未知应用」后会自动继续安装");
                                                     return;
                                                 }
+                                                if (!foreground) {
+                                                    // 应用不在前台时系统会静默拦截启动安装器，等回来后自动弹
+                                                    toast("更新已下载，回到应用后自动安装");
+                                                    return;
+                                                }
+                                                pendingInstall = false;
                                                 installApk();
                                             }
                                         });
@@ -747,11 +754,18 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        foreground = true;
         if (pendingInstall && Build.VERSION.SDK_INT >= 26
                 && getPackageManager().canRequestPackageInstalls()) {
             pendingInstall = false;
             installApk();
         }
+    }
+
+    @Override
+    protected void onPause() {
+        foreground = false;
+        super.onPause();
     }
 
     private void toast(final String msg) {
@@ -2956,6 +2970,7 @@ public class MainActivity extends Activity {
         profQr.setVisibility(View.GONE);
         profCodeBig.setVisibility(View.GONE);
         if (logged) {
+            if (profAvatar.getDrawable() == null) showAvatarPlaceholder();
             profLogin.setText(ghLogin == null ? "已登录" : "@" + ghLogin);
             profName.setText(prefs.getString("gh_name", ""));
             profStatusTxt.setText("已登录 GitHub，反馈会以这个账号提交");
@@ -3587,6 +3602,11 @@ public class MainActivity extends Activity {
         profStatusTxt.setTextColor(C_SUB);
         profStatusTxt.setGravity(Gravity.CENTER);
         profStatusTxt.setPadding(0, dp(6), 0, dp(6));
+        profStatusTxt.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (ghToken != null) loadProfileFromGitHub();
+            }
+        });
         profInner.addView(profStatusTxt, wrap());
 
         profQr = new ImageView(this);
@@ -3648,11 +3668,15 @@ public class MainActivity extends Activity {
     private void loadProfileFromGitHub() {
         if (ghToken == null) return;
         final String token = ghToken;
+        profStatusTxt.setTextColor(C_SUB);
+        profStatusTxt.setText("正在加载头像与昵称…");
+        if (profAvatar.getDrawable() == null) showAvatarPlaceholder();
         new Thread(new Runnable() {
             public void run() {
                 String login = ghLogin == null ? "" : ghLogin;
                 String name = prefs.getString("gh_name", "");
                 String avatar = prefs.getString("gh_avatar", "");
+                boolean netFail = false;
                 try {
                     JSONObject o = new JSONObject(httpGetAuthed("https://api.github.com/user"));
                     login = o.optString("login", login);
@@ -3660,23 +3684,48 @@ public class MainActivity extends Activity {
                     avatar = o.optString("avatar_url", "");
                     prefs.edit().putString("gh_login", login).putString("gh_name", name)
                             .putString("gh_avatar", avatar).apply();
-                } catch (Exception ignored) { }
+                } catch (Exception e) {
+                    netFail = true;
+                }
                 Bitmap bm = loadAvatarBitmap(avatar, login);
                 final Bitmap fb = bm;
                 final String fl = login;
                 final String fn = (name == null) ? "" : name;
+                final boolean fail = netFail;
                 runOnUiThread(new Runnable() {
                     public void run() {
-                        if (token.equals(ghToken)) {
-                            ghLogin = fl;
-                            if (fb != null) profAvatar.setImageBitmap(fb);
-                            profLogin.setText(fl.length() == 0 ? "已登录" : "@" + fl);
-                            profName.setText(fn);
+                        if (!token.equals(ghToken)) return;
+                        ghLogin = fl;
+                        if (fb != null) {
+                            profAvatar.setBackgroundDrawable(null);
+                            profAvatar.setImageBitmap(fb);
+                        } else {
+                            showAvatarPlaceholder();
+                        }
+                        profLogin.setText(fl.length() == 0 ? "已登录" : "@" + fl);
+                        profName.setText(fn.length() == 0 ? (fail ? "（昵称没加载出来）" : "") : fn);
+                        if (fail) {
+                            profStatusTxt.setTextColor(0xFFFFB74D);
+                            profStatusTxt.setText("网络不佳，头像和昵称没加载出来 · 点此重试");
+                        } else {
+                            profStatusTxt.setTextColor(C_SUB);
+                            profStatusTxt.setText("已登录 GitHub，反馈会以这个账号提交");
                         }
                     }
                 });
             }
         }).start();
+    }
+
+    /** 头像占位：灰色圆，表示这里本该有头像。 */
+    private void showAvatarPlaceholder() {
+        if (profAvatar == null) return;
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.OVAL);
+        g.setColor(0xFF262626);
+        profAvatar.setBackgroundDrawable(g);
+        profAvatar.setImageDrawable(null);
+        profAvatar.setVisibility(View.VISIBLE);
     }
 
     private Bitmap loadAvatarBitmap(String url, String login) {
