@@ -124,7 +124,7 @@ public class MainActivity extends Activity {
 
     // ---------- 导航 ----------
     private static final int S_SUBJECT = 0, S_BLOCK = 1, S_CHILD = 2, S_ITEM = 3, S_DETAIL = 4, S_SETTINGS = 5,
-            S_SEARCH = 6, S_FEEDBACK = 7, S_MYFEEDBACK = 8, S_PROFILE = 9;
+            S_SEARCH = 6, S_FEEDBACK = 7, S_MYFEEDBACK = 8, S_PROFILE = 9, S_CHANGELOG = 10;
     private int screen = S_SUBJECT;
     private Subject curSubject;
     private Block curBlock;
@@ -159,16 +159,26 @@ public class MainActivity extends Activity {
     private String ghToken, ghLogin;
     private String fbCode, fbCodeUrl;
     private AlertDialog codeDialog;
+    private AlertDialog updateDialog;
+    private String pendingUrl, pendingTag;
+    private boolean pendingDownload = false;
     private boolean pendingInstall = false;
     private volatile boolean downloadCancel = false;
     private boolean foreground = false;
     private String lastPath = "";
     private boolean subjectDirty = true;
     private String lastQuery = null;
-    private final int[] savedPos = new int[10];
-    private final int[] savedTop = new int[10];
-    private final boolean[] hasSaved = new boolean[10];
-    private final boolean[] restoreNext = new boolean[10];
+    private final int[] savedPos = new int[11];
+    private final int[] savedTop = new int[11];
+    private final boolean[] hasSaved = new boolean[11];
+    private final boolean[] restoreNext = new boolean[11];
+
+    // 更新日志
+    private LinearLayout changelogScreen, changelogInner, changelogList;
+    private ScrollView changelogScroll;
+    private TextView changelogSub;
+    private int changelogBack = S_SETTINGS;
+    private boolean changelogFilled = false;
 
     // 我的反馈记录
     private LinearLayout mineScreen;
@@ -360,7 +370,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 检查 GitHub Release 最新版，有新版则先申请安装权限，再下载 APK 覆盖安装。 */
+    /** 检查 GitHub Release 最新版：有新版先展示更新说明，确认后再下载覆盖安装。 */
     private void checkUpdate(final boolean silent) {
         downloadCancel = false;
         if (!silent) progressShow("正在检查更新…", "连接更新服务器", -1);
@@ -376,56 +386,11 @@ public class MainActivity extends Activity {
                         return;
                     }
                     final String url = rel.apkUrl;
+                    final String notes = rel.notes;
                     runOnUiThread(new Runnable() {
                         public void run() {
-                            if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
-                                progressHide();
-                                requestInstallPermission();
-                                return;
-                            }
-                            new Thread(new Runnable() {
-                                public void run() {
-                                    try {
-                                        if (!reuseDownloaded(remoteTag)) {
-                                            downloadApkWithMirrors(url, remoteTag);
-                                        }
-                                        if (downloadCancel) {
-                                            downloadCancel = false;
-                                            progressHide();
-                                            toast("已取消更新");
-                                            return;
-                                        }
-                                        progressShow("下载完成", "正在打开安装程序…", 100);
-                                        runOnUiThread(new Runnable() {
-                                            public void run() {
-                                                progressHide();
-                                                pendingInstall = true;
-                                                if (Build.VERSION.SDK_INT >= 26
-                                                        && !getPackageManager().canRequestPackageInstalls()) {
-                                                    requestInstallPermission();
-                                                    toast("开启「允许安装未知应用」后会自动继续安装");
-                                                    return;
-                                                }
-                                                if (!foreground) {
-                                                    // 应用不在前台时系统会静默拦截启动安装器，等回来后自动弹
-                                                    toast("更新已下载，回到应用后自动安装");
-                                                    return;
-                                                }
-                                                pendingInstall = false;
-                                                installApk();
-                                            }
-                                        });
-                                    } catch (final Exception e) {
-                                        progressHide();
-                                        if (downloadCancel) {
-                                            downloadCancel = false;
-                                            toast("已取消更新");
-                                        } else {
-                                            toast("下载失败：" + e.getMessage());
-                                        }
-                                    }
-                                }
-                            }).start();
+                            progressHide();
+                            showUpdateDialog(remoteTag, notes, url, silent);
                         }
                     });
                 } catch (final Exception e) {
@@ -436,9 +401,199 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    /** 更新说明弹窗：先看这次改了什么，再决定「立即更新」还是「稍后」。 */
+    private void showUpdateDialog(final String tag, final String notes, final String url, boolean silent) {
+        final String ver = tagWithV(tag);
+        // 选过「稍后」的版本，开机自动检查时不再打扰；手动检查仍然提示
+        if (silent && ver.equals(prefs.getString("skip_version", ""))) return;
+        dismissUpdateDialog();
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(13), dp(11), dp(13), dp(11));
+        box.setBackgroundDrawable(pill(C_CARD));
+
+        TextView t = new TextView(this);
+        t.setText("发现新版本 " + ver);
+        t.setTextSize(m.subtitleSize + 1f);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setTextColor(C_PRIMARY);
+        t.setGravity(Gravity.CENTER);
+        box.addView(t, wrap());
+
+        TextView cur = new TextView(this);
+        cur.setText("当前 v" + appVersion() + "（build " + appVersionCode() + "）");
+        cur.setTextSize(m.subtitleSize - 2f);
+        cur.setTextColor(C_SUB);
+        cur.setGravity(Gravity.CENTER);
+        cur.setPadding(0, dp(2), 0, dp(6));
+        box.addView(cur, wrap());
+
+        String desc = trimNotes(notes);
+        if (desc.length() == 0) desc = "这次没有单独写说明，安装后可在「设置 → 关于 → 更新日志」里查看全部记录。";
+
+        TextView head = new TextView(this);
+        head.setText("更新内容");
+        head.setTextSize(m.subtitleSize - 1.5f);
+        head.setTextColor(C_SUB);
+        head.setPadding(dp(2), 0, dp(2), dp(2));
+        box.addView(head, wrap());
+
+        ScrollView sc = new ScrollView(this);
+        sc.setVerticalScrollBarEnabled(false);
+        TextView body = new TextView(this);
+        body.setText(desc);
+        body.setTextSize(m.subtitleSize - 1f);
+        body.setTextColor(C_TEXT);
+        body.setLineSpacing(dp(2), 1.16f);
+        body.setPadding(dp(2), 0, dp(2), dp(1));
+        sc.addView(body);
+        int maxH = Math.min(dp(104), (int) (getResources().getDisplayMetrics().heightPixels * 0.30f));
+        box.addView(sc, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, maxH));
+
+        TextView go = new TextView(this);
+        go.setText("立即更新");
+        go.setTextSize(m.backSize);
+        go.setTypeface(Typeface.DEFAULT_BOLD);
+        go.setTextColor(C_PRIMARY);
+        go.setGravity(Gravity.CENTER);
+        go.setPadding(dp(8), dp(10), dp(8), dp(10));
+        go.setBackgroundDrawable(pill(0xFF14384A));
+        go.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                dismissUpdateDialog();
+                prefs.edit().remove("skip_version").apply();
+                startUpdate(url, tag);
+            }
+        });
+        LinearLayout.LayoutParams glp = wrap();
+        glp.topMargin = dp(9);
+        box.addView(go, glp);
+
+        TextView later = new TextView(this);
+        later.setText("稍后");
+        later.setTextSize(m.subtitleSize - 1f);
+        later.setTextColor(C_SUB);
+        later.setGravity(Gravity.CENTER);
+        later.setPadding(dp(8), dp(8), dp(8), dp(2));
+        later.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                dismissUpdateDialog();
+                prefs.edit().putString("skip_version", ver).apply();
+            }
+        });
+        box.addView(later, wrap());
+
+        TextView more = new TextView(this);
+        more.setText("查看历次更新日志");
+        more.setTextSize(m.subtitleSize - 2.5f);
+        more.setTextColor(C_PRIMARY);
+        more.setGravity(Gravity.CENTER);
+        more.setPadding(dp(8), dp(2), dp(8), 0);
+        more.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                dismissUpdateDialog();
+                changelogBack = (screen == S_CHANGELOG) ? S_SETTINGS : screen;
+                showScreen(S_CHANGELOG);
+            }
+        });
+        box.addView(more, wrap());
+
+        updateDialog = new AlertDialog.Builder(this).setView(box).create();
+        updateDialog.setCancelable(true);
+        updateDialog.show();
+        try {
+            Window w = updateDialog.getWindow();
+            int sw = getResources().getDisplayMetrics().widthPixels;
+            w.setLayout((int) (sw * (m.round ? 0.74f : 0.86f)), WindowManager.LayoutParams.WRAP_CONTENT);
+            w.setBackgroundDrawable(new ColorDrawable(0x00000000));
+        } catch (Exception ignored) { }
+    }
+
+    private void dismissUpdateDialog() {
+        try {
+            if (updateDialog != null && updateDialog.isShowing()) updateDialog.dismiss();
+        } catch (Exception ignored) { }
+        updateDialog = null;
+    }
+
+    /** Release 说明太长，整理成小屏能读的纯文本（去空行、去 Markdown 记号）。 */
+    private String trimNotes(String s) {
+        if (s == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (String raw : s.replace("\r\n", "\n").split("\n")) {
+            String l = raw.trim();
+            if (l.length() == 0) continue;
+            if (l.startsWith("#")) l = l.replace("#", "").trim();
+            if (l.startsWith("- ") || l.startsWith("* ") || l.startsWith("• ")) l = "· " + l.substring(2).trim();
+            int cut = l.indexOf(" - ");
+            if (cut > 0 && cut < 12 && l.charAt(0) == 'v') l = l.substring(cut + 3).trim();
+            if (l.length() == 0) continue;
+            if (sb.length() > 0) sb.append('\n');
+            sb.append(l);
+            if (sb.length() > 460) { sb.append("\n…"); break; }
+        }
+        return sb.toString();
+    }
+
+    /** 用户确认更新后：权限不足先去申请，回来接着下载；然后下载并唤起安装器。 */
+    private void startUpdate(final String url, final String tag) {
+        if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+            pendingUrl = url;
+            pendingTag = tag;
+            pendingDownload = true;
+            requestInstallPermission();
+            return;
+        }
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    if (!reuseDownloaded(tag)) {
+                        downloadApkWithMirrors(url, tag);
+                    }
+                    if (downloadCancel) {
+                        downloadCancel = false;
+                        progressHide();
+                        toast("已取消更新");
+                        return;
+                    }
+                    progressShow("下载完成", "正在打开安装程序…", 100);
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            progressHide();
+                            pendingInstall = true;
+                            if (Build.VERSION.SDK_INT >= 26
+                                    && !getPackageManager().canRequestPackageInstalls()) {
+                                requestInstallPermission();
+                                toast("开启「允许安装未知应用」后会自动继续安装");
+                                return;
+                            }
+                            if (!foreground) {
+                                // 应用不在前台时系统会静默拦截启动安装器，等回来后自动弹
+                                toast("更新已下载，回到应用后自动安装");
+                                return;
+                            }
+                            pendingInstall = false;
+                            installApk();
+                        }
+                    });
+                } catch (final Exception e) {
+                    progressHide();
+                    if (downloadCancel) {
+                        downloadCancel = false;
+                        toast("已取消更新");
+                    } else {
+                        toast("下载失败：" + e.getMessage());
+                    }
+                }
+            }
+        }).start();
+    }
+
     private static class RelInfo {
         String tag;
         String apkUrl;
+        String notes;
     }
 
     /** 先走 API；API 全不通时改用仓库里的静态 version.json（静态文件更容易代理）。 */
@@ -447,6 +602,7 @@ public class MainActivity extends Activity {
         try {
             JSONObject obj = fetchLatestRelease();
             r.tag = obj.optString("tag_name", "");
+            r.notes = obj.optString("body", "");
             JSONArray assets = obj.optJSONArray("assets");
             if (assets != null) {
                 for (int i = 0; i < assets.length(); i++) {
@@ -528,7 +684,7 @@ public class MainActivity extends Activity {
         try {
             startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                     Uri.parse("package:" + getPackageName())));
-            toast("请开启「允许安装未知应用」，再回来点一次检查更新");
+            toast("请开启「允许安装未知应用」，回到应用后会自动继续");
         } catch (Exception e) {
             toast("请在系统设置中开启安装未知应用权限");
         }
@@ -755,6 +911,13 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         foreground = true;
+        if (pendingDownload && Build.VERSION.SDK_INT >= 26
+                && getPackageManager().canRequestPackageInstalls()) {
+            // 刚授权完「安装未知应用」，回来接着下载，不用再点一次检查更新
+            pendingDownload = false;
+            startUpdate(pendingUrl, pendingTag);
+            return;
+        }
         if (pendingInstall && Build.VERSION.SDK_INT >= 26
                 && getPackageManager().canRequestPackageInstalls()) {
             pendingInstall = false;
@@ -844,6 +1007,10 @@ public class MainActivity extends Activity {
         profileScreen = newScreen();
         buildProfileScreen();
         root.addView(profileScreen, fp());
+
+        changelogScreen = newScreen();
+        buildChangelogScreen();
+        root.addView(changelogScreen, fp());
 
         // 主页
         subjectList = makeList();
@@ -2309,12 +2476,36 @@ public class MainActivity extends Activity {
         String verName = appVersion();
         int verCode = appVersionCode();
         about.setText("腕上知识汇总 v" + verName + "（build " + verCode + "）"
+                + "\n作者：@hnxy114514"
                 + "\n屏幕：" + (m.round ? "圆形（已启用圆形安全区）" : "方形")
                 + "\n知识点 " + itemCount + " 条 · 配图 " + imgCount + " 张");
         about.setTextSize(m.subtitleSize - 1f);
         about.setTextColor(C_SUB);
         about.setPadding(dp(4), dp(4), dp(4), dp(4));
         settingsInner.addView(about, wrap());
+
+        TextView logBtn = new TextView(this);
+        logBtn.setText("更新日志");
+        logBtn.setTextSize(m.backSize);
+        logBtn.setTextColor(C_PRIMARY);
+        logBtn.setGravity(Gravity.CENTER);
+        logBtn.setPadding(dp(10), dp(10), dp(10), dp(10));
+        logBtn.setBackgroundDrawable(pill(C_PILL));
+        logBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                changelogBack = S_SETTINGS;
+                showScreen(S_CHANGELOG);
+            }
+        });
+        LinearLayout.LayoutParams logLp = wrap();
+        logLp.topMargin = dp(8);
+        settingsInner.addView(logBtn, logLp);
+        TextView logHint = new TextView(this);
+        logHint.setText("每次更新改了什么，按版本倒序都记在这里。");
+        logHint.setTextSize(m.subtitleSize - 2f);
+        logHint.setTextColor(C_SUB);
+        logHint.setPadding(dp(4), dp(3), dp(4), dp(2));
+        settingsInner.addView(logHint, wrap());
 
         TextView reset = new TextView(this);
         reset.setText("恢复默认设置");
@@ -2509,7 +2700,7 @@ public class MainActivity extends Activity {
         }
         screen = s;
         View[] screens = {subjectScreen, blockScreen, childScreen, listScreen, detailScreen, settingsScreen,
-                searchScreen, feedbackScreen, mineScreen, profileScreen};
+                searchScreen, feedbackScreen, mineScreen, profileScreen, changelogScreen};
         View target = screens[s];
         boolean shown = target.getVisibility() == View.VISIBLE && target.getAlpha() > 0.95f
                 && Math.abs(target.getTranslationX()) < dp(4);
@@ -2557,6 +2748,8 @@ public class MainActivity extends Activity {
         } else if (s == S_PROFILE) {
             updateProfileUi();
             if (ghToken != null) loadProfileFromGitHub();
+        } else if (s == S_CHANGELOG) {
+            if (!changelogFilled) fillChangelog();
         }
 
         // 只有刚重建过列表数据的页面才需要把位置摆回去；其余页面由 ListView 自己保留，
@@ -2585,6 +2778,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         dismissCodeDialog();
+        dismissUpdateDialog();
         super.onDestroy();
     }
 
@@ -2613,6 +2807,7 @@ public class MainActivity extends Activity {
         if (screen == S_FEEDBACK) return S_SETTINGS;
         if (screen == S_MYFEEDBACK) return S_FEEDBACK;
         if (screen == S_PROFILE) return S_SETTINGS;
+        if (screen == S_CHANGELOG) return changelogBack == S_CHANGELOG ? S_SETTINGS : changelogBack;
         return -1;
     }
 
@@ -2625,6 +2820,7 @@ public class MainActivity extends Activity {
             case S_DETAIL: return detailScreen;
             case S_SETTINGS: return settingsScreen;
             case S_SEARCH: return searchScreen;
+            case S_CHANGELOG: return changelogScreen;
             default: return null;
         }
     }
@@ -2720,6 +2916,7 @@ public class MainActivity extends Activity {
             case S_FEEDBACK: return feedbackScreen;
             case S_MYFEEDBACK: return mineScreen;
             case S_PROFILE: return profileScreen;
+            case S_CHANGELOG: return changelogScreen;
             default: return subjectScreen;
         }
     }
@@ -2802,6 +2999,113 @@ public class MainActivity extends Activity {
     private static final String GH_ISSUES = "https://api.github.com/repos/" + REPO + "/issues";
 
     private boolean loginRunning = false;
+
+    // ================= 更新日志 =================
+    private void buildChangelogScreen() {
+        changelogScroll = new ScrollView(this);
+        changelogScroll.setVerticalScrollBarEnabled(false);
+        changelogInner = new LinearLayout(this);
+        changelogInner.setOrientation(LinearLayout.VERTICAL);
+        changelogScroll.addView(changelogInner);
+        changelogScreen.addView(changelogScroll, lw());
+
+        changelogInner.addView(makeBack("‹ 返回", new View.OnClickListener() {
+            public void onClick(View v) { showScreen(backTarget()); }
+        }), wrapM());
+
+        TextView title = new TextView(this);
+        title.setText("更新日志");
+        title.setTextSize(m.titleSize);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(C_PRIMARY);
+        title.setGravity(Gravity.CENTER);
+        changelogInner.addView(title, wrap());
+
+        changelogSub = new TextView(this);
+        changelogSub.setTextSize(m.subtitleSize - 1f);
+        changelogSub.setTextColor(C_SUB);
+        changelogSub.setGravity(Gravity.CENTER);
+        changelogSub.setPadding(dp(4), dp(2), dp(4), dp(8));
+        changelogInner.addView(changelogSub, wrap());
+
+        changelogList = new LinearLayout(this);
+        changelogList.setOrientation(LinearLayout.VERTICAL);
+        changelogInner.addView(changelogList, wrap());
+    }
+
+    /** 读取 assets/changelog.json，按版本倒序渲染；当前版本高亮。 */
+    private void fillChangelog() {
+        changelogFilled = true;
+        changelogList.removeAllViews();
+        String cur = appVersion();
+        JSONArray arr = null;
+        try {
+            arr = readJsonAsset("changelog.json").optJSONArray("log");
+        } catch (Exception ignored) { }
+        if (arr == null || arr.length() == 0) {
+            changelogSub.setText("当前版本 v" + cur);
+            TextView empty = new TextView(this);
+            empty.setText("暂无更新记录");
+            empty.setTextSize(m.subtitleSize);
+            empty.setTextColor(C_SUB);
+            empty.setGravity(Gravity.CENTER);
+            empty.setPadding(dp(4), dp(12), dp(4), dp(12));
+            changelogList.addView(empty, wrap());
+            return;
+        }
+        changelogSub.setText("当前 v" + cur + " · 共记录 " + arr.length() + " 个版本");
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject o = arr.optJSONObject(i);
+            if (o == null) continue;
+            String v = o.optString("v", "");
+            String d = o.optString("d", "");
+            boolean isCur = v.equals(cur);
+
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setPadding(dp(10), dp(8), dp(10), dp(9));
+            card.setBackgroundDrawable(pill(isCur ? 0xFF14384A : C_CARD));
+
+            LinearLayout head = new LinearLayout(this);
+            head.setOrientation(LinearLayout.HORIZONTAL);
+            head.setGravity(Gravity.CENTER_VERTICAL);
+
+            TextView ver = new TextView(this);
+            ver.setText("v" + v);
+            ver.setTextSize(m.subtitleSize + 0.5f);
+            ver.setTypeface(Typeface.DEFAULT_BOLD);
+            ver.setTextColor(isCur ? C_PRIMARY : C_TEXT);
+            head.addView(ver, new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+            TextView date = new TextView(this);
+            date.setText(isCur ? ("当前 · " + d) : d);
+            date.setTextSize(m.subtitleSize - 2f);
+            date.setTextColor(C_SUB);
+            head.addView(date, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            card.addView(head, wrap());
+
+            JSONArray items = o.optJSONArray("items");
+            if (items != null) {
+                for (int j = 0; j < items.length(); j++) {
+                    String line = items.optString(j, "");
+                    if (line.length() == 0) continue;
+                    TextView item = new TextView(this);
+                    item.setText("· " + line);
+                    item.setTextSize(m.subtitleSize - 1f);
+                    item.setTextColor(C_TEXT);
+                    item.setLineSpacing(dp(2), 1.18f);
+                    item.setPadding(dp(2), dp(4), dp(2), 0);
+                    card.addView(item, wrap());
+                }
+            }
+
+            LinearLayout.LayoutParams clp = wrap();
+            clp.bottomMargin = dp(6);
+            changelogList.addView(card, clp);
+        }
+    }
 
     private void buildFeedbackScreen() {
         feedbackScroll = new ScrollView(this);

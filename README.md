@@ -158,6 +158,18 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
 - 下载源顺序（`MainActivity.MIRRORS`，前缀 + 原地址）：直连 → gh-proxy.com → ghproxy.net → ghfast.top → gh.llkk.cc → github.moeyy.xyz。任一源 15 秒内拿不到 150KB 即判定「太慢」自动切换下一个。
 - 屏幕中央有进度卡片，实时显示百分比、已下载/总大小、当前下载源；卡片不拦截点击，可边下边用；卡片底部有「取消」，点后立即中断下载并清理临时文件。
 - 同一版本下载过一次即复用本地 `filesDir/update.apk`（`apk_tag` 记录版本），不重复下载。
+- 发现新版本先弹「更新说明」弹窗：标题给出版本号，中间是可滚动的更新内容（来自 Release 正文，`trimNotes()` 去掉 Markdown 记号并截到 460 字），下方三个入口：「立即更新」「稍后」「查看历次更新日志」。
+- 点「稍后」会把版本号记进 `skip_version`：之后开机自动检查不再打扰同一版本，手动点「检查更新」仍会提示。
+- 点「立即更新」时如果还没有「安装未知应用」权限，先去授权；`onResume` 检测到权限已给就自动接着下载（`pendingDownload`），不用再点一次检查更新。
+
+---
+
+## 更新日志（App 内）
+
+- 数据源：`app/src/main/assets/changelog.json`（随 APK 打包，离线可看），结构 `{"version":1,"log":[{"v":"1.11.2","d":"10-28","items":["…"]}]}`，按版本倒序排列。
+- 入口：设置 → 关于 → 「更新日志」；当前版本那一栏用高亮底色并标注「当前」。
+- **发版纪律**：每次出包前先在 `changelog.json` 的 `log` 数组**最前面**插入本版条目（版本号与 `versionName` 一致），否则新版本在更新日志里查不到。只写用户能感知的变化，一条一句话，不写内部实现。
+- Release 正文（`release.py` 的参数）与 changelog 条目分开维护：前者给「更新说明弹窗」用，后者给「更新日志」用；两边说法要一致。
 
 ---
 
@@ -171,20 +183,6 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
 - 提交：`POST /repos/<repo>/issues`，正文自动附带版本号、机型、Android 版本、圆/方屏、最近浏览的知识点路径。
 - 「我的反馈记录」：拉取 `issues?creator=<自己>&state=all`，列表显示状态与日期，点开看正文 + 最新回复。
 - 状态约定（靠 label 与 state）：有 `已修复` 标签 → 已修复；issue 已关闭 → 已处理；有 `处理中` 标签 → 处理中；否则 待处理。处理一条反馈时：先打 `处理中`，修完补评论 + 打 `已修复` + 关闭。
-- 「我的反馈记录」：拉取 `issues?creator=<自己>&state=all`，列表显示状态与日期，点开看正文 + 最新回复。
-- 状态约定（靠 label 与 state）：有 `已修复` 标签 → 已修复；issue 已关闭 → 已处理；有 `处理中` 标签 → 处理中；否则 待处理。处理一条反馈时：先打 `处理中`，修完补评论 + 打 `已修复` + 关闭。
-- OAuth App 的两条硬要求：必须勾选 **Enable Device Flow**；**不要**勾 Expire user access tokens（勾了 8 小时过期，续期需要 client_secret，而 secret 不能放进公开 APK）。
-
----
-
-## 反馈功能（App 内提交 Issue）
-
-- 入口：设置 → 数据管理 → 反馈与建议。
-- 登录用 GitHub Device Flow：`MainActivity.GH_CLIENT_ID` 硬编码 OAuth App 的 client_id，scope 为 `public_repo`。
-- 流程：点登录 → 取 8 位授权码 → 自动复制到剪贴板并弹原生对话框 → 反馈页显示固定网址二维码（`assets/qr_login.png`，内容 `https://github.com/login/device`）+ 大号授权码，手机扫码后输码授权（手表浏览器支持不佳，作为备选按钮）→ 手表每 5 秒轮询 → 成功后 token 存 SharedPreferences（`gh_token` / `gh_login`）。
-- 二维码是静态图片，不含授权码：授权码每次不同，静态图只承载固定网址，用户扫完照表上的码输入。
-- 提交：`POST /repos/<repo>/issues`，正文自动附带版本号、机型、Android 版本、圆/方屏、最近浏览的知识点路径。
-- OAuth App 的两条硬要求：必须勾选 **Enable Device Flow**；**不要**勾 Expire user access tokens（勾了 8 小时过期，续期需要 client_secret，而 secret 不能放进公开 APK）。
 
 ---
 
