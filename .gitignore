@@ -28,3 +28,6 @@ Thumbs.db
 # Python 缓存（含子目录）
 **/__pycache__/
 *.pyc
+
+# 发布凭据（GitHub token / 签名密码，本地复用，绝不入库）
+.publish_env
