@@ -29,12 +29,30 @@ python build_authored.py
 
 echo "== 2. 清理 =="
 python - "$BUILD" "$OUT" <<'PY'
-import os, shutil, sys
+import os, shutil, sys, time
 build, out = sys.argv[1], sys.argv[2]
 for d in ("gen", "obj", "dexout"):
     p = os.path.join(build, d)
     if os.path.isdir(p):
-        shutil.rmtree(p, ignore_errors=True)
+        # 旧产物移到 build/_old/<时间戳>/ 而不是直接删：
+        # 一是保留一次现场便于排查，二是避免一次批量删除上百个中间文件。
+        old_root = os.path.join(build, "_old")
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        dst = os.path.join(old_root, stamp + "-" + d)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        try:
+            os.rename(p, dst)
+        except OSError:
+            shutil.rmtree(p, ignore_errors=True)
+# 上一轮改名留下的归档只保留最近 3 份，免得 build 目录无限涨
+old_root = os.path.join(build, "_old")
+if os.path.isdir(old_root):
+    runs = sorted(os.listdir(old_root), reverse=True)[3:]
+    for r in runs:
+        try:
+            shutil.rmtree(os.path.join(old_root, r), ignore_errors=True)
+        except Exception:
+            pass          # 清不掉就留着，不影响构建
 for f in ("classes.dex", "classes.jar", "base.apk", "unsigned.apk", "aligned.apk", "res.zip"):
     p = os.path.join(build, f)
     if os.path.isfile(p):

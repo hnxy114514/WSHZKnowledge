@@ -686,7 +686,7 @@ def _is_unit_like(den, num):
 
 
 def _scan_left(s, pos):
-    i, dr, ds = pos - 1, 0, 0
+    i, dr, ds, db = pos - 1, 0, 0, 0
     while i >= 0:
         c = s[i]
         if c == ")":
@@ -701,7 +701,13 @@ def _scan_left(s, pos):
             if ds == 0:
                 break
             ds -= 1
-        elif dr == 0 and ds == 0 and c not in _ATOM:
+        elif c == "}":
+            db += 1
+        elif c == "{":
+            if db == 0:
+                break          # 外层组的左括号，不属于本次分子
+            db -= 1
+        elif dr == 0 and ds == 0 and db == 0 and c not in _ATOM:
             break
         i -= 1
     return i + 1
@@ -709,7 +715,7 @@ def _scan_left(s, pos):
 
 def _scan_right(s, pos):
     i, n = pos + 1, len(s)
-    dr = ds = 0
+    dr = ds = db = 0
     while i < n:
         c = s[i]
         if c == "(":
@@ -724,7 +730,13 @@ def _scan_right(s, pos):
             if ds == 0:
                 break
             ds -= 1
-        elif dr == 0 and ds == 0 and c not in _ATOM:
+        elif c == "{":
+            db += 1
+        elif c == "}":
+            if db == 0:
+                break          # 外层组的右括号，不属于本次分母
+            db -= 1
+        elif dr == 0 and ds == 0 and db == 0 and c not in _ATOM:
             break
         i += 1
     return i

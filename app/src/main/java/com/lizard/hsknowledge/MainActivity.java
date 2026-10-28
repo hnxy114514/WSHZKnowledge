@@ -105,8 +105,6 @@ public class MainActivity extends Activity {
     private static final String[] API_MIRRORS = {
             "https://gh-proxy.com/",
     };
-    /** API 只试直连 + 前几个镜像，避免逐个超时干等。 */
-    private static final int API_TRIES = 3;
     private static final String VERSION_JSON_RAW =
             "https://raw.githubusercontent.com/" + REPO + "/main/cloud/version.json";
     private static final String APK_FILE = "update.apk";
@@ -195,7 +193,8 @@ public class MainActivity extends Activity {
     private final List<Hit> todayShown = new ArrayList<Hit>();
     private String todayBuiltFor = "";
     private ScrollView aboutScroll;
-    private TextView aboutInfo, thanksState;
+    private TextView aboutInfo, thanksState, thanksLoadTxt;
+    private TextView routeHint;
     private boolean thanksLoaded = false, thanksLoadingBusy = false;
     private final Map<String, Bitmap> avatarCache = new HashMap<String, Bitmap>();
 
@@ -211,6 +210,9 @@ public class MainActivity extends Activity {
     private ListView mineList;
     private TextView mineHeader;
     private boolean mineAllMode = false;   // true=查看仓库全部反馈（仅项目所有者）
+    private boolean mineDirty = false;     // 反馈被编辑/撤回/删除过，回到列表要重新拉取
+    private AlertDialog editIssueDlg;
+    private JSONObject curIssue;           // 当前打开的反馈，编辑/撤回/删除用
     private final List<JSONObject> mineIssues = new ArrayList<JSONObject>();
     private final List<String[]> mineRows = new ArrayList<String[]>();
     private FrameLayout progBox;
@@ -260,14 +262,22 @@ public class MainActivity extends Activity {
                 sidePad = dp(14); topPad = dp(14); bottomPad = dp(14);
                 roundSafe = 0;
             }
-            // 字号：优先用「显示调节」里的值，未设置时按屏型取默认
-            titleSize = titleSizeSp > 0 ? titleSizeSp : (round ? 15f : 17f);
-            subtitleSize = subSizeSp > 0 ? subSizeSp : (round ? 11f : 12f);
-            backSize = Math.max(9f, listSizeSp - 2f);
+            // 字号：优先用「显示调节」里的值，未设置时按屏型取默认。
+            // 整体缩放必须乘进字号，否则只有间距和图标变大，字还是原样，看着就像没生效。
+            float k = uiScale;
+            titleSize = (titleSizeSp > 0 ? titleSizeSp : (round ? 15f : 17f)) * k;
+            subtitleSize = (subSizeSp > 0 ? subSizeSp : (round ? 11f : 12f)) * k;
+            backSize = Math.max(9f, listSizeSp - 2f) * k;
             secTagSize = Math.max(8f, subtitleSize - 1f);
         }
     }
     private Metrics m;
+
+    /** 正文字号（含整体缩放）。 */
+    private float fsSp() { return fontSizeSp * uiScale; }
+
+    /** 列表字号（含整体缩放）。 */
+    private float lsSp() { return listSizeSp * uiScale; }
 
     private int dp(float v) {
         float px = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v,
@@ -298,6 +308,8 @@ public class MainActivity extends Activity {
         } else {
             showScreen(S_SUBJECT);
         }
+        // 后台探测最优通道（直连 / 镜像），探测结果给所有联网页面共用
+        startRouteProbe();
         checkUpdate(true);
     }
 
@@ -462,8 +474,8 @@ public class MainActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(13), dp(11), dp(13), dp(11));
         box.setBackgroundDrawable(pill(C_CARD));
-        // 整块内容用软件层渲染：滚动时标题等文字才不会随兄弟 ScrollView 重绘而闪烁
-        box.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+        // 这里不能再给整块开软件层：层里的内容不会跟着内层 ScrollView 的滚动及时重画，
+        // 滑起来就会留下上一帧的文字（残影）。改成滚动时整块重绘，见下面 sc 的监听。
 
         TextView t = new TextView(this);
         t.setText("发现新版本 " + ver);
@@ -486,6 +498,7 @@ public class MainActivity extends Activity {
 
         TextView head = new TextView(this);
         head.setText("更新内容");
+        head.setGravity(Gravity.CENTER);
         head.setTextSize(m.subtitleSize - 1.5f);
         head.setTextColor(C_SUB);
         head.setPadding(dp(2), 0, dp(2), dp(2));
@@ -494,6 +507,8 @@ public class MainActivity extends Activity {
         ScrollView sc = new ScrollView(this);
         sc.setVerticalScrollBarEnabled(false);
         sc.setBackgroundColor(C_CARD);
+        sc.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        sc.setFadingEdgeLength(0);
         TextView body = new TextView(this);
         body.setText(desc);
         body.setTextSize(m.subtitleSize - 1f);
@@ -503,6 +518,15 @@ public class MainActivity extends Activity {
         sc.addView(body);
         int maxH = Math.min(dp(104), (int) (getResources().getDisplayMetrics().heightPixels * 0.30f));
         box.addView(sc, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, maxH));
+
+        // 窗口背景是透明的，滚动时系统可能只重画脏区，上一帧的字会留在原地形成残影；
+        // 每滚一点就整块重绘一次，卡片区域每帧都完整刷新。
+        sc.getViewTreeObserver().addOnScrollChangedListener(
+                new android.view.ViewTreeObserver.OnScrollChangedListener() {
+                    public void onScrollChanged() {
+                        box.invalidate();
+                    }
+                });
 
         TextView go = new TextView(this);
         go.setText("立即更新");
@@ -557,13 +581,20 @@ public class MainActivity extends Activity {
 
         updateDialog = new AlertDialog.Builder(this).setView(box).create();
         updateDialog.setCancelable(true);
+        try {
+            // 窗口背景透明：弹窗以外完全不遮内容。像素格式要显式声明成带透明的，
+            // 否则合成器按不透明窗口处理，滚动时容易留下上一帧。
+            Window w0 = updateDialog.getWindow();
+            if (w0 != null) {
+                w0.setFormat(android.graphics.PixelFormat.TRANSLUCENT);
+                w0.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            }
+        } catch (Exception ignored) { }
         updateDialog.show();
         try {
             Window w = updateDialog.getWindow();
             int sw = getResources().getDisplayMetrics().widthPixels;
             w.setLayout((int) (sw * (m.round ? 0.74f : 0.86f)), WindowManager.LayoutParams.WRAP_CONTENT);
-            // 窗口背景透明：弹窗以外的区域保持透明，只显示卡片本身；box 已设为软件层整体渲染，滚动时整块重绘，不会闪烁
-            w.setBackgroundDrawable(new ColorDrawable(0x00000000));
         } catch (Exception ignored) { }
     }
 
@@ -605,8 +636,27 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             public void run() {
                 try {
-                    if (!reuseDownloaded(tag)) {
-                        downloadApkWithMirrors(url, tag);
+                    // 从弹窗到点下载之间可能又发了新版，动手前再确认一次，别下到上一个版本
+                    String useTag = tag, useUrl = url;
+                    progressShow("正在确认最新版本…", "连接更新服务器", -1);
+                    final String[] got = new String[2];
+                    Thread probe = new Thread(new Runnable() {
+                        public void run() {
+                            try {
+                                RelInfo rel = fetchReleaseInfo();
+                                got[0] = rel.tag;
+                                got[1] = rel.apkUrl;
+                            } catch (Exception ignored) { }
+                        }
+                    });
+                    probe.start();
+                    try { probe.join(6000); } catch (Exception ignored) { }
+                    if (got[0] != null && got[0].length() > 0 && compareSemver(got[0], useTag) > 0) {
+                        useTag = got[0];
+                        useUrl = got[1];
+                    }
+                    if (!reuseDownloaded(useTag)) {
+                        downloadApkWithMirrors(useUrl, useTag);
                     }
                     if (downloadCancel) {
                         downloadCancel = false;
@@ -653,28 +703,44 @@ public class MainActivity extends Activity {
         String notes;
     }
 
-    /** 先走 API；API 全不通时改用仓库里的静态 version.json（静态文件更容易代理）。 */
+    /** 先走 API；API 不通或给的还是旧版本时，用仓库里的静态 version.json 兜底/纠偏。 */
     private RelInfo fetchReleaseInfo() throws Exception {
         RelInfo r = new RelInfo();
+        String apiTag = "", apiUrl = "", apiNotes = "";
         try {
             JSONObject obj = fetchLatestRelease();
-            r.tag = obj.optString("tag_name", "");
-            r.notes = obj.optString("body", "");
+            apiTag = obj.optString("tag_name", "");
+            apiNotes = obj.optString("body", "");
             JSONArray assets = obj.optJSONArray("assets");
             if (assets != null) {
                 for (int i = 0; i < assets.length(); i++) {
                     JSONObject a = assets.getJSONObject(i);
-                    if (a.optString("name", "").endsWith(".apk")) {
-                        r.apkUrl = a.optString("browser_download_url", "");
+                    String n = a.optString("name", "");
+                    if (!n.endsWith(".apk")) continue;
+                    // 资源名必须对得上 tag，防止拿到上一个版本留下的旧包
+                    if (apiTag.length() == 0 || n.contains(apiTag)) {
+                        apiUrl = a.optString("browser_download_url", "");
                         break;
                     }
                 }
             }
-        } catch (Exception e) {
-            r.tag = fetchTagFallback();
-        }
-        if (r.tag == null || r.tag.length() == 0) throw new Exception("无法获取版本号");
-        if (r.apkUrl == null || r.apkUrl.length() == 0) r.apkUrl = apkUrlFor(r.tag);
+        } catch (Exception ignored) { }
+
+        // 镜像有缓存，API 有可能返回上一个版本；两边比一下，取更新的
+        String staticTag = "";
+        try { staticTag = fetchStaticTag(); } catch (Exception ignored) { }
+
+        String best = apiTag;
+        if (best.length() == 0) best = staticTag;
+        else if (staticTag.length() > 0 && compareSemver(staticTag, best) > 0) best = staticTag;
+        if (best == null || best.length() == 0) throw new Exception("无法获取版本号");
+
+        r.tag = best;
+        boolean apiWins = best.equals(apiTag);
+        r.notes = apiWins ? apiNotes : "";
+        // 只有 API 这条胜出、且下载地址确实属于这个 tag，才用 API 给的地址，其余一律按 tag 拼
+        r.apkUrl = (apiWins && apiUrl.length() > 0 && apiUrl.contains(best))
+                ? apiUrl : apkUrlFor(best);
         return r;
     }
 
@@ -691,10 +757,16 @@ public class MainActivity extends Activity {
     /** 直连失败时换支持 API 转发的镜像取 release 信息。 */
     private JSONObject fetchLatestRelease() throws Exception {
         Exception last = null;
+        // 必须带时间戳参数：镜像普遍缓存 /releases/latest，不带的话刚发版也会拿回上一个版本
+        String q = "?nocache=" + System.currentTimeMillis();
+        // 先走启动时测出来的最优通道，多数情况一步就中
+        try {
+            return new JSONObject(httpGetText(apiBase() + RELEASES_API + q, 5000, 6000));
+        } catch (Exception e) { last = e; }
         for (int i = 0; i <= API_MIRRORS.length; i++) {
             String u = (i == 0) ? RELEASES_API : API_MIRRORS[i - 1] + RELEASES_API;
             try {
-                return new JSONObject(httpGetText(u, 5000, 6000));
+                return new JSONObject(httpGetText(u + q, 5000, 6000));
             } catch (Exception e) {
                 last = e;
             }
@@ -702,19 +774,26 @@ public class MainActivity extends Activity {
         throw (last == null) ? new Exception("无法连接更新服务器") : last;
     }
 
-    private String fetchTagFallback() throws Exception {
+    /** 读仓库里的静态版本号（raw，镜像覆盖面最广）。既当兜底，也用来给 API 结果做交叉校验。 */
+    private String fetchStaticTag() throws Exception {
         Exception last = null;
-        int tries = Math.min(API_TRIES, MIRRORS.length);
-        for (int i = 0; i <= tries; i++) {
-            String u = (i == 0) ? VERSION_JSON_RAW : MIRRORS[i - 1] + VERSION_JSON_RAW;
+        String q = "?nocache=" + System.currentTimeMillis();
+        List<String> cands = new ArrayList<String>();
+        addNoDup(cands, rawBase());
+        addNoDup(cands, "");
+        for (int i = 0; i < Math.min(2, MIRRORS.length); i++) addNoDup(cands, MIRRORS[i]);
+        for (String base : cands) {
             try {
-                String v = new JSONObject(httpGetText(u, 5000, 6000)).optString("version", "");
+                String v = new JSONObject(httpGetText(base + VERSION_JSON_RAW + q, 4000, 5000))
+                        .optString("version", "");
                 if (v.length() > 0) return v.startsWith("v") ? v : "v" + v;
-            } catch (Exception e) {
-                last = e;
-            }
+            } catch (Exception e) { last = e; }
         }
         throw (last == null) ? new Exception("无法获取版本号") : last;
+    }
+
+    private void addNoDup(List<String> list, String v) {
+        if (v != null && !list.contains(v)) list.add(v);
     }
 
     private String httpGetText(String urlStr, int connectMs, int readMs) throws Exception {
@@ -735,6 +814,210 @@ public class MainActivity extends Activity {
         } finally {
             cn.disconnect();
         }
+    }
+
+    // ================= 启动时的通道探测 =================
+    /** 探测 api.github.com 用的轻量地址（无需鉴权、体积极小）。 */
+    private static final String PROBE_API = "https://api.github.com/zen";
+    private static final String ROUTE_API_KEY = "route_api";
+    private static final String ROUTE_RAW_KEY = "route_raw";
+    private static final String ROUTE_NONE = "none";
+
+    /** 探测出来的最优通道：null = 还没测出来 / 全不通，"" = 直连。 */
+    private static volatile String routeApi = null;
+    private static volatile String routeRaw = null;
+    private boolean routeProbing = false;
+
+    /** App 启动时后台跑一次：并发试直连与各镜像，挑最快能用的记下来。
+     *  不弹任何界面；只有真连上了才浮一个气泡说明走的是哪条路。 */
+    private void startRouteProbe() { startRouteProbe(false); }
+
+    /** @param manual 设置里手动点的：不沿用上次结果，重新挨个测一遍，且无论成败都给提示。 */
+    private void startRouteProbe(final boolean manual) {
+        if (manual) {
+            if (routeProbing) {
+                toast("正在检测，稍等");
+                return;
+            }
+            routeApi = null;
+            routeRaw = null;
+        } else {
+            // 先套用上次测出来的结果，保证首屏就有可用通道
+            routeApi = savedRoute(ROUTE_API_KEY);
+            routeRaw = savedRoute(ROUTE_RAW_KEY);
+        }
+        if (routeProbing) return;
+        routeProbing = true;
+        new Thread(new Runnable() {
+            public void run() {
+                // 两条通道同时探，别让启动等待翻倍
+                final java.util.concurrent.CountDownLatch done =
+                        new java.util.concurrent.CountDownLatch(2);
+                final String[] got = new String[2];
+                new Thread(new Runnable() {
+                    public void run() {
+                        got[0] = probeBest(apiPrefixes(), PROBE_API);
+                        done.countDown();
+                    }
+                }).start();
+                new Thread(new Runnable() {
+                    public void run() {
+                        got[1] = probeBest(rawPrefixes(), VERSION_JSON_RAW);
+                        done.countDown();
+                    }
+                }).start();
+                try {
+                    done.await(8, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (Exception ignored) { }
+                String api = got[0];
+                String raw = got[1];
+                if (api != null) {
+                    routeApi = api;
+                    prefs.edit().putString(ROUTE_API_KEY, api).apply();
+                } else {
+                    prefs.edit().putString(ROUTE_API_KEY, ROUTE_NONE).apply();
+                }
+                if (raw != null) {
+                    routeRaw = raw;
+                    prefs.edit().putString(ROUTE_RAW_KEY, raw).apply();
+                } else {
+                    prefs.edit().putString(ROUTE_RAW_KEY, ROUTE_NONE).apply();
+                }
+                routeProbing = false;
+                final String pick = (api != null) ? api : raw;
+                runOnUiThread(new Runnable() {
+                    public void run() { refreshRouteHint(); }
+                });
+                if (manual) {
+                    // 手动点的，成败都要有回话
+                    if (pick == null) showBubble("没连上服务器，稍后再试");
+                    else showBubble("已连接服务器 · " + routeName(pick));
+                    return;
+                }
+                if (pick == null) return;              // 全不通就别报喜
+                // 首启引导页不打扰；点「完成」后 recreate 会重跑一次，那时再补上
+                if (tuningFirstRun) return;
+                showBubble("已连接服务器 · " + routeName(pick));
+            }
+        }).start();
+    }
+
+    private String[] apiPrefixes() {
+        String[] out = new String[API_MIRRORS.length + 1];
+        out[0] = "";
+        for (int i = 0; i < API_MIRRORS.length; i++) out[i + 1] = API_MIRRORS[i];
+        return out;
+    }
+
+    private String[] rawPrefixes() {
+        String[] out = new String[MIRRORS.length + 1];
+        out[0] = "";
+        for (int i = 0; i < MIRRORS.length; i++) out[i + 1] = MIRRORS[i];
+        return out;
+    }
+
+    /** 并发探测所有候选，取「能用且最快」的那个前缀；全都连不上返回 null。 */
+    private String probeBest(String[] prefixes, String url) {
+        final Object lock = new Object();
+        final String[] best = {null};
+        final long[] bestCost = {Long.MAX_VALUE};
+        final java.util.concurrent.CountDownLatch left =
+                new java.util.concurrent.CountDownLatch(prefixes.length);
+        for (int i = 0; i < prefixes.length; i++) {
+            final String pre = prefixes[i];
+            new Thread(new Runnable() {
+                public void run() {
+                    long t0 = android.os.SystemClock.uptimeMillis();
+                    try {
+                        String s = httpGetText(pre + url, 4000, 4000);
+                        if (s != null && s.length() > 0) {
+                            long cost = android.os.SystemClock.uptimeMillis() - t0;
+                            synchronized (lock) {
+                                if (cost < bestCost[0]) {
+                                    bestCost[0] = cost;
+                                    best[0] = pre;
+                                }
+                            }
+                        }
+                    } catch (Exception ignored) { }
+                    left.countDown();
+                }
+            }).start();
+        }
+        try {
+            left.await(6, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception ignored) { }
+        synchronized (lock) { return best[0]; }
+    }
+
+    /** 设置页里那行「当前走哪条路」的说明。 */
+    private void refreshRouteHint() {
+        if (routeHint == null) return;
+        String a = (routeApi == null) ? "未连通" : routeName(routeApi);
+        String r = (routeRaw == null) ? "未连通" : routeName(routeRaw);
+        routeHint.setTextColor((routeApi == null && routeRaw == null) ? 0xFFE57373 : C_SUB);
+        routeHint.setText("GitHub 接口：" + a + "；文件与头像：" + r);
+    }
+
+    private String savedRoute(String key) {
+        String v = prefs.getString(key, "");
+        return ROUTE_NONE.equals(v) ? null : v;
+    }
+
+    /** 拼请求前缀：测出来了就用测出来的，没测出来（或全不通）就直连。 */
+    private String apiBase() { return routeApi == null ? "" : routeApi; }
+    private String rawBase() { return routeRaw == null ? "" : routeRaw; }
+
+    private String routeName(String prefix) {
+        return (prefix == null || prefix.length() == 0) ? "直连" : hostOf(prefix);
+    }
+
+    /** 屏幕下方浮出一个小气泡，淡入停留后自动淡出移除，不拦截任何操作。 */
+    private void showBubble(final String text) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (root == null) return;
+                final FrameLayout box = new FrameLayout(MainActivity.this);
+                box.setClickable(false);
+
+                TextView tv = new TextView(MainActivity.this);
+                tv.setText(text);
+                tv.setTextSize(m.subtitleSize - 1f);
+                tv.setTextColor(C_TEXT);
+                tv.setGravity(Gravity.CENTER);
+                tv.setPadding(dp(12), dp(7), dp(12), dp(7));
+                tv.setBackgroundDrawable(pill(C_CARD));
+
+                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                lp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+                lp.bottomMargin = dp(16);
+                box.addView(tv, lp);
+                root.addView(box, fp());
+
+                android.view.animation.AlphaAnimation in =
+                        new android.view.animation.AlphaAnimation(0f, 1f);
+                in.setDuration(200);
+                box.startAnimation(in);
+
+                new android.os.Handler().postDelayed(new Runnable() {
+                    public void run() {
+                        android.view.animation.AlphaAnimation out =
+                                new android.view.animation.AlphaAnimation(1f, 0f);
+                        out.setDuration(320);
+                        out.setAnimationListener(
+                                new android.view.animation.Animation.AnimationListener() {
+                                    public void onAnimationStart(android.view.animation.Animation a) { }
+                                    public void onAnimationRepeat(android.view.animation.Animation a) { }
+                                    public void onAnimationEnd(android.view.animation.Animation a) {
+                                        root.removeView(box);
+                                    }
+                                });
+                        box.startAnimation(out);
+                    }
+                }, 1800);
+            }
+        });
     }
 
     private void requestInstallPermission() {
@@ -896,11 +1179,13 @@ public class MainActivity extends Activity {
         progTitle.setTextSize(m.subtitleSize);
         progTitle.setTypeface(Typeface.DEFAULT_BOLD);
         progTitle.setTextColor(C_TEXT);
+        progTitle.setGravity(Gravity.CENTER);
         card.addView(progTitle, wrap());
 
         progDetail = new TextView(this);
         progDetail.setTextSize(m.subtitleSize - 1.5f);
         progDetail.setTextColor(C_SUB);
+        progDetail.setGravity(Gravity.CENTER);
         progDetail.setPadding(0, dp(3), 0, 0);
         card.addView(progDetail, wrap());
 
@@ -1383,7 +1668,7 @@ public class MainActivity extends Activity {
                     }
                 }
                 tv.setText(applyMarkup(getItem(position)));
-                tv.setTextSize(listSizeSp);
+                tv.setTextSize(lsSp());
                 tv.setTextColor(color);
                 tv.setTypeface(Typeface.DEFAULT_BOLD);
                 tv.setGravity(Gravity.CENTER);
@@ -1520,7 +1805,7 @@ public class MainActivity extends Activity {
                         box.setBackgroundDrawable(content);
                     }
                     title = new TextView(MainActivity.this);
-                    title.setTextSize(listSizeSp);
+                    title.setTextSize(lsSp());
                     title.setTextColor(0xFFF0F0F0);
                     title.setTypeface(Typeface.DEFAULT_BOLD);
                     title.setGravity(Gravity.CENTER);
@@ -1791,7 +2076,7 @@ public class MainActivity extends Activity {
         if (secs == null || secs.isEmpty()) {
             TextView empty = new TextView(this);
             empty.setText("（暂无内容）");
-            empty.setTextSize(fontSizeSp);
+            empty.setTextSize(fsSp());
             empty.setTextColor(C_SUB);
             empty.setGravity(Gravity.CENTER);
             detailInner.addView(empty, wrap());
@@ -1825,7 +2110,7 @@ public class MainActivity extends Activity {
 
                 TextView body = new TextView(this);
                 body.setText(applyMarkup(s.body));
-                body.setTextSize(fontSizeSp);
+                body.setTextSize(fsSp());
                 body.setTextColor(C_TEXT);
                 body.setLineSpacing(dp(3), 1.25f);
                 card.addView(body, wrap());
@@ -2535,6 +2820,7 @@ public class MainActivity extends Activity {
         displayHint.setText("正文字号、列表字号、标题字号、说明小字与整体界面缩放，都在这里用滑块调，带实时预览。");
         displayHint.setTextSize(m.subtitleSize - 2f);
         displayHint.setTextColor(C_SUB);
+        displayHint.setGravity(Gravity.CENTER);
         displayHint.setPadding(dp(4), dp(3), dp(4), dp(2));
         settingsInner.addView(displayHint, wrap());
 
@@ -2556,6 +2842,7 @@ public class MainActivity extends Activity {
         hapticHint.setText("点击列表、返回、开关等交互时轻微震动一下，作为触感反馈。");
         hapticHint.setTextSize(m.subtitleSize - 2f);
         hapticHint.setTextColor(C_SUB);
+        hapticHint.setGravity(Gravity.CENTER);
         hapticHint.setPadding(dp(4), dp(2), dp(4), dp(4));
         settingsInner.addView(hapticHint, wrap());
 
@@ -2563,6 +2850,7 @@ public class MainActivity extends Activity {
         swipeHint.setText("从屏幕左侧 1/4 内向右拖动：当前页跟手滑出、露出上一页预览，滑到一半以上松手即返回，不够则弹回。查看大图时不生效，需点「‹ 关闭」。");
         swipeHint.setTextSize(m.subtitleSize - 2f);
         swipeHint.setTextColor(C_SUB);
+        swipeHint.setGravity(Gravity.CENTER);
         swipeHint.setPadding(dp(4), dp(2), dp(4), dp(4));
         settingsInner.addView(swipeHint, wrap());
 
@@ -2586,8 +2874,39 @@ public class MainActivity extends Activity {
         updHint.setText("直连不通会自动换镜像下载；下载时屏幕中央显示进度与下载源，完成后自动打开安装。");
         updHint.setTextSize(m.subtitleSize - 2f);
         updHint.setTextColor(C_SUB);
+        updHint.setGravity(Gravity.CENTER);
         updHint.setPadding(dp(4), dp(3), dp(4), dp(2));
         settingsInner.addView(updHint, wrap());
+        TextView routeEntry = new TextView(this);
+        routeEntry.setText("重新连接服务器");
+        routeEntry.setTextSize(m.backSize);
+        routeEntry.setTextColor(C_PRIMARY);
+        routeEntry.setGravity(Gravity.CENTER);
+        routeEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
+        routeEntry.setBackgroundDrawable(pill(C_PILL));
+        applyIcon(routeEntry, "ic_update", C_PRIMARY, 15);
+        routeEntry.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                if (routeHint != null) {
+                    routeHint.setTextColor(C_SUB);
+                    routeHint.setText("正在检测各条线路…");
+                }
+                startRouteProbe(true);
+            }
+        });
+        LinearLayout.LayoutParams rtLp = wrap();
+        rtLp.topMargin = dp(6);
+        settingsInner.addView(routeEntry, rtLp);
+
+        routeHint = new TextView(this);
+        routeHint.setGravity(Gravity.CENTER);
+        routeHint.setTextSize(m.subtitleSize - 2f);
+        routeHint.setTextColor(C_SUB);
+        routeHint.setPadding(dp(4), dp(3), dp(4), dp(2));
+        settingsInner.addView(routeHint, wrap());
+        refreshRouteHint();
+
         TextView fbEntry = new TextView(this);
         fbEntry.setText("反馈与建议");
         fbEntry.setTextSize(m.backSize);
@@ -2606,6 +2925,7 @@ public class MainActivity extends Activity {
         fbHint.setText("反馈会以 Issue 形式提交到项目的 GitHub 仓库，需先在手机浏览器完成一次登录授权。");
         fbHint.setTextSize(m.subtitleSize - 2f);
         fbHint.setTextColor(C_SUB);
+        fbHint.setGravity(Gravity.CENTER);
         fbHint.setPadding(dp(4), dp(3), dp(4), dp(2));
         settingsInner.addView(fbHint, wrap());
 
@@ -2613,6 +2933,7 @@ public class MainActivity extends Activity {
         orderHint.setText("主页科目顺序（点 ↑↓ 调整，自动保存）");
         orderHint.setTextSize(m.subtitleSize - 2f);
         orderHint.setTextColor(C_SUB);
+        orderHint.setGravity(Gravity.CENTER);
         orderHint.setPadding(dp(4), dp(2), dp(4), dp(4));
         settingsInner.addView(orderHint, wrap());
         for (int idx = 0; idx < orderKeys.size(); idx++) {
@@ -2640,6 +2961,7 @@ public class MainActivity extends Activity {
         aboutHint.setText("版本信息、更新日志、感谢名单。");
         aboutHint.setTextSize(m.subtitleSize - 2f);
         aboutHint.setTextColor(C_SUB);
+        aboutHint.setGravity(Gravity.CENTER);
         aboutHint.setPadding(dp(4), dp(3), dp(4), dp(2));
         settingsInner.addView(aboutHint, wrap());
 
@@ -2671,6 +2993,7 @@ public class MainActivity extends Activity {
     private TextView sectionHeader(String label) {
         TextView t = new TextView(this);
         t.setText(label);
+        t.setGravity(Gravity.CENTER);
         t.setTextSize(m.subtitleSize);
         t.setTypeface(Typeface.DEFAULT_BOLD);
         t.setTextColor(C_PRIMARY);
@@ -2787,7 +3110,7 @@ public class MainActivity extends Activity {
         boolean canMinus = value > min;
         TextView minusBtn = new TextView(this);
         minusBtn.setText(" − ");
-        minusBtn.setTextSize(16);
+        minusBtn.setTextSize(16f * uiScale);
         minusBtn.setTypeface(Typeface.DEFAULT_BOLD);
         minusBtn.setTextColor(canMinus ? C_PRIMARY : 0xFF3E3E3E);
         minusBtn.setPadding(dp(12), dp(4), dp(12), dp(4));
@@ -2807,7 +3130,7 @@ public class MainActivity extends Activity {
         boolean canPlus = value < max;
         TextView plusBtn = new TextView(this);
         plusBtn.setText(" + ");
-        plusBtn.setTextSize(16);
+        plusBtn.setTextSize(16f * uiScale);
         plusBtn.setTypeface(Typeface.DEFAULT_BOLD);
         plusBtn.setTextColor(canPlus ? C_PRIMARY : 0xFF3E3E3E);
         plusBtn.setPadding(dp(12), dp(4), dp(12), dp(4));
@@ -2893,6 +3216,8 @@ public class MainActivity extends Activity {
                 refreshGlobalSearch();
                 restoreNext[S_SEARCH] = true;
             }
+        } else if (s == S_MYFEEDBACK) {
+            if (mineDirty) { mineDirty = false; loadMyIssues(); }
         } else if (s == S_FEEDBACK) {
             updateFeedbackUi();
         } else if (s == S_PROFILE) {
@@ -3187,7 +3512,7 @@ public class MainActivity extends Activity {
     private int tapCount = 0;
     private long lastTapTime = 0;
 
-    private static final int AVATAR_DP = 26;
+    private static final int AVATAR_DP = 34;
     /** 每次进关于页都按当前数据重算一次，保证数字是实时的。 */
     private void refreshAboutInfo() {
         if (aboutInfo == null) return;
@@ -3262,6 +3587,7 @@ public class MainActivity extends Activity {
         aboutInner.addView(sectionHeader("感谢名单"), wrap());
         TextView tip = new TextView(this);
         tip.setText("以下朋友提交的反馈被采纳，特此致谢（按采纳数量排序）");
+        tip.setGravity(Gravity.CENTER);
         tip.setTextSize(m.subtitleSize - 2f);
         tip.setTextColor(C_SUB);
         tip.setPadding(dp(4), dp(2), dp(4), dp(4));
@@ -3280,11 +3606,13 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(dp(18), dp(18));
         slp.rightMargin = dp(8);
         thanksLoading.addView(spin, slp);
-        TextView loadTxt = new TextView(this);
-        loadTxt.setText("正在加载名单…");
-        loadTxt.setTextSize(m.subtitleSize - 1f);
-        loadTxt.setTextColor(C_SUB);
-        thanksLoading.addView(loadTxt, wrap());
+        thanksLoadTxt = new TextView(this);
+        thanksLoadTxt.setText("正在加载名单…");
+        thanksLoadTxt.setTextSize(m.subtitleSize - 1f);
+        thanksLoadTxt.setTextColor(C_SUB);
+        thanksLoadTxt.setSingleLine(true);
+        thanksLoadTxt.setEllipsize(TextUtils.TruncateAt.END);
+        thanksLoading.addView(thanksLoadTxt, wrap());
         thanksLoading.setVisibility(View.GONE);
         aboutInner.addView(thanksLoading, wrap());
 
@@ -3308,7 +3636,104 @@ public class MainActivity extends Activity {
         aboutInner.addView(thanksBox, wrap());
     }
 
-    /** 拉取已采纳的反馈，按提交人聚合后排序（自己提的不计入）。 */
+    /** 仓库里的静态备份名单（raw，几乎所有镜像都代，成功率最高）。 */
+    private static final String THANKS_SNAPSHOT =
+            "https://raw.githubusercontent.com/" + REPO + "/main/cloud/thanks.json";
+    /** 上次成功加载的名单，网络全不通时兜底显示。 */
+    private static final String THANKS_CACHE = "thanks_cache";
+
+    /** 取数开关：只在「一个都拿不到」时才用缓存兜底。 */
+    private void setThanksHint(final String s) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (thanksLoadTxt != null) thanksLoadTxt.setText(s);
+            }
+        });
+    }
+
+    private String hostOf(String url) {
+        String s = url.replace("https://", "").replace("http://", "");
+        int p = s.indexOf('/');
+        if (p > 0) s = s.substring(0, p);
+        return s;
+    }
+
+    /** 把 issues 数组聚合成「提交人 → 采纳条数」并排序（自己的不计入，指定的人置顶）。 */
+    private List<Map.Entry<String, Integer>> parseThanks(JSONArray arr) {
+        Map<String, Integer> cnt = new HashMap<String, Integer>();
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject o = arr.optJSONObject(i);
+            if (o == null || o.has("pull_request")) continue;
+            boolean accepted = false;
+            JSONArray labels = o.optJSONArray("labels");
+            if (labels != null) {
+                for (int k = 0; k < labels.length(); k++) {
+                    Object lo = labels.opt(k);
+                    String name = (lo instanceof JSONObject)
+                            ? ((JSONObject) lo).optString("name", "") : String.valueOf(lo);
+                    if (name.contains("已修复") || name.contains("已处理")) {
+                        accepted = true;
+                        break;
+                    }
+                }
+            }
+            if (!accepted) continue;
+            JSONObject u = o.optJSONObject("user");
+            String login = (u == null) ? null : u.optString("login", "");
+            if (login == null || login.length() == 0) continue;
+            if (login.equalsIgnoreCase(REPO_OWNER)) continue;   // 自己的不算致谢对象
+            Integer old = cnt.get(login);
+            cnt.put(login, old == null ? 1 : old + 1);
+        }
+        List<Map.Entry<String, Integer>> list =
+                new ArrayList<Map.Entry<String, Integer>>(cnt.entrySet());
+        java.util.Collections.sort(list, new java.util.Comparator<Map.Entry<String, Integer>>() {
+            public int compare(Map.Entry<String, Integer> a, Map.Entry<String, Integer> b) {
+                boolean pa = a.getKey().equalsIgnoreCase(THANKS_PINNED);
+                boolean pb = b.getKey().equalsIgnoreCase(THANKS_PINNED);
+                if (pa != pb) return pa ? -1 : 1;       // 指定的人永远置顶
+                int c = b.getValue() - a.getValue();     // 采纳多的在前
+                if (c != 0) return c;
+                return a.getKey().compareToIgnoreCase(b.getKey());
+            }
+        });
+        return list;
+    }
+
+    /** 缓存：只存「用户名 + 条数」，不存整份 issues，省空间也省解析。 */
+    private String packThanks(List<Map.Entry<String, Integer>> list) {
+        JSONArray a = new JSONArray();
+        for (Map.Entry<String, Integer> e : list) {
+            JSONObject o = new JSONObject();
+            try {
+                o.put("u", e.getKey());
+                o.put("n", e.getValue());
+            } catch (Exception ignored) { }
+            a.put(o);
+        }
+        return a.toString();
+    }
+
+    private List<Map.Entry<String, Integer>> unpackThanks(String s) {
+        List<Map.Entry<String, Integer>> list = new ArrayList<Map.Entry<String, Integer>>();
+        if (s == null || s.length() < 2) return list;
+        try {
+            JSONArray a = new JSONArray(s);
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.optJSONObject(i);
+                if (o == null) continue;
+                String u = o.optString("u", "");
+                if (u.length() == 0) continue;
+                list.add(new java.util.AbstractMap.SimpleEntry<String, Integer>(
+                        u, o.optInt("n", 1)));
+            }
+        } catch (Exception ignored) { }
+        return list;
+    }
+
+    /** 拉取已采纳的反馈，按提交人聚合后排序（自己提的不计入）。
+     *  取数顺序：直连 api.github.com（5 秒超时）→ 能转发 API 的镜像 → 仓库静态备份名单（走全量镜像）；
+     *  全都拿不到就用上次缓存的名单，页面不会一直空着。 */
     private void loadThanks() {
         if (thanksLoadingBusy) return;
         thanksLoadingBusy = true;
@@ -3316,81 +3741,116 @@ public class MainActivity extends Activity {
         thanksBox.removeAllViews();
         thanksState.setVisibility(View.GONE);
         thanksLoading.setVisibility(View.VISIBLE);
+        setThanksHint("正在连接…");
+        android.view.animation.AlphaAnimation fade =
+                new android.view.animation.AlphaAnimation(0f, 1f);
+        fade.setDuration(180);
+        fade.setFillAfter(true);
+        thanksLoading.startAnimation(fade);
 
         new Thread(new Runnable() {
             public void run() {
-                try {
-                    String url = GH_ISSUES + "?state=closed&per_page=100";
-                    JSONArray arr = new JSONArray(httpGetPublic(url));
-                    final Map<String, Integer> cnt = new HashMap<String, Integer>();
-                    for (int i = 0; i < arr.length(); i++) {
-                        JSONObject o = arr.optJSONObject(i);
-                        if (o == null || o.has("pull_request")) continue;
-                        boolean accepted = false;
-                        JSONArray labels = o.optJSONArray("labels");
-                        if (labels != null) {
-                            for (int k = 0; k < labels.length(); k++) {
-                                Object lo = labels.opt(k);
-                                String name = (lo instanceof JSONObject)
-                                        ? ((JSONObject) lo).optString("name", "") : String.valueOf(lo);
-                                if (name.contains("已修复") || name.contains("已处理")) {
-                                    accepted = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if (!accepted) continue;
-                        JSONObject u = o.optJSONObject("user");
-                        String login = (u == null) ? null : u.optString("login", "");
-                        if (login == null || login.length() == 0) continue;
-                        if (login.equalsIgnoreCase(REPO_OWNER)) continue;   // 自己的不算致谢对象
-                        Integer old = cnt.get(login);
-                        cnt.put(login, old == null ? 1 : old + 1);
+                String raw = null;
+                String query = GH_ISSUES + "?state=closed&per_page=100";
+                // 总时限：一个个源试下去最坏能拖几十秒，到点就收手改用缓存
+                final long deadline = android.os.SystemClock.uptimeMillis() + 25000L;
+
+                // 0) 启动时测出来的最优通道，命中就不必再逐个试
+                if (apiBase().length() > 0) {
+                    try {
+                        raw = httpGetText(apiBase() + query, 5000, 6000);
+                    } catch (Exception ignored) { }
+                }
+
+                // 1) 直连，超时设短一点，连不上就赶紧换镜像，别让用户干等
+                if (raw == null) {
+                    try {
+                        raw = httpGetText(query, 5000, 6000);
+                    } catch (Exception ignored) { }
+                }
+
+                // 2) 能转发 api.github.com 的镜像
+                if (raw == null) {
+                    for (int i = 0; i < API_MIRRORS.length && raw == null; i++) {
+                        if (android.os.SystemClock.uptimeMillis() > deadline) break;
+                        setThanksHint("切换镜像 " + hostOf(API_MIRRORS[i]) + "…");
+                        try {
+                            raw = httpGetText(API_MIRRORS[i] + query, 5000, 6000);
+                        } catch (Exception ignored) { }
                     }
+                }
 
-                    List<Map.Entry<String, Integer>> list =
-                            new ArrayList<Map.Entry<String, Integer>>(cnt.entrySet());
-                    java.util.Collections.sort(list, new java.util.Comparator<Map.Entry<String, Integer>>() {
-                        public int compare(Map.Entry<String, Integer> a, Map.Entry<String, Integer> b) {
-                            boolean pa = a.getKey().equalsIgnoreCase(THANKS_PINNED);
-                            boolean pb = b.getKey().equalsIgnoreCase(THANKS_PINNED);
-                            if (pa != pb) return pa ? -1 : 1;       // 指定的人永远置顶
-                            int c = b.getValue() - a.getValue();     // 采纳多的在前
-                            if (c != 0) return c;
-                            return a.getKey().compareToIgnoreCase(b.getKey());
+                // 3) 仓库里的静态备份名单：raw 基本所有镜像都代，这一步成功率最高
+                if (raw == null) {
+                    for (int i = 0; i <= MIRRORS.length && raw == null; i++) {
+                        if (android.os.SystemClock.uptimeMillis() > deadline) break;
+                        String u = (i == 0) ? THANKS_SNAPSHOT : MIRRORS[i - 1] + THANKS_SNAPSHOT;
+                        setThanksHint(i == 0 ? "读取备份名单…"
+                                : "切换镜像 " + hostOf(MIRRORS[i - 1]) + "…");
+                        try {
+                            String s = httpGetText(u, 5000, 6000);
+                            if (s != null && s.length() > 2) raw = s;
+                        } catch (Exception ignored) { }
+                    }
+                }
+
+                List<Map.Entry<String, Integer>> list = null;
+                boolean fetched = false;      // 真的取到了数据（哪怕结果是空的）
+                if (raw != null) {
+                    try {
+                        list = parseThanks(new JSONArray(raw));
+                        fetched = true;
+                        if (!list.isEmpty()) {
+                            prefs.edit().putString(THANKS_CACHE, packThanks(list)).apply();
                         }
-                    });
+                    } catch (Exception ignored) { }
+                }
+                boolean fromCache = false;
+                if (!fetched) {
+                    list = unpackThanks(prefs.getString(THANKS_CACHE, ""));
+                    fromCache = !list.isEmpty();
+                }
 
-                    runOnUiThread(new Runnable() {
-                        public void run() {
-                            thanksLoadingBusy = false;
-                            thanksLoading.setVisibility(View.GONE);
-                            if (list.isEmpty()) {
+                final List<Map.Entry<String, Integer>> out = list;
+                final boolean cached = fromCache;
+                final boolean got = fetched;
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        thanksLoadingBusy = false;
+                        thanksLoading.setVisibility(View.GONE);
+                        if (out.isEmpty()) {
+                            // 取到了但确实没人被采纳 ≠ 加载失败，别混成一句
+                            if (got) {
                                 thanksState.setText("还没有被采纳的反馈");
                                 thanksState.setTextColor(C_SUB);
-                                thanksState.setVisibility(View.VISIBLE);
                             } else {
-                                for (int i = 0; i < list.size(); i++) {
-                                    Map.Entry<String, Integer> e = list.get(i);
-                                    LinearLayout.LayoutParams lp = wrap();
-                                    lp.topMargin = dp(6);
-                                    thanksBox.addView(thanksRow(i, e.getKey(), e.getValue()), lp);
-                                }
+                                thanksState.setText("名单加载失败，点这里重试");
+                                thanksState.setTextColor(0xFFE57373);
                             }
-                            thanksLoaded = true;
-                        }
-                    });
-                } catch (final Exception ex) {
-                    runOnUiThread(new Runnable() {
-                        public void run() {
-                            thanksLoadingBusy = false;
-                            thanksLoading.setVisibility(View.GONE);
-                            thanksState.setText("名单加载失败，点这里重试");
-                            thanksState.setTextColor(0xFFE57373);
                             thanksState.setVisibility(View.VISIBLE);
+                            return;
                         }
-                    });
-                }
+                        if (cached) {
+                            TextView note = new TextView(MainActivity.this);
+                            note.setText("网络不通，下面是上次加载的名单");
+                            note.setTextSize(m.subtitleSize - 2f);
+                            note.setTextColor(0xFFE57373);
+                            note.setGravity(Gravity.CENTER);
+                            note.setPadding(dp(4), dp(3), dp(4), dp(3));
+                            LinearLayout.LayoutParams nlp = wrap();
+                            nlp.topMargin = dp(4);
+                            thanksBox.addView(note, nlp);
+                        }
+                        for (int i = 0; i < out.size(); i++) {
+                            Map.Entry<String, Integer> e = out.get(i);
+                            LinearLayout.LayoutParams lp = wrap();
+                            lp.topMargin = dp(8);
+                            thanksBox.addView(thanksRow(i, e.getKey(), e.getValue()), lp);
+                        }
+                        // 走缓存说明这次没连上，下次进页面要重新试一次
+                        thanksLoaded = !cached;
+                    }
+                });
             }
         }).start();
     }
@@ -3400,14 +3860,14 @@ public class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(8), dp(6), dp(8), dp(6));
+        row.setPadding(dp(10), dp(9), dp(10), dp(9));
         row.setBackgroundDrawable(pill(C_PILL));
 
         int size = dp(AVATAR_DP);
         ImageView av = new ImageView(this);
         av.setImageBitmap(letterAvatar(login, size));
         FrameLayout avBox = new FrameLayout(this);
-        int box = size + dp(12);       // 头像本身小，扩大点击区域
+        int box = size + dp(14);       // 头像本身小，扩大点击区域
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(box, box);
         blp.rightMargin = dp(4);
         avBox.addView(av, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
@@ -3431,7 +3891,7 @@ public class MainActivity extends Activity {
         col.setOrientation(LinearLayout.VERTICAL);
         TextView name = new TextView(this);
         name.setText((index + 1) + ". @" + login);
-        name.setTextSize(listSizeSp - 1f);
+        name.setTextSize(lsSp());
         name.setTypeface(Typeface.DEFAULT_BOLD);
         name.setTextColor(index == 0 ? C_HI : 0xFFF0F0F0);
         name.setMaxLines(1);
@@ -3439,7 +3899,7 @@ public class MainActivity extends Activity {
         col.addView(name, wrap());
         TextView sub = new TextView(this);
         sub.setText("采纳 " + count + " 条");
-        sub.setTextSize(m.subtitleSize - 2f);
+        sub.setTextSize(m.subtitleSize - 1f);
         sub.setTextColor(index == 0 ? C_HI : C_SUB);
         col.addView(sub, wrap());
         row.addView(col, new LinearLayout.LayoutParams(0,
@@ -3657,7 +4117,11 @@ public class MainActivity extends Activity {
             d.setTint(color);
             int s = dp(sizeDp);
             d.setBounds(0, 0, s, s);
-            tv.setCompoundDrawables(d, null, null, null);
+            // 右侧补一个同宽的透明占位：否则「图标 + 文字」会作为整体居中，
+            // 文字被左侧图标顶偏，看上去就不在按钮正中。
+            Drawable pad = new ColorDrawable(Color.TRANSPARENT);
+            pad.setBounds(0, 0, s, s);
+            tv.setCompoundDrawables(d, null, pad, null);
             tv.setCompoundDrawablePadding(dp(7));
         } catch (Exception ignored) { }
     }
@@ -3691,10 +4155,15 @@ public class MainActivity extends Activity {
                 Bitmap got = null;
                 try {
                     Bitmap raw = null;
-                    String[] urls = {
-                            "https://github.com/" + login + ".png?size=" + (size * 2),
-                            "https://avatars.githubusercontent.com/" + login + "?size=" + (size * 2)
-                    };
+                    String gh = "https://github.com/" + login + ".png?size=" + (size * 2);
+                    String av = "https://avatars.githubusercontent.com/" + login + "?size=" + (size * 2);
+                    List<String> cand = new ArrayList<String>();
+                    cand.add(rawBase() + gh);       // 启动时测出来的最优通道优先
+                    cand.add(gh);
+                    cand.add(av);
+                    // 头像只是点缀，只多试两个镜像，别为一张图等太久
+                    for (int i = 0; i < Math.min(2, MIRRORS.length); i++) cand.add(MIRRORS[i] + gh);
+                    String[] urls = cand.toArray(new String[0]);
                     for (String u : urls) {
                         try {
                             byte[] data = httpGetBytes(u);
@@ -3993,6 +4462,7 @@ public class MainActivity extends Activity {
 
         pvTitle = new TextView(this);
         pvTitle.setText("示例知识点标题");
+        pvTitle.setGravity(Gravity.CENTER);
         pvTitle.setTypeface(Typeface.DEFAULT_BOLD);
         pvTitle.setTextColor(0xFFF2F2F2);
         pvTitle.setPadding(0, dp(2), 0, dp(2));
@@ -4005,12 +4475,14 @@ public class MainActivity extends Activity {
 
         pvList = new TextView(this);
         pvList.setText("列表项：三角恒等变换 ›");
+        pvList.setGravity(Gravity.CENTER);
         pvList.setTextColor(0xFFEDEDED);
         pvList.setPadding(0, dp(5), 0, 0);
         card.addView(pvList, wrap());
 
         pvSub = new TextView(this);
         pvSub.setText("小字：路径、提示、计数用这个字号");
+        pvSub.setGravity(Gravity.CENTER);
         pvSub.setTextColor(C_SUB);
         card.addView(pvSub, wrap());
 
@@ -4041,14 +4513,15 @@ public class MainActivity extends Activity {
 
         // ---- 界面大小 ----
         displayInner.addView(sectionHeader("界面大小"), wrap());
-        displayInner.addView(sliderRow("整体缩放", uiScale, 0.85f, 1.20f, 0.05f, "%",
+        displayInner.addView(sliderRow("整体缩放", uiScale, 0.85f, 1.40f, 0.05f, "%",
                 new OnFloatChange() {
                     public void onChanged(float v) { uiScale = v; applyPreview(); }
                 }), wrap());
         TextView scaleHint = new TextView(this);
-        scaleHint.setText("调大后按钮、间距、图标一起变大，适合手指粗或看不清的人；表盘小的机型建议不要超过 110%。");
+        scaleHint.setText("调大后文字、按钮、间距、图标一起变大，适合手指粗或看不清的人；表盘小的机型建议不要超过 115%。");
         scaleHint.setTextSize(Math.max(9f, m.subtitleSize - 2f));
         scaleHint.setTextColor(C_SUB);
+        scaleHint.setGravity(Gravity.CENTER);
         scaleHint.setPadding(dp(4), dp(2), dp(4), dp(4));
         displayInner.addView(scaleHint, wrap());
 
@@ -4293,11 +4766,13 @@ public class MainActivity extends Activity {
                 + " · Android " + Build.VERSION.RELEASE + " · " + (m.round ? "圆屏" : "方屏"));
         diag.setTextSize(m.subtitleSize - 2.5f);
         diag.setTextColor(C_SUB);
+        diag.setGravity(Gravity.CENTER);
         diag.setPadding(dp(4), dp(5), dp(4), dp(8));
         feedbackInner.addView(diag, wrap());
 
         TextView note = new TextView(this);
         note.setText("提交后会以你的 GitHub 账号在该仓库公开建一条 Issue，别人也能看到。");
+        note.setGravity(Gravity.CENTER);
         note.setTextSize(m.subtitleSize - 2.5f);
         note.setTextColor(C_SUB);
         note.setPadding(dp(4), 0, dp(4), dp(8));
@@ -4591,7 +5066,7 @@ public class MainActivity extends Activity {
                 try {
                     JSONObject payload = new JSONObject();
                     payload.put("title", "[" + FB_TYPES[fbType] + "] " + firstLine(desc, 20));
-                    payload.put("body", feedbackBody(desc));
+                    payload.put("body", feedbackBody(FB_TYPES[fbType], desc));
                     JSONObject o = new JSONObject(httpPost(GH_ISSUES, payload.toString(),
                             "application/json", ghToken));
                     final int num = o.optInt("number", 0);
@@ -4626,8 +5101,8 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private String feedbackBody(String desc) {
-        return "**类型**：" + FB_TYPES[fbType] + "\n\n"
+    private String feedbackBody(String type, String desc) {
+        return "**类型**：" + type + "\n\n"
                 + "**版本**：" + appVersion() + "（build " + appVersionCode() + "）\n"
                 + "**设备**：" + Build.MODEL + " · Android " + Build.VERSION.RELEASE
                 + " · " + (m.round ? "圆屏" : "方屏") + "\n"
@@ -4766,6 +5241,12 @@ public class MainActivity extends Activity {
     }
 
     private String httpPost(String url, String body, String contentType, String token) throws Exception {
+        return httpPost(url, body, contentType, token, "token");
+    }
+
+    /** scheme 用 token（REST 老写法）还是 Bearer（GraphQL 要求），由调用处决定。 */
+    private String httpPost(String url, String body, String contentType, String token,
+                            String scheme) throws Exception {
         HttpURLConnection cn = (HttpURLConnection) new URL(url).openConnection();
         try {
             byte[] data = body.getBytes(StandardCharsets.UTF_8);
@@ -4777,7 +5258,7 @@ public class MainActivity extends Activity {
             cn.setRequestProperty("Content-Type", contentType);
             cn.setRequestProperty("Accept", "application/json");
             cn.setRequestProperty("User-Agent", "HZKnowledge-Android");
-            if (token != null) cn.setRequestProperty("Authorization", "token " + token);
+            if (token != null) cn.setRequestProperty("Authorization", scheme + " " + token);
             OutputStream os = cn.getOutputStream();
             os.write(data);
             os.close();
@@ -4827,7 +5308,7 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             public void run() {
                 try {
-                    String url = "https://api.github.com/repos/" + REPO + "/issues?state=all&per_page="
+                    String url = apiBase() + "https://api.github.com/repos/" + REPO + "/issues?state=all&per_page="
                             + (all ? "100" : "40")
                             + (!all && login != null && login.length() > 0 ? "&creator=" + login : "");
                     JSONArray arr = new JSONArray(httpGetAuthed(url));
@@ -4881,13 +5362,18 @@ public class MainActivity extends Activity {
             }
         }
         if (fixed) return "已修复";
-        if ("closed".equals(o.optString("state"))) return "已处理";
+        if ("closed".equals(o.optString("state"))) {
+            // 本人撤回的会在正文末尾留一行标记，跟「已处理」区分开
+            if (o.optString("body", "").contains("提交者已撤回")) return "已撤回";
+            return "已处理";
+        }
         if (working) return "处理中";
         return "待处理";
     }
 
     private String issueStatusColor(JSONObject o) {
         String s = issueStatusText(o);
+        if ("已撤回".equals(s)) return "#FF8A8A8A";
         if ("已修复".equals(s) || "已处理".equals(s)) return "#FF81C784";
         if ("处理中".equals(s)) return "#FF4FC3F7";
         return "#FFFFB74D";
@@ -4924,7 +5410,7 @@ public class MainActivity extends Activity {
                         box.setBackgroundDrawable(content);
                     }
                     title = new TextView(MainActivity.this);
-                    title.setTextSize(listSizeSp - 1f);
+                    title.setTextSize(lsSp() - 1f);
                     title.setTextColor(0xFFF0F0F0);
                     title.setTypeface(Typeface.DEFAULT_BOLD);
                     title.setGravity(Gravity.CENTER);
@@ -4963,7 +5449,8 @@ public class MainActivity extends Activity {
             public void run() {
                 String reply = null;
                 try {
-                    String u = "https://api.github.com/repos/" + REPO + "/issues/" + number + "/comments?per_page=30";
+                    String u = apiBase() + "https://api.github.com/repos/" + REPO
+                            + "/issues/" + number + "/comments?per_page=30";
                     JSONArray arr = new JSONArray(httpGetAuthed(u));
                     for (int i = 0; i < arr.length(); i++) {
                         String b = arr.getJSONObject(i).optString("body", "");
@@ -4992,11 +5479,435 @@ public class MainActivity extends Activity {
                         secs.add(s2);
                         openDetail("#" + number + " " + title, secs, status + " · " + shortTime(
                                 issue.optString("created_at", "")), S_MYFEEDBACK, null);
+                        curIssue = issue;
+                        addIssueActions(issue);
                     }
                 });
             }
         }).start();
     }
+    // ================= 反馈的编辑 / 撤回 / 删除 =================
+
+    private static final String GH_GRAPHQL = "https://api.github.com/graphql";
+    /** 改标题 + 正文（编辑）。 */
+    private static final String MUT_EDIT =
+            "mutation($id: ID!, $title: String!, $body: String!) {"
+            + " updateIssue(input: {id: $id, title: $title, body: $body})"
+            + " { issue { number } } }";
+    /** 撤回：正文末尾加一行说明，同时把状态置为 CLOSED。 */
+    private static final String MUT_WITHDRAW =
+            "mutation($id: ID!, $body: String!) {"
+            + " updateIssue(input: {id: $id, body: $body, state: CLOSED})"
+            + " { issue { number state } } }";
+    /** 真删除只有 GraphQL 有（REST 没有删 issue 的接口）。 */
+    private static final String MUT_DELETE =
+            "mutation($id: ID!) { deleteIssue(input: {issueId: $id}) { clientMutationId } }";
+
+    /** 带 token 的 GraphQL 请求，直连不走镜像；GitHub 把错误放在 errors 里，一并抛出来。 */
+    private JSONObject ghGraphql(String query, JSONObject vars) throws Exception {
+        JSONObject payload = new JSONObject();
+        payload.put("query", query);
+        payload.put("variables", vars);
+        String raw = httpPost(GH_GRAPHQL, payload.toString(), "application/json", ghToken, "Bearer");
+        JSONObject o = new JSONObject(raw);
+        JSONArray errs = o.optJSONArray("errors");
+        if (errs != null && errs.length() > 0) {
+            String msg = errs.optJSONObject(0).optString("message", "");
+            throw new Exception(msg.length() > 0 ? msg : "请求被拒绝");
+        }
+        JSONObject data = o.optJSONObject("data");
+        return data != null ? data : new JSONObject();
+    }
+
+    /** 这条是不是本人发的。 */
+    private boolean issueMine(JSONObject o) {
+        if (ghLogin == null || ghLogin.length() == 0) return false;
+        JSONObject u = o.optJSONObject("user");
+        String lg = (u == null) ? "" : u.optString("login", "");
+        return ghLogin.equalsIgnoreCase(lg);
+    }
+
+    /** 未受理 = 状态是「待处理」：没打「处理中」「已修复」标签，也没被关闭。 */
+    private boolean issuePending(JSONObject o) {
+        return "待处理".equals(issueStatusText(o));
+    }
+
+    /** 反馈详情底部：本人可编辑 / 撤回未受理的；项目所有者可删除任意一条。 */
+    private void addIssueActions(final JSONObject issue) {
+        if (ghToken == null || detailInner == null) return;
+        if (issue.optString("node_id", "").length() == 0) return;
+        if (issueMine(issue) && issuePending(issue)) {
+            detailInner.addView(issueActBtn("编辑这条反馈", C_PRIMARY, 0xFF14384A,
+                    new View.OnClickListener() {
+                        public void onClick(View v) { showEditIssueDialog(issue); }
+                    }), wrapM());
+            detailInner.addView(issueActBtn("撤回这条反馈", 0xFFFFB74D, C_PILL,
+                    new View.OnClickListener() {
+                        public void onClick(View v) { confirmWithdrawIssue(issue); }
+                    }), wrapM());
+        }
+        if (isAdmin()) {
+            detailInner.addView(issueActBtn("删除这条反馈（开发者）", 0xFFE57373, C_PILL,
+                    new View.OnClickListener() {
+                        public void onClick(View v) { confirmDeleteIssue(issue); }
+                    }), wrapM());
+        }
+    }
+
+    private TextView issueActBtn(String label, int textColor, int bg, View.OnClickListener onClick) {
+        final View.OnClickListener user = onClick;
+        TextView b = new TextView(this);
+        b.setText(label);
+        b.setTextSize(m.backSize);
+        b.setTypeface(Typeface.DEFAULT_BOLD);
+        b.setGravity(Gravity.CENTER);
+        b.setTextColor(textColor);
+        b.setPadding(dp(10), dp(11), dp(10), dp(11));
+        b.setBackgroundDrawable(pill(bg));
+        b.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { vibrate(); if (user != null) user.onClick(v); }
+        });
+        return b;
+    }
+
+    /** 编辑自己那条反馈：类型 + 描述，保存时整体覆盖 GitHub 上的标题和正文。 */
+    private void showEditIssueDialog(final JSONObject issue) {
+        dismissEditIssueDialog();
+        final String oldBody = issue.optString("body", "");
+        final int[] type = new int[]{parseIssueType(oldBody)};
+        String desc = parseIssueDesc(oldBody);
+
+        // 内容比屏幕高时只让里面滚，弹窗本身不能顶出屏幕（手表屏小）
+        final int maxDlgH = (int) (getResources().getDisplayMetrics().heightPixels * 0.74f);
+        ScrollView sc = new ScrollView(this) {
+            @Override
+            protected void onMeasure(int wSpec, int hSpec) {
+                super.onMeasure(wSpec,
+                        View.MeasureSpec.makeMeasureSpec(maxDlgH, View.MeasureSpec.AT_MOST));
+            }
+        };
+        sc.setVerticalScrollBarEnabled(false);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(12), dp(12), dp(12), dp(10));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xFF151515);
+        bg.setCornerRadius(dp(16));
+        box.setBackgroundDrawable(bg);
+        sc.addView(box);
+
+        TextView cap = new TextView(this);
+        cap.setText("编辑这条反馈");
+        cap.setTextSize(m.subtitleSize);
+        cap.setTypeface(Typeface.DEFAULT_BOLD);
+        cap.setTextColor(C_PRIMARY);
+        cap.setGravity(Gravity.CENTER);
+        box.addView(cap, wrap());
+
+        final TextView[] btns = new TextView[FB_TYPES.length];
+        for (int row = 0; row < (FB_TYPES.length + 1) / 2; row++) {
+            LinearLayout line = new LinearLayout(this);
+            line.setOrientation(LinearLayout.HORIZONTAL);
+            int cols = Math.min(2, FB_TYPES.length - row * 2);
+            for (int col = 0; col < cols; col++) {
+                final int idx = row * 2 + col;
+                TextView b = new TextView(this);
+                b.setText(FB_TYPES[idx]);
+                b.setTextSize(m.subtitleSize - 1f);
+                b.setGravity(Gravity.CENTER);
+                b.setPadding(dp(4), dp(9), dp(4), dp(9));
+                b.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) {
+                        vibrate();
+                        type[0] = idx;
+                        paintEditTypes(btns, type[0]);
+                    }
+                });
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+                if (cols == 2) {
+                    if (col == 0) lp.rightMargin = dp(4); else lp.leftMargin = dp(4);
+                }
+                lp.bottomMargin = dp(4);
+                btns[idx] = b;
+                line.addView(b, lp);
+            }
+            box.addView(line, wrap());
+        }
+        paintEditTypes(btns, type[0]);
+
+        final EditText ed = new EditText(this);
+        ed.setText(desc);
+        ed.setTextSize(m.subtitleSize - 1f);
+        ed.setTextColor(Color.WHITE);
+        ed.setHint("写清问题或建议");
+        ed.setHintTextColor(C_SUB);
+        ed.setBackgroundDrawable(pill(C_PILL));
+        ed.setPadding(dp(10), dp(8), dp(10), dp(8));
+        ed.setMinLines(3);
+        ed.setGravity(Gravity.TOP | Gravity.START);
+        LinearLayout.LayoutParams elp = wrap();
+        elp.topMargin = dp(6);
+        box.addView(ed, elp);
+
+        final TextView save = new TextView(this);
+        save.setText("保存修改");
+        save.setTextSize(m.backSize);
+        save.setTypeface(Typeface.DEFAULT_BOLD);
+        save.setGravity(Gravity.CENTER);
+        save.setTextColor(C_PRIMARY);
+        save.setPadding(dp(10), dp(11), dp(10), dp(11));
+        save.setBackgroundDrawable(pill(0xFF14384A));
+        LinearLayout.LayoutParams slp = wrap();
+        slp.topMargin = dp(8);
+        box.addView(save, slp);
+
+        TextView cancel = new TextView(this);
+        cancel.setText("取消");
+        cancel.setTextSize(m.subtitleSize - 1f);
+        cancel.setGravity(Gravity.CENTER);
+        cancel.setTextColor(C_SUB);
+        cancel.setPadding(dp(8), dp(9), dp(8), dp(2));
+        cancel.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { vibrate(); dismissEditIssueDialog(); }
+        });
+        box.addView(cancel, wrap());
+
+        save.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                final String d = ed.getText().toString().trim();
+                if (d.length() < 5) {
+                    toast("至少写 5 个字");
+                    return;
+                }
+                save.setText("保存中…");
+                save.setEnabled(false);
+                final int t = type[0];
+                new Thread(new Runnable() {
+                    public void run() {
+                        try {
+                            JSONObject vars = new JSONObject();
+                            vars.put("id", issue.optString("node_id", ""));
+                            vars.put("title", "[" + FB_TYPES[t] + "] " + firstLine(d, 20));
+                            vars.put("body", feedbackBody(FB_TYPES[t], d));
+                            ghGraphql(MUT_EDIT, vars);
+                            runOnUiThread(new Runnable() {
+                                public void run() {
+                                    dismissEditIssueDialog();
+                                    toast("已保存修改");
+                                    mineDirty = true;
+                                    showScreen(S_MYFEEDBACK);
+                                }
+                            });
+                        } catch (final Exception e) {
+                            runOnUiThread(new Runnable() {
+                                public void run() {
+                                    save.setEnabled(true);
+                                    save.setText("保存修改");
+                                    toast("保存失败：" + e.getMessage());
+                                }
+                            });
+                        }
+                    }
+                }).start();
+            }
+        });
+
+        editIssueDlg = new AlertDialog.Builder(this).setView(sc).create();
+        editIssueDlg.setCancelable(true);
+        editIssueDlg.show();
+        sizeDialog(editIssueDlg, 0.90f);
+    }
+
+    private void paintEditTypes(TextView[] btns, int on) {
+        for (int i = 0; i < btns.length; i++) {
+            if (btns[i] == null) continue;
+            boolean sel = (i == on);
+            btns[i].setTextColor(sel ? C_PRIMARY : C_SUB);
+            btns[i].setTypeface(sel ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            btns[i].setBackgroundDrawable(pill(sel ? 0xFF14384A : C_PILL));
+        }
+    }
+
+    private void dismissEditIssueDialog() {
+        if (editIssueDlg == null) return;
+        try { editIssueDlg.dismiss(); } catch (Exception ignored) { }
+        editIssueDlg = null;
+    }
+
+    /** 弹窗宽度按屏宽比例给，圆屏再收一点。必须在 show() 之后调。 */
+    private void sizeDialog(AlertDialog d, float ratio) {
+        try {
+            Window w = d.getWindow();
+            if (w == null) return;
+            w.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            int sw = getResources().getDisplayMetrics().widthPixels;
+            w.setLayout((int) (sw * (m.round ? ratio - 0.08f : ratio)),
+                    WindowManager.LayoutParams.WRAP_CONTENT);
+        } catch (Exception ignored) { }
+    }
+
+    private void confirmWithdrawIssue(final JSONObject issue) {
+        confirmIssueAction("撤回这条反馈？",
+                "撤回后它会关闭，开发者不再处理；需要的话可以再重新提一条。",
+                "确认撤回", 0xFFFFB74D, new Runnable() {
+                    public void run() { withdrawIssue(issue); }
+                });
+    }
+
+    private void withdrawIssue(final JSONObject issue) {
+        toast("正在撤回…");
+        final String stamp = new java.text.SimpleDateFormat("MM-dd HH:mm",
+                java.util.Locale.CHINA).format(new java.util.Date());
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    JSONObject vars = new JSONObject();
+                    vars.put("id", issue.optString("node_id", ""));
+                    vars.put("body", issue.optString("body", "")
+                            + "\n\n（提交者已撤回 · " + stamp + "）");
+                    ghGraphql(MUT_WITHDRAW, vars);
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            toast("已撤回这条反馈");
+                            mineDirty = true;
+                            showScreen(S_MYFEEDBACK);
+                        }
+                    });
+                } catch (final Exception e) {
+                    runOnUiThread(new Runnable() {
+                        public void run() { toast("撤回失败：" + e.getMessage()); }
+                    });
+                }
+            }
+        }).start();
+    }
+
+    private void confirmDeleteIssue(final JSONObject issue) {
+        confirmIssueAction("删除 #" + issue.optInt("number") + "？",
+                "会直接从仓库里删掉这条反馈，删完找不回来。",
+                "确认删除", 0xFFE57373, new Runnable() {
+                    public void run() { deleteIssue(issue); }
+                });
+    }
+
+    private void deleteIssue(final JSONObject issue) {
+        toast("正在删除…");
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    JSONObject vars = new JSONObject();
+                    vars.put("id", issue.optString("node_id", ""));
+                    ghGraphql(MUT_DELETE, vars);
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            toast("已删除 #" + issue.optInt("number"));
+                            mineDirty = true;
+                            showScreen(S_MYFEEDBACK);
+                        }
+                    });
+                } catch (final Exception e) {
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            toast("删除失败：" + e.getMessage() + "（需要有仓库写权限）");
+                        }
+                    });
+                }
+            }
+        }).start();
+    }
+
+    /** 危险操作前先确认一次，避免手滑。 */
+    private void confirmIssueAction(String title, String msg, String okText, int okColor,
+                                    final Runnable yes) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(13), dp(12), dp(13), dp(8));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xFF151515);
+        bg.setCornerRadius(dp(16));
+        box.setBackgroundDrawable(bg);
+
+        TextView t = new TextView(this);
+        t.setText(title);
+        t.setTextSize(m.subtitleSize);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setTextColor(Color.WHITE);
+        t.setGravity(Gravity.CENTER);
+        box.addView(t, wrap());
+
+        TextView msgTv = new TextView(this);
+        msgTv.setText(msg);
+        msgTv.setTextSize(m.subtitleSize - 2f);
+        msgTv.setTextColor(C_SUB);
+        msgTv.setGravity(Gravity.CENTER);
+        msgTv.setPadding(dp(2), dp(6), dp(2), dp(4));
+        box.addView(msgTv, wrap());
+
+        TextView ok = new TextView(this);
+        ok.setText(okText);
+        ok.setTextSize(m.backSize);
+        ok.setTypeface(Typeface.DEFAULT_BOLD);
+        ok.setGravity(Gravity.CENTER);
+        ok.setTextColor(okColor);
+        ok.setPadding(dp(10), dp(11), dp(10), dp(11));
+        ok.setBackgroundDrawable(pill(C_PILL));
+        LinearLayout.LayoutParams olp = wrap();
+        olp.topMargin = dp(4);
+        box.addView(ok, olp);
+
+        TextView no = new TextView(this);
+        no.setText("取消");
+        no.setTextSize(m.subtitleSize - 1f);
+        no.setGravity(Gravity.CENTER);
+        no.setTextColor(C_SUB);
+        no.setPadding(dp(8), dp(9), dp(8), dp(2));
+        box.addView(no, wrap());
+
+        final AlertDialog d = new AlertDialog.Builder(this).setView(box).create();
+        d.setCancelable(true);
+        ok.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                try { d.dismiss(); } catch (Exception ignored) { }
+                if (yes != null) yes.run();
+            }
+        });
+        no.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                try { d.dismiss(); } catch (Exception ignored) { }
+            }
+        });
+        d.show();
+        sizeDialog(d, 0.86f);
+    }
+
+    /** 从正文里找回当初选的反馈类型。 */
+    private int parseIssueType(String body) {
+        String key = "**类型**：";
+        int i = body.indexOf(key);
+        if (i >= 0) {
+            int nl = body.indexOf('\n', i);
+            String v = (nl > 0 ? body.substring(i + key.length(), nl) : body.substring(i + key.length()));
+            v = v.trim();
+            for (int k = 0; k < FB_TYPES.length; k++) {
+                if (FB_TYPES[k].equals(v)) return k;
+            }
+        }
+        return FB_TYPES.length - 1;
+    }
+
+    /** 从正文里取回用户写的那段描述（--- 之后的）。 */
+    private String parseIssueDesc(String body) {
+        int i = body.indexOf("---");
+        if (i < 0) return body.trim();
+        String d = body.substring(i + 3);
+        while (d.length() > 0 && (d.charAt(0) == '\n' || d.charAt(0) == ' ')) d = d.substring(1);
+        return d.trim();
+    }
+
     // ================= 个人主页 =================
 
     private void buildProfileScreen() {
@@ -5133,7 +6044,7 @@ public class MainActivity extends Activity {
                 String avatar = prefs.getString("gh_avatar", "");
                 boolean netFail = false;
                 try {
-                    JSONObject o = new JSONObject(httpGetAuthed("https://api.github.com/user"));
+                    JSONObject o = new JSONObject(httpGetAuthed(apiBase() + GH_USER));
                     login = o.optString("login", login);
                     name = o.optString("name", "");
                     avatar = o.optString("avatar_url", "");

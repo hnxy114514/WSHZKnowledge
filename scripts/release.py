@@ -93,12 +93,39 @@ def main():
         print("上传 APK 失败:", up.get("message"))
         sys.exit(1)
 
-    print("== 4. 提交版本标记 ==")
+    print("== 4. 刷新感谢名单静态备份 ==")
+    refresh_thanks()
+
+    print("== 5. 写入版本标记 ==")
+    write_version_file(ver, tag)
+
+    print("== 6. 提交版本标记 ==")
     push_version(token, tag)
 
     print("== 完成 ==")
     print("下载直链:", up.get("browser_download_url"))
     print("Release 页: https://github.com/%s/releases/tag/%s" % (REPO, tag))
+
+
+def refresh_thanks():
+    """重新生成 cloud/thanks.json（感谢名单的镜像兜底数据）。失败不影响发版。"""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script = os.path.join(root, "tools", "gen_thanks.py")
+    rc = subprocess.call([sys.executable, script])
+    if rc != 0:
+        print("感谢名单备份未更新（保留上一版），不影响发版")
+
+
+def write_version_file(ver, tag):
+    """写 cloud/version.json（App 的兜底版本号，也用来给 API 结果做交叉校验）。
+
+    必须自动生成：这个文件要是停在旧版本，App 会拿它跟 API 比对取新的，
+    旧数据会把更新判断带偏。放在 Release 建好、APK 传完之后写，内容才和线上一致。
+    """
+    path = os.path.join("cloud", "version.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"version": ver, "tag": tag}, f, ensure_ascii=False)
+    print("cloud/version.json ->", ver)
 
 
 def push_version(token, tag):

@@ -11,7 +11,7 @@ WSHZKnowledge/
 ├── app/                              Android 工程
 │   ├── src/main/
 │   │   ├── java/com/lizard/hsknowledge/
-│   │   │   ├── MainActivity.java        UI + 数学排版引擎 + 云端更新（核心，约 2000 行）
+│   │   │   ├── MainActivity.java        UI + 数学排版引擎 + 云端更新（核心，约 5600 行）
 │   │   │   └── ApkFileProvider.java     APK 覆盖安装用的 ContentProvider
 │   │   ├── assets/
 │   │   │   ├── data/                    九科知识库 JSON（构建时自动生成，勿手改）
@@ -31,12 +31,17 @@ WSHZKnowledge/
 │   │   ├── <图片名>.py                 每张配图一个脚本，单独运行只生成那一张
 │   │   └── gen_all.py                  一键重新生成全部在用配图
 │   ├── make_icon.py                    生成应用图标（表盘 + Emoji 书本，输出 5 个 dpi）
+│   ├── gen_thanks.py                   生成感谢名单的静态备份 cloud/thanks.json（发版时自动跑）
+│   ├── ids.json                        章 / 知识点编号台账（构建时读写，必须随仓库保留）
 │   └── emoji_src/open_book.png          图标用的书本 Emoji 源图（Fluent Emoji, MIT）
 │
-├── cloud/version.json                 更新兜底用的版本号（App 拉不到 GitHub API 时读它）
+├── cloud/
+│   ├── version.json                    更新兜底用的版本号（App 拉不到 GitHub API 时读它）
+│   └── thanks.json                     感谢名单的静态备份（API 全不通时 App 读它）
 ├── local/                             本地私密文件（凭据、keystore、备忘），已被 .gitignore 排除
 ├── scripts/build.sh                   无 Gradle 构建脚本（aapt2 + javac + d8 + apksigner）
-├── scripts/release.py                 一键发布：构建 + 创建 Release + 上传 APK
+├── scripts/release.py                 一键发布：构建 + 创建 Release + 上传 APK + 写 cloud/version.json + 刷新 cloud/thanks.json
+├── 编号规则.md                         章 / 知识点编号的格式说明（编号里带科目码与加入日期）
 ├── .gitignore                          排除签名密钥、产物、缓存、归档
 └── README.md                           本文件
 ```
@@ -44,6 +49,7 @@ WSHZKnowledge/
 未入库的本地目录（已 gitignore，按需清理）：
 
 - `build/`：构建中间产物与产出 APK（每次构建重建）。
+  另有几个只在本机跑、不参与打包的校验/补丁脚本：`build/check_data.py`（知识点数据体检）、`build/patch_*.py`（成批改动源码的补丁）。
 - `local/`：发布凭据、签名 keystore、本地备忘，不进仓库。
 
 ---
@@ -60,13 +66,19 @@ app/src/main/assets/data/*.json  （九科 JSON，构建时生成）
 App 启动时读取 assets/data，MainActivity 排版引擎渲染
 ```
 
+改完 `subjects/*.py` 或 `build_authored.py`，跑 `python build/check_data.py` 做一次体检：
+查编号重复 / 标题重复 / 空正文 / 加粗与花括号配对 / 未被排版引擎支持的 LaTeX 命令 /
+`\frac` 参数完整性 / 上下标写法，并核对编号里的科目码与日期。
+`build_authored.py` 分数化（`fracify`）时分子分母的边界扫描对 `()`、`[]`、`{}` 三种括号都要做
+深度保护，否则带下标的分式会被拆坏（历史坑，见《工作技巧》踩坑 23）。
+
 配图走另一条独立的链：
 
 ```
 tools/img_gen/  （common.py + 每张图一个 <图片名>.py + gen_all.py）
         │  直接运行某个脚本 / 或 gen_all.py
         ▼
-app/src/main/assets/img/*.png  （56 张）
+app/src/main/assets/img/*.png  （57 张）
         │  打包进 APK
         ▼
 知识点详情页展示，双击可全屏缩放
@@ -90,6 +102,17 @@ tools/subjects/*.py  →  build_authored.py 的 assign_ids()  →  tools/ids.jso
 
 规则见仓库根目录的《编号规则.md》。要点：`科目码-加入日期-章序号[-章内序号]`，
 编号一经分配永不重排，`tools/ids.json` 必须随仓库保留（删了会全部按新日期重编）。
+
+感谢名单链（唯一需要联网的内容）：
+
+```
+GitHub issues（带「已修复 / 已处理」标签）
+        │  App 拉取 → 按提交人聚合 → 关于页「感谢名单」
+        ▲
+        └── 兜底：cloud/thanks.json（tools/gen_thanks.py 生成，release.py 每次发版刷新，
+                                     推到 main 之后 raw 才读得到，发版必须推代码）
+```
+取数顺序见「启动时的通道探测」与「感谢名单的取数兜底」两节。
 
 ---
 
@@ -166,11 +189,12 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
 ## 云端更新机制
 
 - App 启动时后台静默检查，设置页「检查更新」可手动触发。
-- 取版本号三级兜底：
-  1. 直连 `api.github.com/.../releases/latest`；
-  2. 走镜像 `https://gh-proxy.com/` + 同一 API（实测可转发 API）；
-  3. 仍失败则读静态文件 `cloud/version.json`（`build_authored.py` 构建时按 `versionName` 生成，`release.py` 会随发布自动提交推送）。
-- 用 `versionName` 与最新 Release 的 `tag_name` 做语义化比较。
+- 取版本号（每一级都优先走启动时测出的通道，见下一节）：
+  1. `api.github.com/.../releases/latest`，失败换能转发 API 的镜像；
+  2. 同时读静态文件 `cloud/version.json`（`release.py` 发版时按 `versionName` 自动写入并提交推送）；
+  3. **两边交叉比对，取更新的那个**。镜像普遍缓存 API 响应，只信 API 会在刚发完版时拿回上一个版本。
+- API 请求一律带 `?nocache=<当前毫秒>` 穿透镜像缓存；Release 资源名必须与 tag 对得上才采用其下载地址，否则按 tag 拼 URL。
+- 用 `versionName` 与最新 tag 做语义化比较（`compareSemver`，按三段数字比）。
 - 有新版 → 先申请「安装未知应用」权限 → 下载 APK → 触发覆盖安装。
 - 下载源顺序（`MainActivity.MIRRORS`，前缀 + 原地址）：直连 → gh-proxy.com → ghproxy.net → ghfast.top → gh.llkk.cc → github.moeyy.xyz。任一源 15 秒内拿不到 150KB 即判定「太慢」自动切换下一个。
 - 屏幕中央有进度卡片，实时显示百分比、已下载/总大小、当前下载源；卡片不拦截点击，可边下边用；卡片底部有「取消」，点后立即中断下载并清理临时文件。
@@ -178,12 +202,41 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
 - 发现新版本先弹「更新说明」弹窗：标题给出版本号，中间是可滚动的更新内容（来自 Release 正文，`trimNotes()` 去掉 Markdown 记号并截到 460 字），下方三个入口：「立即更新」「稍后」「查看历次更新日志」。
 - 点「稍后」会把版本号记进 `skip_version`：之后开机自动检查不再打扰同一版本，手动点「检查更新」仍会提示。
 - 点「立即更新」时如果还没有「安装未知应用」权限，先去授权；`onResume` 检测到权限已给就自动接着下载（`pendingDownload`），不用再点一次检查更新。
+- **下载前会再确认一次是不是最新**（最多等 6 秒）：弹窗弹出到点按钮之间可能又发了新版，确认到更新的就改下那个，避免下到上一个版本。
+
+### 更新弹窗的绘制注意
+
+- 卡片整块**不要开软件层**（`setLayerType(LAYER_TYPE_SOFTWARE)`）。层里的内容跟不上内层 `ScrollView` 的滚动，滑起来会留下上一帧的文字（残影）。
+- 滚动时靠 `OnScrollChangedListener` 调 `box.invalidate()` 整块重绘；`ScrollView` 关掉过滚动与淡出边（边缘拖影）。
+- 窗口背景透明的同时要显式 `setFormat(PixelFormat.TRANSLUCENT)`，否则合成器按不透明窗口处理，滚动时更容易留残影。
+
+### 启动时的通道探测（全局共用）
+
+- `onCreate` 里后台起 `startRouteProbe()`，并发试探两条通道：
+  - **API 通道**：直连 `api.github.com/zen` + `API_MIRRORS`；
+  - **raw/github 通道**：直连 `cloud/version.json` + `MIRRORS` 全量镜像。
+- 取「能连通且耗时最短」的那个前缀，存 `prefs` 的 `route_api` / `route_raw`；下次启动先套用上次结果，同时后台再测一次刷新。
+- 全不通时存 `none`，`apiBase()` / `rawBase()` 退化为直连，行为与探测前一致。
+- 联网处一律走 `apiBase()` / `rawBase()`：更新检查、感谢名单、个人信息 `/user`、我的反馈列表与评论、头像。原来的「逐个镜像重试」逻辑保留在后面当兜底。
+- 探测结果出来后浮一个底部气泡「已连接服务器 · 直连 / 镜像域名」，淡入停留 1.8 秒自动移除，不拦截操作，也不弹任何界面。
+- 首启显示调节引导页时不弹气泡（避免盖住「完成」按钮）；点完成后 `recreate()` 会重跑一次，那时补上。
+- 手动重测：设置 → 数据管理 → 「重新连接服务器」（`startRouteProbe(true)`）。不沿用上次结果，全部候选重测一遍，
+  下面那行实时显示「GitHub 接口：直连 / 镜像域名 / 未连通；文件与头像：…」，检测中显示「正在检测各条线路…」，
+  成败都弹气泡（失败是「没连上服务器，稍后再试」）。网络切换后用它最省事。
+- 登录相关 POST（`device/code`、`oauth/access_token`）与提交反馈仍走直连，不经过镜像，避免把 token 交给第三方。
+
+### 感谢名单的取数兜底
+
+- 取数顺序：启动时测出的最优通道（`apiBase()`）→ 直连（5 秒超时）→ `API_MIRRORS` 里能转发 API 的镜像 → 静态备份 `cloud/thanks.json`（走 `MIRRORS` 全量镜像）。整轮 25 秒总时限。
+- `cloud/thanks.json` 由 `tools/gen_thanks.py` 生成，`release.py` 每次发版自动刷新；内容是最小 issues 数组（只带 `user.login` 与一条已修复标签），App 端复用同一个 `parseThanks()`，解析逻辑不分叉。
+- 整轮重试有 25 秒总时限；全都拿不到就用 `prefs` 里上次成功的结果（`thanks_cache`）兜底，并提示「网络不通，下面是上次加载的名单」，下次进页面会重新试。
+- 头像同样加了镜像兜底（只多试前两个，不为一张图干等）。
 
 ---
 
 ## 更新日志（App 内）
 
-- 数据源：`app/src/main/assets/changelog.json`（随 APK 打包，离线可看），结构 `{"version":1,"log":[{"v":"1.11.2","d":"10-28","items":["…"]}]}`，按版本倒序排列。
+- 数据源：`app/src/main/assets/changelog.json`（随 APK 打包，离线可看），结构 `{"version":1,"log":[{"v":"2.0.0","d":"10-28","items":["…"]}]}`，按版本倒序排列。
 - 入口：设置 → 关于 → 「更新日志」；当前版本那一栏用高亮底色并标注「当前」。
 - **发版纪律**：每次出包前先在 `changelog.json` 的 `log` 数组**最前面**插入本版条目（版本号与 `versionName` 一致），否则新版本在更新日志里查不到。只写用户能感知的变化，一条一句话，不写内部实现。
 - Release 正文（`release.py` 的参数）与 changelog 条目分开维护：前者给「更新说明弹窗」用，后者给「更新日志」用；两边说法要一致。
@@ -198,8 +251,18 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
 - 流程：点登录 → 取 8 位授权码 → 自动复制到剪贴板并弹原生对话框 → 反馈页显示固定网址二维码（`assets/qr_login.png`，内容 `https://github.com/login/device`）+ 大号授权码，手机扫码后输码授权（手表浏览器支持不佳，作为备选按钮）→ 手表每 5 秒轮询 → 成功后 token 存 SharedPreferences（`gh_token` / `gh_login`）。
 - 二维码是静态图片，不含授权码：授权码每次不同，静态图只承载固定网址，用户扫完照表上的码输入。
 - 提交：`POST /repos/<repo>/issues`，正文自动附带版本号、机型、Android 版本、圆/方屏、最近浏览的知识点路径。
-- 「我的反馈记录」：拉取 `issues?creator=<自己>&state=all`，列表显示状态与日期，点开看正文 + 最新回复。
-- 状态约定（靠 label 与 state）：有 `已修复` 标签 → 已修复；issue 已关闭 → 已处理；有 `处理中` 标签 → 处理中；否则 待处理。处理一条反馈时：先打 `处理中`，修完补评论 + 打 `已修复` + 关闭。
+  登录与提交都走直连，不经镜像（请求里带 token，不给第三方）。
+- 「我的反馈记录」：拉取 `issues?creator=<自己>&state=all`（走 `apiBase()`），列表显示状态与日期，点开看正文 + 最新回复。
+- 状态约定（靠 label、state 与正文标记）：有 `已修复` 标签 → 已修复；正文含「提交者已撤回」→ 已撤回；
+  issue 已关闭 → 已处理；有 `处理中` 标签 → 处理中；否则 待处理。处理一条反馈时：先打 `处理中`，修完补评论 + 打 `已修复` + 关闭。
+- **自己发的、还没受理（待处理）的反馈可以改或撤**：打开那条反馈，底部会出现「编辑这条反馈」「撤回这条反馈」。
+  - 编辑：弹窗里改类型与描述，保存时整体覆盖 GitHub 上的标题和正文（`updateIssue`）。
+  - 撤回：正文末尾追加一行「（提交者已撤回 · 时间）」并把状态置为 CLOSED（`updateIssue` + `state: CLOSED`），列表里显示成「已撤回」，跟「已处理」区分开。
+  - 已被受理（处理中 / 已修复 / 已关闭）或不是自己发的，就不显示这两个按钮，避免改到正在处理的内容。
+- **项目所有者（@hnxy114514）可以删除任意一条反馈**：打开任意反馈底部有「删除这条反馈（开发者）」，删前弹确认框。
+  REST 没有删 issue 的接口，必须走 GraphQL 的 `deleteIssue`，需要仓库写权限；失败时把 GitHub 返回的原因直接提示出来。
+- 上面三个操作都走 GraphQL（`POST https://api.github.com/graphql`，直连带 token，认证头用 `Bearer`），
+  issue 的 `node_id` 从列表接口带回来直接用。改完会重新拉一次列表（`mineDirty` 标记，回到列表页时触发）。
 
 ---
 
@@ -212,8 +275,21 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
 - 全局搜索：结果项第一行是知识点标题、第二行是「科目 › 章」小字；右侧 ✕ 清空关键词；从详情返回会保留关键词与结果。
 - **新增知识点（今日）**：主页「设置」上方，按知识点编号里的加入日期筛选当天新增；当天没有就退到最近一批，
   标题写成「最近新增（MM-DD）· N 条」。列表分页加载：首屏 40 条，滚到倒数 5 条内续载下一批，只往已有列表尾部追加、不重建。
+- **显示调节（设置 → 显示）**：正文字号、列表字号、标题 / 副标题字号、整体缩放四项，改完点「完成，开始使用」才重建界面。
+  - 整体缩放 `ui_scale`（0.85 ~ 1.40）**必须同时作用在间距和字号两条线上**：
+    间距、图标、圆角统一走 `dp()`（内部乘 `uiScale`）；字号统一走 `Metrics` 的派生值
+    （`titleSize` / `subtitleSize` / `backSize` / `secTagSize`，构造时已乘）与 `fsSp()` / `lsSp()`。
+  - 新增任何文字都要用上面这几个入口，不能直接 `setTextSize(常量)`，否则又会出现「间距变大了、字没变」。
+  - 调节页内只有预览区实时跟着变，整屏生效靠 `recreate()`。
 - **显示调节首次引导**：没存过「已调节」标记的用户（含老版本升级上来的）首次启动会先看到字体 / 缩放调节页，
   必须点「完成，开始使用」才进主页，返回键不放行；确认过之后不再出现。
+- **文字一律居中**：按钮、列表项、标题、说明小字都居中；只有详情页正文长段落、更新说明条目、更新日志的「· 」条目
+  和输入框（搜索框、反馈描述）保持靠左。
+  - **带图标的按钮**必须在右侧补一个同宽的透明占位（`applyIcon()` 里已做）：
+    TextView 会把「图标 + 文字」当整体居中，不补占位的话文字会被左侧图标顶偏，看着就不在按钮正中。
+  - 新增任何说明文字记得 `setGravity(Gravity.CENTER)`，只有真正的长段落和输入类控件才留 `TOP|START`。
+- **连接状态气泡**：通道探测出结果后屏幕底部浮出「已连接服务器 · 直连 / 镜像域名」，1.8 秒后自动淡出，
+  不拦操作；失败不弹。设置 → 数据管理 → 「重新连接服务器」可随时重测。
 
 
 ---
@@ -223,4 +299,7 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
 - `app/src/main/assets/data/` 和 `assets/img/` 都是**生成物**，不要手改，改源文件后重新构建。
 - 签名密钥 `release.keystore` 和 GitHub Token 都**不能入库、不能外泄**。
 - 发布新版本必须同时改 `versionName` 并推代码，否则 App 检测不到更新。
+- **改代码要同步改文档**：动了目录结构、数据流、联网方式、编号规则、界面交互的，同一个改动必须把本文件里对应的章节一起改；
+  文档里写死的张数、行数、域名这类事实也要跟着更新（历史上出现过「56 张图」「约 2000 行」这类过时描述）。
+  用户能感知的变化还要进 `app/src/main/assets/changelog.json`。
 - **素材署名**：应用图标中的书本图形取自 Microsoft Fluent Emoji（MIT License），由 `tools/make_icon.py` 合成圆形表盘后输出。
