@@ -687,6 +687,7 @@ public class MainActivity extends Activity {
 
     // ================= UI =================
     private void buildUi() {
+        getWindow().setBackgroundDrawable(new ColorDrawable(C_BG));
         root = new FrameLayout(this);
         root.setBackgroundColor(C_BG);
         setContentView(root);
@@ -900,6 +901,7 @@ public class MainActivity extends Activity {
     private LinearLayout newScreen() {
         LinearLayout ll = new LinearLayout(this);
         ll.setOrientation(LinearLayout.VERTICAL);
+        ll.setBackgroundColor(C_BG);   // 每页自带黑底：右滑预览时两页各自独立，不会互相透出
         ll.setPadding(m.sidePad, m.topPad, m.sidePad, m.bottomPad);
         return ll;
     }
