@@ -54,6 +54,7 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -176,10 +177,11 @@ public class MainActivity extends Activity {
     private final boolean[] restoreNext = new boolean[12];
 
     // 关于 / 感谢名单
-    private LinearLayout aboutScreen;
-    private ListView aboutList;
-    private final List<String[]> thanksRows = new ArrayList<String[]>();
-    private boolean thanksLoaded = false;
+    private LinearLayout aboutScreen, aboutInner, thanksBox, thanksLoading;
+    private ScrollView aboutScroll;
+    private TextView aboutInfo, thanksState;
+    private boolean thanksLoaded = false, thanksLoadingBusy = false;
+    private final Map<String, Bitmap> avatarCache = new HashMap<String, Bitmap>();
 
     // 更新日志
     private LinearLayout changelogScreen, changelogInner, changelogList;
@@ -2271,7 +2273,7 @@ public class MainActivity extends Activity {
         }
 
         private float sizeOf(float orig) {
-            return script == 0 ? orig : orig * 0.74f;
+            return script == 0 ? orig : orig * 0.68f;
         }
 
         private float baseOf(float orig, float y) {
@@ -2391,7 +2393,7 @@ public class MainActivity extends Activity {
                 ssb.append(inner);
                 if (sup) ssb.setSpan(new SuperscriptSpan(), start, ssb.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                 else ssb.setSpan(new SubscriptSpan(), start, ssb.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-                ssb.setSpan(new RelativeSizeSpan(0.70f), start, ssb.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ssb.setSpan(new RelativeSizeSpan(0.64f), start, ssb.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                 i = next;
             } else if (c == '*' && i + 1 < n && txt.charAt(i + 1) == '*') {
                 int end = txt.indexOf("**", i + 2);
@@ -2809,6 +2811,7 @@ public class MainActivity extends Activity {
             updateProfileUi();
             if (ghToken != null) loadProfileFromGitHub();
         } else if (s == S_ABOUT) {
+            refreshAboutInfo();
             if (!thanksLoaded) loadThanks();
         } else if (s == S_CHANGELOG) {
             if (!changelogFilled) fillChangelog();
@@ -2833,7 +2836,6 @@ public class MainActivity extends Activity {
             case S_ITEM: return itemList;
             case S_SEARCH: return searchList;
             case S_MYFEEDBACK: return mineList;
-            case S_ABOUT: return aboutList;
             default: return null;
         }
     }
@@ -3071,24 +3073,14 @@ public class MainActivity extends Activity {
     private static final String THANKS_PINNED = new String(
             android.util.Base64.decode("bHVja3l5eTA3MjE=", android.util.Base64.NO_WRAP));
     private static final String REPO_OWNER = "hnxy114514";
+    private static final String HINT_TEXT = "I love Lucky";
+    private int tapCount = 0;
+    private long lastTapTime = 0;
 
-    private void buildAboutScreen() {
-        aboutList = makeList();
-
-        LinearLayout head = new LinearLayout(this);
-        head.setOrientation(LinearLayout.VERTICAL);
-        head.addView(makeBack("‹ 返回设置", new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_SETTINGS); }
-        }), wrapM());
-
-        TextView title = new TextView(this);
-        title.setText("关于");
-        title.setTextSize(m.titleSize);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setTextColor(C_PRIMARY);
-        title.setGravity(Gravity.CENTER);
-        head.addView(title, wrap());
-
+    private static final int AVATAR_DP = 26;
+    /** 每次进关于页都按当前数据重算一次，保证数字是实时的。 */
+    private void refreshAboutInfo() {
+        if (aboutInfo == null) return;
         int itemCount = 0, imgCount = 0;
         for (Subject su : subjects) {
             for (Block bl : su.blocks) {
@@ -3100,19 +3092,43 @@ public class MainActivity extends Activity {
                 }
             }
         }
-        TextView info = new TextView(this);
-        info.setText("腕上知识汇总 v" + appVersion() + "（build " + appVersionCode() + "）"
+        aboutInfo.setText("腕上知识汇总 v" + appVersion() + "（build " + appVersionCode() + "）"
                 + "\n作者：@" + REPO_OWNER
                 + "\n屏幕：" + (m.round ? "圆形（已启用圆形安全区）" : "方形")
                 + "\n共 " + subjects.size() + " 科 · 知识点 " + itemCount + " 条 · 配图 " + imgCount + " 张");
-        info.setTextSize(m.subtitleSize - 1f);
-        info.setTextColor(C_SUB);
-        info.setGravity(Gravity.CENTER);
-        info.setPadding(dp(8), dp(9), dp(8), dp(9));
-        info.setBackgroundDrawable(pill(C_PILL));
+    }
+
+
+    private void buildAboutScreen() {
+        aboutScroll = new ScrollView(this);
+        aboutScroll.setVerticalScrollBarEnabled(false);
+        aboutInner = new LinearLayout(this);
+        aboutInner.setOrientation(LinearLayout.VERTICAL);
+        aboutScroll.addView(aboutInner);
+        aboutScreen.addView(aboutScroll, lw());
+
+        aboutInner.addView(makeBack("‹ 返回设置", new View.OnClickListener() {
+            public void onClick(View v) { showScreen(S_SETTINGS); }
+        }), wrapM());
+
+        TextView title = new TextView(this);
+        title.setText("关于");
+        title.setTextSize(m.titleSize);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(C_PRIMARY);
+        title.setGravity(Gravity.CENTER);
+        aboutInner.addView(title, wrap());
+
+        aboutInfo = new TextView(this);
+        aboutInfo.setTextSize(m.subtitleSize - 1f);
+        aboutInfo.setTextColor(C_SUB);
+        aboutInfo.setGravity(Gravity.CENTER);
+        aboutInfo.setPadding(dp(8), dp(9), dp(8), dp(9));
+        aboutInfo.setBackgroundDrawable(pill(C_PILL));
         LinearLayout.LayoutParams ilp = wrap();
         ilp.topMargin = dp(6);
-        head.addView(info, ilp);
+        aboutInner.addView(aboutInfo, ilp);
+        refreshAboutInfo();
 
         TextView logEntry = new TextView(this);
         logEntry.setText("更新日志");
@@ -3130,25 +3146,66 @@ public class MainActivity extends Activity {
         });
         LinearLayout.LayoutParams llp = wrap();
         llp.topMargin = dp(6);
-        head.addView(logEntry, llp);
+        aboutInner.addView(logEntry, llp);
 
-        head.addView(sectionHeader("感谢名单"), wrap());
+        aboutInner.addView(sectionHeader("感谢名单"), wrap());
         TextView tip = new TextView(this);
         tip.setText("以下朋友提交的反馈被采纳，特此致谢（按采纳数量排序）");
         tip.setTextSize(m.subtitleSize - 2f);
         tip.setTextColor(C_SUB);
         tip.setPadding(dp(4), dp(2), dp(4), dp(4));
-        head.addView(tip, wrap());
+        aboutInner.addView(tip, wrap());
 
-        aboutList.addHeaderView(head);
-        aboutList.setAdapter(pairAdapter(thanksRows));
+        // 加载中：转圈 + 文案
+        thanksLoading = new LinearLayout(this);
+        thanksLoading.setOrientation(LinearLayout.HORIZONTAL);
+        thanksLoading.setGravity(Gravity.CENTER);
+        thanksLoading.setPadding(dp(4), dp(10), dp(4), dp(10));
+        ProgressBar spin = new ProgressBar(this);
+        try {
+            spin.getIndeterminateDrawable()
+                    .setColorFilter(C_PRIMARY, android.graphics.PorterDuff.Mode.SRC_IN);
+        } catch (Exception ignored) { }
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(dp(18), dp(18));
+        slp.rightMargin = dp(8);
+        thanksLoading.addView(spin, slp);
+        TextView loadTxt = new TextView(this);
+        loadTxt.setText("正在加载名单…");
+        loadTxt.setTextSize(m.subtitleSize - 1f);
+        loadTxt.setTextColor(C_SUB);
+        thanksLoading.addView(loadTxt, wrap());
+        thanksLoading.setVisibility(View.GONE);
+        aboutInner.addView(thanksLoading, wrap());
+
+        // 空态 / 失败重试
+        thanksState = new TextView(this);
+        thanksState.setTextSize(m.subtitleSize - 1f);
+        thanksState.setTextColor(C_SUB);
+        thanksState.setGravity(Gravity.CENTER);
+        thanksState.setPadding(dp(6), dp(9), dp(6), dp(9));
+        thanksState.setVisibility(View.GONE);
+        thanksState.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                loadThanks();
+            }
+        });
+        aboutInner.addView(thanksState, wrap());
+
+        thanksBox = new LinearLayout(this);
+        thanksBox.setOrientation(LinearLayout.VERTICAL);
+        aboutInner.addView(thanksBox, wrap());
     }
 
-    /** 拉取已采纳的反馈，按提交人聚合后排序（自己提交的不计入）。 */
+    /** 拉取已采纳的反馈，按提交人聚合后排序（自己提的不计入）。 */
     private void loadThanks() {
-        thanksRows.clear();
-        thanksRows.add(new String[]{"正在加载…", "", "#FF8A8A8A"});
-        aboutList.setAdapter(pairAdapter(thanksRows));
+        if (thanksLoadingBusy) return;
+        thanksLoadingBusy = true;
+        thanksLoaded = false;
+        thanksBox.removeAllViews();
+        thanksState.setVisibility(View.GONE);
+        thanksLoading.setVisibility(View.VISIBLE);
+
         new Thread(new Runnable() {
             public void run() {
                 try {
@@ -3195,29 +3252,31 @@ public class MainActivity extends Activity {
 
                     runOnUiThread(new Runnable() {
                         public void run() {
-                            thanksRows.clear();
+                            thanksLoadingBusy = false;
+                            thanksLoading.setVisibility(View.GONE);
                             if (list.isEmpty()) {
-                                thanksRows.add(new String[]{"还没有采纳的反馈", "", "#FF8A8A8A"});
+                                thanksState.setText("还没有被采纳的反馈");
+                                thanksState.setTextColor(C_SUB);
+                                thanksState.setVisibility(View.VISIBLE);
                             } else {
                                 for (int i = 0; i < list.size(); i++) {
                                     Map.Entry<String, Integer> e = list.get(i);
-                                    String color = (i == 0) ? "#FFFFC24B" : "#FF9CC4E6";
-                                    thanksRows.add(new String[]{
-                                            (i + 1) + ". @" + e.getKey(),
-                                            "采纳 " + e.getValue() + " 条",
-                                            color});
+                                    LinearLayout.LayoutParams lp = wrap();
+                                    lp.topMargin = dp(6);
+                                    thanksBox.addView(thanksRow(i, e.getKey(), e.getValue()), lp);
                                 }
                             }
-                            aboutList.setAdapter(pairAdapter(thanksRows));
                             thanksLoaded = true;
                         }
                     });
                 } catch (final Exception ex) {
                     runOnUiThread(new Runnable() {
                         public void run() {
-                            thanksRows.clear();
-                            thanksRows.add(new String[]{"名单加载失败，请检查网络", "", "#FFE57373"});
-                            aboutList.setAdapter(pairAdapter(thanksRows));
+                            thanksLoadingBusy = false;
+                            thanksLoading.setVisibility(View.GONE);
+                            thanksState.setText("名单加载失败，点这里重试");
+                            thanksState.setTextColor(0xFFE57373);
+                            thanksState.setVisibility(View.VISIBLE);
                         }
                     });
                 }
@@ -3225,21 +3284,188 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    /** 一行致谢：圆形头像 + 名次/用户名 + 采纳条数。 */
+    private View thanksRow(int index, String login, int count) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(8), dp(6), dp(8), dp(6));
+        row.setBackgroundDrawable(pill(C_PILL));
+
+        int size = dp(AVATAR_DP);
+        ImageView av = new ImageView(this);
+        av.setImageBitmap(letterAvatar(login, size));
+        FrameLayout avBox = new FrameLayout(this);
+        int box = size + dp(12);       // 头像本身小，扩大点击区域
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(box, box);
+        blp.rightMargin = dp(4);
+        avBox.addView(av, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
+        row.addView(avBox, blp);
+
+        if (login.equalsIgnoreCase(THANKS_PINNED)) {
+            avBox.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) { onAvatarTap(); }
+            });
+        }
+
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        TextView name = new TextView(this);
+        name.setText((index + 1) + ". @" + login);
+        name.setTextSize(listSizeSp - 1f);
+        name.setTypeface(Typeface.DEFAULT_BOLD);
+        name.setTextColor(index == 0 ? C_HI : 0xFFF0F0F0);
+        name.setMaxLines(1);
+        name.setEllipsize(TextUtils.TruncateAt.END);
+        col.addView(name, wrap());
+        TextView sub = new TextView(this);
+        sub.setText("采纳 " + count + " 条");
+        sub.setTextSize(m.subtitleSize - 2f);
+        sub.setTextColor(index == 0 ? C_HI : C_SUB);
+        col.addView(sub, wrap());
+        row.addView(col, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        loadAvatar(login, av, size);
+        return row;
+    }
+
+    /** 连续点击计数：超过 2 秒重新开始，满 5 次给一次反馈。 */
+    private void onAvatarTap() {
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - lastTapTime > 2000) tapCount = 0;
+        lastTapTime = now;
+        tapCount++;
+        if (tapCount < 5) return;
+        tapCount = 0;
+        vibrate();
+        showCard();
+    }
+
+    /** 屏幕中央浮出一张卡片，淡入停留后淡出。 */
+    private void showCard() {
+        final TextView tv = new TextView(this);
+        tv.setText(HINT_TEXT);
+        tv.setTextSize(m.titleSize);
+        tv.setTypeface(Typeface.DEFAULT_BOLD);
+        tv.setTextColor(C_HI);
+        tv.setGravity(Gravity.CENTER);
+        tv.setPadding(dp(20), dp(14), dp(20), dp(14));
+        tv.setBackgroundDrawable(pill(0xFF151515));
+        tv.setAlpha(0f);
+        tv.setScaleX(0.82f);
+        tv.setScaleY(0.82f);
+
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.gravity = Gravity.CENTER;
+        root.addView(tv, lp);
+        tv.bringToFront();
+        tv.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(220).start();
+
+        tv.postDelayed(new Runnable() {
+            public void run() {
+                tv.animate().alpha(0f).setDuration(320).withEndAction(new Runnable() {
+                    public void run() {
+                        try { root.removeView(tv); } catch (Exception ignored) { }
+                    }
+                }).start();
+            }
+        }, 1700);
+    }
+
+    /** 先用首字母色块占位，头像下载成功再替换（网络差也不会空白）。 */
+    private Bitmap letterAvatar(String login, int size) {
+        Bitmap bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(bmp);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        int[] palette = {0xFF35566F, 0xFF4A6B5A, 0xFF6E5140, 0xFF5B4E7A, 0xFF3F6A72};
+        p.setColor(palette[Math.abs(login.hashCode()) % palette.length]);
+        c.drawCircle(size / 2f, size / 2f, size / 2f, p);
+        String ch = login.length() > 0 ? login.substring(0, 1).toUpperCase() : "?";
+        p.setColor(0xFFF2F6FB);
+        p.setTextSize(size * 0.52f);
+        p.setTypeface(Typeface.DEFAULT_BOLD);
+        p.setTextAlign(Paint.Align.CENTER);
+        Paint.FontMetrics fm = p.getFontMetrics();
+        c.drawText(ch, size / 2f, size / 2f - (fm.ascent + fm.descent) / 2f, p);
+        return bmp;
+    }
+
+    /** 裁成圆形，填满 ImageView。 */
+    private Bitmap circleCrop(Bitmap src, int size) {
+        Bitmap out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(out);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        BitmapShader shader = new BitmapShader(src,
+                android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP);
+        Matrix mx = new Matrix();
+        float scale = (float) size / Math.min(src.getWidth(), src.getHeight());
+        mx.setScale(scale, scale);
+        mx.postTranslate((size - src.getWidth() * scale) / 2f,
+                (size - src.getHeight() * scale) / 2f);
+        shader.setLocalMatrix(mx);
+        p.setShader(shader);
+        c.drawCircle(size / 2f, size / 2f, size / 2f, p);
+        return out;
+    }
+
+    private void loadAvatar(final String login, final ImageView iv, final int size) {
+        Bitmap cached = avatarCache.get(login);
+        if (cached != null) {
+            iv.setImageBitmap(cached);
+            return;
+        }
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    Bitmap raw = null;
+                    String[] urls = {
+                            "https://github.com/" + login + ".png?size=" + (size * 2),
+                            "https://avatars.githubusercontent.com/" + login + "?size=" + (size * 2)
+                    };
+                    for (String u : urls) {
+                        try {
+                            byte[] data = httpGetBytes(u);
+                            raw = BitmapFactory.decodeByteArray(data, 0, data.length);
+                            if (raw != null && raw.getWidth() >= 8) break;
+                        } catch (Exception ignored) { }
+                    }
+                    if (raw == null || raw.getWidth() < 8) return;
+                    final Bitmap circle = circleCrop(raw, size);
+                    avatarCache.put(login, circle);
+                    runOnUiThread(new Runnable() {
+                        public void run() { iv.setImageBitmap(circle); }
+                    });
+                } catch (Exception ignored) {
+                    // 下载失败就保留首字母头像，不影响名单显示
+                }
+            }
+        }).start();
+    }
+
     /** 无需登录的 GitHub 读取（公开仓库）。 */
     private String httpGetPublic(String url) throws Exception {
+        byte[] data = httpGetBytes(url);
+        return new String(data, "UTF-8");
+    }
+
+    /** 简单 GET，返回原始字节（头像等二进制用）。 */
+    private byte[] httpGetBytes(String url) throws Exception {
         java.net.HttpURLConnection cn = (java.net.HttpURLConnection) new URL(url).openConnection();
         try {
-            cn.setConnectTimeout(8000);
-            cn.setReadTimeout(12000);
+            cn.setConnectTimeout(6000);
+            cn.setReadTimeout(9000);
+            cn.setInstanceFollowRedirects(true);
             cn.setRequestProperty("Accept", "application/vnd.github+json");
             cn.setRequestProperty("User-Agent", "HZKnowledge-Android");
             java.io.InputStream is = cn.getInputStream();
             java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
-            byte[] b = new byte[4096];
+            byte[] b = new byte[8192];
             int n;
             while ((n = is.read(b)) > 0) bos.write(b, 0, n);
             is.close();
-            return new String(bos.toByteArray(), "UTF-8");
+            return bos.toByteArray();
         } finally {
             cn.disconnect();
         }
