@@ -144,6 +144,10 @@ public class MainActivity extends Activity {
     private float fontSizeSp = 14f;
     private float listSizeSp = 15f;
     private boolean isRound = false;
+    // 右滑返回手势（设置里可关）
+    private boolean swipeBack = true;
+    private boolean swipeTracking = false;
+    private float swipeX, swipeY;
     private List<String> orderKeys = new ArrayList<String>();
     private static final String[] DEFAULT_ORDER = {"chinese", "math", "english", "physics", "chem", "bio", "politics", "history", "geography"};
 
@@ -182,6 +186,7 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences("settings", MODE_PRIVATE);
         fontSizeSp = prefs.getFloat("font_size", m.round ? 13f : 14f);
         listSizeSp = prefs.getFloat("list_size", m.round ? 14f : 15f);
+        swipeBack = prefs.getBoolean("swipe_back", true);
         loadData();
         loadOrderKeys();
         buildUi();
@@ -2057,6 +2062,20 @@ public class MainActivity extends Activity {
             }
         }), wrap());
 
+        settingsInner.addView(toggleRow("右滑返回", swipeBack, new View.OnClickListener() {
+            public void onClick(View v) {
+                swipeBack = !swipeBack;
+                prefs.edit().putBoolean("swipe_back", swipeBack).apply();
+                renderSettings();
+            }
+        }), wrap());
+        TextView swipeHint = new TextView(this);
+        swipeHint.setText("开启后从屏幕左侧向右滑即返回上一页；查看大图时不生效，需点「‹ 关闭」。");
+        swipeHint.setTextSize(m.subtitleSize - 2f);
+        swipeHint.setTextColor(C_SUB);
+        swipeHint.setPadding(dp(4), dp(2), dp(4), dp(4));
+        settingsInner.addView(swipeHint, wrap());
+
         settingsInner.addView(sectionHeader("数据管理"), wrap());
         TextView upd = new TextView(this);
         upd.setText("检查更新");
@@ -2206,6 +2225,36 @@ public class MainActivity extends Activity {
         return t;
     }
 
+    /** 开关型设置行：点整行切换，右侧显示开/关。 */
+    private View toggleRow(String label, boolean on, View.OnClickListener onClick) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(10), dp(8), dp(10), dp(8));
+        row.setBackgroundDrawable(pill(C_CARD));
+        row.setOnClickListener(onClick);
+
+        TextView name = new TextView(this);
+        name.setText(label);
+        name.setTextSize(m.backSize);
+        name.setTextColor(C_TEXT);
+        name.setLayoutParams(new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView state = new TextView(this);
+        state.setText(on ? "开" : "关");
+        state.setTextSize(m.backSize);
+        state.setTypeface(Typeface.DEFAULT_BOLD);
+        state.setTextColor(on ? C_PRIMARY : C_SUB);
+        state.setGravity(Gravity.CENTER);
+        state.setPadding(dp(14), dp(3), dp(14), dp(3));
+        state.setBackgroundDrawable(pill(on ? 0xFF14384A : C_PILL));
+
+        row.addView(name);
+        row.addView(state);
+        return row;
+    }
+
     private View settingRow(String label, int value,
                             View.OnClickListener minus, View.OnClickListener plus) {
         LinearLayout row = new LinearLayout(this);
@@ -2298,12 +2347,54 @@ public class MainActivity extends Activity {
     @Override
     public void onBackPressed() {
         if (fullscreenView != null) { closeFullscreen(); return; }
+        if (screen == S_SUBJECT) { super.onBackPressed(); return; }
+        handleBack();
+    }
+
+    /** 返回上一级（实体键与右滑手势共用）。 */
+    private void handleBack() {
+        if (fullscreenView != null) { closeFullscreen(); return; }
         if (screen == S_DETAIL) showScreen(detailBack);
         else if (screen == S_ITEM) showScreen(S_CHILD);
         else if (screen == S_CHILD) showScreen(S_BLOCK);
         else if (screen == S_BLOCK) showScreen(S_SUBJECT);
         else if (screen == S_SETTINGS) showScreen(S_SUBJECT);
         else if (screen == S_SEARCH) showScreen(S_SUBJECT);
-        else super.onBackPressed();
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        trackSwipeBack(ev);
+        return super.dispatchTouchEvent(ev);
+    }
+
+    /** 右滑返回：抬手时判定，横向位移够大且明显横向才触发；全屏看图、主页不触发。 */
+    private void trackSwipeBack(MotionEvent ev) {
+        if (!swipeBack || fullscreenView != null) {
+            swipeTracking = false;
+            return;
+        }
+        int action = ev.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            swipeX = ev.getX();
+            swipeY = ev.getY();
+            swipeTracking = true;
+        } else if (action == MotionEvent.ACTION_UP) {
+            if (swipeTracking) {
+                float dx = ev.getX() - swipeX;
+                float dy = Math.abs(ev.getY() - swipeY);
+                boolean editing = getCurrentFocus() instanceof EditText;
+                float need = editing ? dp(70) : dp(48);          // 正在输入时要求更长滑动
+                boolean edgeOk = !editing || swipeX <= dp(22);   // 且必须从最左边起手
+                if (screen != S_SUBJECT && dx > need && dx > dy * 1.5f && edgeOk) {
+                    swipeTracking = false;
+                    handleBack();
+                    return;
+                }
+            }
+            swipeTracking = false;
+        } else if (action == MotionEvent.ACTION_CANCEL) {
+            swipeTracking = false;
+        }
     }
 }
