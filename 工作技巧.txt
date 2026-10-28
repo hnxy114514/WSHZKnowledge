@@ -291,3 +291,71 @@ Release 的 tag 必须 = v{versionName}，App 靠它判断要不要更新。
    - javac 全量编译（build.sh 第 5 步会做，但改完先单独编译更快）
    - bash build.sh 后在 APK 上 aapt2 dump badging 确认 versionName
    - 用 release.py 发布，它会顺手把 cloud/version.json 推上去
+
+
+==================================================
+十五、反馈功能（Device Flow）
+==================================================
+1) client_id 在 MainActivity.GH_CLIENT_ID（Ov23liuXn1Lh4Cy0UpcS），
+   对应 GitHub 账号 hnxy114514 下的 OAuth App "HZKnowledge"。
+   client_id 不是密钥，可随 APK 公开；client_secret 绝不能进代码。
+
+2) OAuth App 两个开关决定成败：
+   - Enable Device Flow 必须勾（不勾 device/code 返回 device_flow_disabled）
+   - Expire user access tokens 不要勾（勾了令牌 8 小时过期，
+     续期要 client_secret，公开 APK 里放不了，等于每 8 小时重登一次）
+
+3) 不用跑 App 也能验证配置是否正常：
+   curl -sk -X POST -H "Accept: application/json" \
+     -d "client_id=Ov23liuXn1Lh4Cy0UpcS&scope=public_repo" \
+     https://github.com/login/device/code
+   → 返回 user_code / interval / expires_in 就说明配置 OK；
+   GitHub 不返回 verification_uri_complete，所以代码里用
+   https://github.com/login/device?user_code=XXXX 自行拼链接。
+
+   再验证轮询（此时没人授权）：
+   取上一步 device_code，POST https://github.com/login/oauth/access_token
+   带 client_id / device_code / grant_type=urn:ietf:params:oauth:grant-type:device_code
+   → 应返回 {"error":"authorization_pending"}
+
+4) 授权码获取后会自动写入剪贴板，并弹原生 AlertDialog 显示码；
+   圆表对话框宽度取屏宽 0.62 倍（圆内接正方形约 0.707），避免被表盘裁掉。
+
+5) token 存 SharedPreferences 的 gh_token / gh_login，设置页「退出登录」清除。
+   提交报 401 / Not Found 时客户端会自动登出。
+
+6) 验证提交是否成功：到仓库 Issues 看有没有新条目，
+   标题形如「[内容有误] 描述前 20 字」，正文带版本/设备/最近浏览。
+
+
+==================================================
+十五、反馈功能（Device Flow）
+==================================================
+1) client_id 在 MainActivity.GH_CLIENT_ID（Ov23liuXn1Lh4Cy0UpcS），
+   对应 GitHub 账号 hnxy114514 下的 OAuth App "HZKnowledge"。
+   client_id 不是密钥，可随 APK 公开；client_secret 绝不能进代码。
+
+2) OAuth App 两个开关决定成败：
+   - Enable Device Flow 必须勾（不勾 device/code 返回 device_flow_disabled）
+   - Expire user access tokens 不要勾（勾了令牌 8 小时过期，
+     续期要 client_secret，公开 APK 里放不了，等于每 8 小时重登一次）
+
+3) 不用跑 App 也能验证配置是否正常：
+   curl -sk -X POST -H "Accept: application/json"      -d "client_id=Ov23liuXn1Lh4Cy0UpcS&scope=public_repo"      https://github.com/login/device/code
+   → 返回 user_code / interval / expires_in 就说明配置 OK；
+   GitHub 不返回 verification_uri_complete，所以代码里用
+   https://github.com/login/device?user_code=XXXX 自行拼链接。
+
+   再验证轮询（此时没人授权）：
+   取上一步 device_code，POST https://github.com/login/oauth/access_token
+   带 client_id / device_code / grant_type=urn:ietf:params:oauth:grant-type:device_code
+   → 应返回 {"error":"authorization_pending"}
+
+4) 授权码获取后会自动写入剪贴板，并弹原生 AlertDialog 显示码；
+   圆表对话框宽度取屏宽 0.62 倍（圆内接正方形约 0.707），避免被表盘裁掉。
+
+5) token 存 SharedPreferences 的 gh_token / gh_login，设置页「退出登录」清除。
+   提交报 401 / Not Found 时客户端会自动登出。
+
+6) 验证提交是否成功：到仓库 Issues 看有没有新条目，
+   标题形如「[内容有误] 描述前 20 字」，正文带版本/设备/最近浏览。

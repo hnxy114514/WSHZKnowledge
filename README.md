@@ -161,6 +161,26 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
 
 ---
 
+## 反馈功能（App 内提交 Issue）
+
+- 入口：设置 → 数据管理 → 反馈与建议。
+- 登录用 GitHub Device Flow：`MainActivity.GH_CLIENT_ID` 硬编码 OAuth App 的 client_id，scope 为 `public_repo`。
+- 流程：点登录 → 取 8 位授权码 → 自动复制到剪贴板并弹原生对话框 → 可跳系统浏览器（链接已带码）→ 手表每 5 秒轮询 → 成功后 token 存 SharedPreferences（`gh_token` / `gh_login`）。
+- 提交：`POST /repos/<repo>/issues`，正文自动附带版本号、机型、Android 版本、圆/方屏、最近浏览的知识点路径。
+- OAuth App 的两条硬要求：必须勾选 **Enable Device Flow**；**不要**勾 Expire user access tokens（勾了 8 小时过期，续期需要 client_secret，而 secret 不能放进公开 APK）。
+
+---
+
+## 反馈功能（App 内提交 Issue）
+
+- 入口：设置 → 数据管理 → 反馈与建议。
+- 登录用 GitHub Device Flow：`MainActivity.GH_CLIENT_ID` 硬编码 OAuth App 的 client_id，scope 为 `public_repo`。
+- 流程：点登录 → 取 8 位授权码 → 自动复制到剪贴板并弹原生对话框 → 可跳系统浏览器（链接已带码）→ 手表每 5 秒轮询 → 成功后 token 存 SharedPreferences（`gh_token` / `gh_login`）。
+- 提交：`POST /repos/<repo>/issues`，正文自动附带版本号、机型、Android 版本、圆/方屏、最近浏览的知识点路径。
+- OAuth App 的两条硬要求：必须勾选 **Enable Device Flow**；**不要**勾 Expire user access tokens（勾了 8 小时过期，续期需要 client_secret，而 secret 不能放进公开 APK）。
+
+---
+
 ## 界面交互要点
 
 - 每页的「‹ 返回」是随内容滚动的第一项，不固定占用顶部空间；系统返回键/手势始终可用。

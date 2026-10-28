@@ -1,6 +1,9 @@
 package com.lizard.hsknowledge;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -37,6 +40,8 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
+import android.view.Window;
+import android.view.WindowManager;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.AbsListView;
@@ -148,6 +153,7 @@ public class MainActivity extends Activity {
     private String fbDraft = "";
     private String ghToken, ghLogin;
     private String fbCode, fbCodeUrl;
+    private AlertDialog codeDialog;
     private String lastPath = "";
     private FrameLayout progBox;
     private View progFill;
@@ -2407,6 +2413,12 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onDestroy() {
+        dismissCodeDialog();
+        super.onDestroy();
+    }
+
+    @Override
     public void onBackPressed() {
         if (fullscreenView != null) { closeFullscreen(); return; }
         if (screen == S_SUBJECT) { super.onBackPressed(); return; }
@@ -2791,6 +2803,7 @@ public class MainActivity extends Activity {
 
     private void logoutGitHub() {
         loginRunning = false;
+        dismissCodeDialog();
         ghToken = null;
         ghLogin = null;
         prefs.edit().remove("gh_token").remove("gh_login").apply();
@@ -2826,8 +2839,9 @@ public class MainActivity extends Activity {
                             : "https://github.com/login/device?user_code=" + code;
                     runOnUiThread(new Runnable() {
                         public void run() {
+                            copyToClipboard(code);
                             updateFeedbackUi();
-                            openBrowser(fbCodeUrl);
+                            showCodeDialog(code, fbCodeUrl);
                         }
                     });
                     pollDeviceToken(device, interval);
@@ -2865,6 +2879,7 @@ public class MainActivity extends Activity {
                 if ("slow_down".equals(err)) { interval += 5; continue; }
                 if ("authorization_pending".equals(err)) continue;
                 loginRunning = false;
+                dismissCodeDialog();
                 updateFeedbackUi();
                 toast("登录未完成：" + ("access_denied".equals(err) ? "已取消授权" : err));
                 return;
@@ -2873,6 +2888,7 @@ public class MainActivity extends Activity {
             }
         }
         loginRunning = false;
+        dismissCodeDialog();
         updateFeedbackUi();
         if (ghToken == null) toast("登录超时，可再点一次登录");
     }
@@ -2885,6 +2901,7 @@ public class MainActivity extends Activity {
                     login = new JSONObject(httpGetAuthed(GH_USER)).optString("login", "");
                 } catch (Exception ignored) { }
                 loginRunning = false;
+                dismissCodeDialog();
                 saveGitHub(ghToken, login);
                 toast(login == null ? "已登录 GitHub" : "已登录 @" + login);
             }
@@ -2973,6 +2990,95 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             return 0;
         }
+    }
+
+    private void copyToClipboard(String text) {
+        try {
+            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("GitHub 授权码", text));
+        } catch (Exception ignored) { }
+    }
+
+    /** 原生对话框：显示授权码（已自动复制到剪贴板），再决定去不去浏览器。 */
+    private void showCodeDialog(final String code, final String url) {
+        dismissCodeDialog();
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(12), dp(13), dp(12), dp(8));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xFF151515);
+        bg.setCornerRadius(dp(16));
+        box.setBackgroundDrawable(bg);
+
+        TextView cap = new TextView(this);
+        cap.setText("GitHub 授权码");
+        cap.setTextSize(m.subtitleSize - 2f);
+        cap.setTextColor(C_SUB);
+        cap.setGravity(Gravity.CENTER);
+        box.addView(cap, wrap());
+
+        TextView codeTxt = new TextView(this);
+        codeTxt.setText(code);
+        codeTxt.setTextSize(m.titleSize);
+        codeTxt.setTypeface(Typeface.DEFAULT_BOLD);
+        codeTxt.setTextColor(C_PRIMARY);
+        codeTxt.setGravity(Gravity.CENTER);
+        codeTxt.setPadding(0, dp(3), 0, dp(3));
+        box.addView(codeTxt, wrap());
+
+        TextView copied = new TextView(this);
+        copied.setText("已复制到剪贴板，可直接粘贴");
+        copied.setTextSize(m.subtitleSize - 2.5f);
+        copied.setTextColor(C_SUB);
+        copied.setGravity(Gravity.CENTER);
+        box.addView(copied, wrap());
+
+        TextView open = new TextView(this);
+        open.setText("打开浏览器授权");
+        open.setTextSize(m.backSize);
+        open.setTypeface(Typeface.DEFAULT_BOLD);
+        open.setTextColor(C_PRIMARY);
+        open.setGravity(Gravity.CENTER);
+        open.setPadding(dp(8), dp(9), dp(8), dp(9));
+        open.setBackgroundDrawable(pill(0xFF14384A));
+        open.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                dismissCodeDialog();
+                openBrowser(url);
+            }
+        });
+        LinearLayout.LayoutParams olp = wrap();
+        olp.topMargin = dp(9);
+        box.addView(open, olp);
+
+        TextView close = new TextView(this);
+        close.setText("稍后再说");
+        close.setTextSize(m.subtitleSize - 1f);
+        close.setTextColor(C_SUB);
+        close.setGravity(Gravity.CENTER);
+        close.setPadding(dp(8), dp(8), dp(8), dp(2));
+        close.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { dismissCodeDialog(); }
+        });
+        box.addView(close, wrap());
+
+        codeDialog = new AlertDialog.Builder(this).setView(box).create();
+        codeDialog.setCancelable(false);
+        codeDialog.setCanceledOnTouchOutside(false);
+        codeDialog.show();
+        try {
+            Window w = codeDialog.getWindow();
+            int sw = getResources().getDisplayMetrics().widthPixels;
+            w.setLayout((int) (sw * (m.round ? 0.62f : 0.82f)), WindowManager.LayoutParams.WRAP_CONTENT);
+            w.setBackgroundDrawable(new ColorDrawable(0x00000000));
+        } catch (Exception ignored) { }
+    }
+
+    private void dismissCodeDialog() {
+        try {
+            if (codeDialog != null && codeDialog.isShowing()) codeDialog.dismiss();
+        } catch (Exception ignored) { }
+        codeDialog = null;
     }
 
     private void openBrowser(String url) {
