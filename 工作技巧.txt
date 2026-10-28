@@ -237,3 +237,48 @@ Release 的 tag 必须 = v{versionName}，App 靠它判断要不要更新。
 6) 合并知识点会导致部分高亮失效，构建输出里的「未匹配」要盯住。
 
 7) 上传 APK 前先本地验证签名和 versionCode，避免推上去装不上。
+
+
+==================================================
+十四、更新机制（版本获取 / 镜像 / 进度）
+==================================================
+1) 取版本号三级兜底（MainActivity.fetchReleaseInfo）：
+   a. 直连 api.github.com/repos/<repo>/releases/latest
+   b. 镜像前缀 + 同一个 API（目前只有 gh-proxy.com 能转发 API）
+   c. 读静态文件 cloud/version.json（raw，几乎所有镜像都支持）
+   三级全挂才报「检查更新失败」。
+
+2) cloud/version.json 由 tools/build_authored.py 构建时按
+   AndroidManifest 的 versionName 自动生成；
+   release.py 发布后会自动 git add -A + commit + push，
+   保证兜底版本号永远和最新 Release 一致。不要手工编辑。
+
+3) 下载源顺序（MainActivity.MIRRORS，前缀 + 原地址）：
+   直连 → gh-proxy.com → ghproxy.net → ghfast.top → gh.llkk.cc → github.moeyy.xyz
+   换源原则：某个源 15 秒内拿不到 150KB，判「连接太慢」自动切下一个；
+   下载内容小于 200KB 判「返回内容不是安装包」（镜像常回 HTML 错误页），也切源。
+
+4) 验证某个镜像是否可用（改镜像列表前先测）：
+   A=gh-proxy.com
+   # 测 APK 下载（取前 256KB）
+   curl -sk -o /dev/null -m 25 -w "%{http_code} %{size_download} %{time_total}\n" \
+     -r 0-262143 "https://$A/https://github.com/hnxy114514/WSHZKnowledge/releases/download/v1.6.0/HZKnowledge-v1.6.0.apk"
+   # 测 API 转发（能不能查版本）
+   curl -sk -m 20 -o /dev/null -w "%{http_code}\n" \
+     "https://$A/https://api.github.com/repos/hnxy114514/WSHZKnowledge/releases/latest"
+   # 测静态文件转发（version.json 兜底）
+   curl -sk -m 20 "https://$A/https://raw.githubusercontent.com/hnxy114514/WSHZKnowledge/main/cloud/version.json"
+   期望：APK 返回 206/200 且有字节；API 返回 200 且是 JSON；
+   ghproxy.net 实测对 API 返回 403（所以它只放在下载列表里）。
+
+5) 进度显示：屏幕中央浮出卡片，标题「正在下载 vX.Y.Z」，
+   副行「42% · 1.2/2.6 MB · 下载源」。卡片只消费自身区域的点击，
+   外围仍可操作，不阻塞阅读。percent<0 表示总长度未知（只显示已下载 MB）。
+
+6) 已下载过的同版本不重复下载：filesDir/update.apk + prefs 的 apk_tag 比对，
+   命中直接弹安装器。换版本才会重新下载（临时文件 .tmp + 重命名，防残留旧包）。
+
+7) 修改下载/更新逻辑后必须做的三件事：
+   - javac 全量编译（build.sh 第 5 步会做，但改完先单独编译更快）
+   - bash build.sh 后在 APK 上 aapt2 dump badging 确认 versionName
+   - 用 release.py 发布，它会顺手把 cloud/version.json 推上去

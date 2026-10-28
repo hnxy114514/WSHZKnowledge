@@ -980,4 +980,18 @@ cloud_fp = os.path.join(cloud_dir, "update.json")
 with open(cloud_fp, "w", encoding="utf-8") as f:
     json.dump({"v": DATA_VERSION, "subjects": ordered}, f, ensure_ascii=False, separators=(",", ":"))
 print("云端更新包:", cloud_fp, os.path.getsize(cloud_fp), "bytes")
+# 版本标记：App 在 GitHub API 不可达时读这个文件判断最新版本
+import re as _re
+_man = os.path.abspath(os.path.join(TOOLS, "..", "app", "src", "main", "AndroidManifest.xml"))
+_ver = ""
+try:
+    _m = _re.search(r'android:versionName="([^"]+)"', open(_man, encoding="utf-8").read())
+    if _m:
+        _ver = _m.group(1)
+except Exception:
+    pass
+if _ver:
+    with open(os.path.join(cloud_dir, "version.json"), "w", encoding="utf-8") as f:
+        json.dump({"version": _ver, "tag": "v" + _ver}, f, ensure_ascii=False)
+    print("版本标记:", os.path.join(cloud_dir, "version.json"), "->", _ver)
 print("目录:", data_dir)

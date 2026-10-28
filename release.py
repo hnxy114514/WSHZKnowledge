@@ -83,9 +83,24 @@ def main():
         print("上传 APK 失败:", up.get("message"))
         sys.exit(1)
 
+    print("== 4. 提交版本标记 ==")
+    push_version(token, tag)
+
     print("== 完成 ==")
     print("下载直链:", up.get("browser_download_url"))
     print("Release 页: https://github.com/%s/releases/tag/%s" % (REPO, tag))
+
+
+def push_version(token, tag):
+    """把 cloud/version.json（App 的兜底版本号）提交并推送到 main。"""
+    url = "https://%s@github.com/%s.git" % (token, REPO)
+    subprocess.call(["git", "add", "-A"])
+    rc = subprocess.call(["git", "commit", "-m", "发布 %s" % tag])
+    if rc != 0:
+        print("无改动可提交，跳过 commit")
+    rc = subprocess.call(["git", "push", url, "main"])
+    if rc != 0:
+        print("推送失败（不影响已发布的 APK），可稍后手动 push")
 
 
 if __name__ == "__main__":

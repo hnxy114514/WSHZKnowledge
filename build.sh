@@ -28,9 +28,23 @@ cd "$PROJ/tools"
 python build_authored.py
 
 echo "== 2. 清理 =="
-rm -rf "$BUILD/gen" "$BUILD/obj" "$BUILD/classes.dex" "$BUILD/dexout" \
-       "$BUILD/base.apk" "$BUILD/unsigned.apk" "$BUILD/aligned.apk" "$OUT"
-mkdir -p "$BUILD/gen" "$BUILD/obj"
+python - "$BUILD" "$OUT" <<'PY'
+import os, shutil, sys
+build, out = sys.argv[1], sys.argv[2]
+for d in ("gen", "obj", "dexout"):
+    p = os.path.join(build, d)
+    if os.path.isdir(p):
+        shutil.rmtree(p, ignore_errors=True)
+for f in ("classes.dex", "classes.jar", "base.apk", "unsigned.apk", "aligned.apk", "res.zip"):
+    p = os.path.join(build, f)
+    if os.path.isfile(p):
+        os.remove(p)
+if os.path.isfile(out):
+    os.remove(out)
+for d in ("gen", "obj"):
+    os.makedirs(os.path.join(build, d), exist_ok=True)
+print("cleaned")
+PY
 
 echo "== 3. aapt2 compile =="
 "$BT/aapt2" compile --dir "$RES" -o "$BUILD/gen/res.zip"

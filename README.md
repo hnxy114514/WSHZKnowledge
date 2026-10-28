@@ -148,10 +148,16 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
 
 ## 云端更新机制
 
-- App 启动时后台匿名请求 `api.github.com/repos/hnxy114514/WSHZKnowledge/releases/latest`。
+- App 启动时后台静默检查，设置页「检查更新」可手动触发。
+- 取版本号三级兜底：
+  1. 直连 `api.github.com/.../releases/latest`；
+  2. 走镜像 `https://gh-proxy.com/` + 同一 API（实测可转发 API）；
+  3. 仍失败则读静态文件 `cloud/version.json`（`build_authored.py` 构建时按 `versionName` 生成，`release.py` 会随发布自动提交推送）。
 - 用 `versionName` 与最新 Release 的 `tag_name` 做语义化比较。
-- 有新版 → 先申请「安装未知应用」权限 → 下载 APK（临时文件 + 重命名，防残留旧包）→ 触发覆盖安装。
-- 无新版 / 网络失败静默（设置页可手动点「检查更新」）。
+- 有新版 → 先申请「安装未知应用」权限 → 下载 APK → 触发覆盖安装。
+- 下载源顺序（`MainActivity.MIRRORS`，前缀 + 原地址）：直连 → gh-proxy.com → ghproxy.net → ghfast.top → gh.llkk.cc → github.moeyy.xyz。任一源 15 秒内拿不到 150KB 即判定「太慢」自动切换下一个。
+- 屏幕中央有进度卡片，实时显示百分比、已下载/总大小、当前下载源；卡片不拦截点击，可边下边用。
+- 同一版本下载过一次即复用本地 `filesDir/update.apk`（`apk_tag` 记录版本），不重复下载。
 
 ---
 

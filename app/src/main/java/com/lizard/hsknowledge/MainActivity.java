@@ -63,6 +63,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -77,7 +78,25 @@ public class MainActivity extends Activity {
     private static final int C_PRIMARY = 0xFF4FC3F7; // 主色（青蓝）
     private static final int C_HI = 0xFFFFC107;      // 重点高亮（琥珀金）
 
-    private static final String RELEASES_URL = "https://api.github.com/repos/hnxy114514/WSHZKnowledge/releases/latest";
+    private static final String REPO = "hnxy114514/WSHZKnowledge";
+    private static final String RELEASES_API = "https://api.github.com/repos/" + REPO + "/releases/latest";
+    private static final String RELEASE_DL = "https://github.com/" + REPO + "/releases/download/";
+    /** 国内直连 GitHub 不稳，逐个尝试以下加速镜像（前缀 + 原地址）。顺序即实测优先级。 */
+    private static final String[] MIRRORS = {
+            "https://gh-proxy.com/",
+            "https://ghproxy.net/",
+            "https://ghfast.top/",
+            "https://gh.llkk.cc/",
+            "https://github.moeyy.xyz/",
+    };
+    /** 能转发 api.github.com 的镜像（多数镜像只代 github.com 与 raw）。 */
+    private static final String[] API_MIRRORS = {
+            "https://gh-proxy.com/",
+    };
+    /** API 只试直连 + 前几个镜像，避免逐个超时干等。 */
+    private static final int API_TRIES = 3;
+    private static final String VERSION_JSON_RAW =
+            "https://raw.githubusercontent.com/" + REPO + "/main/cloud/version.json";
     private static final String APK_FILE = "update.apk";
     private static final String APK_AUTHORITY = "com.lizard.hsknowledge.fileprovider";
     private static final int C_TEXT = 0xFFE8E8E8;    // 正文
@@ -115,6 +134,10 @@ public class MainActivity extends Activity {
     private ScrollView detailScroll, settingsScroll;
     private LinearLayout detailInner, settingsInner;
     private FrameLayout fullscreenView;
+    private FrameLayout progBox;
+    private View progFill;
+    private TextView progTitle, progDetail;
+    private int progBarW;
 
     // ---------- 设置 ----------
     private SharedPreferences prefs;
@@ -282,71 +305,135 @@ public class MainActivity extends Activity {
 
     /** 检查 GitHub Release 最新版，有新版则先申请安装权限，再下载 APK 覆盖安装。 */
     private void checkUpdate(final boolean silent) {
+        if (!silent) progressShow("正在检查更新…", "连接更新服务器", -1);
         new Thread(new Runnable() {
             public void run() {
                 try {
                     final String local = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
-                    URL u = new URL(RELEASES_URL);
-                    HttpURLConnection cn = (HttpURLConnection) u.openConnection();
-                    cn.setConnectTimeout(8000);
-                    cn.setReadTimeout(10000);
-                    cn.setInstanceFollowRedirects(true);
-                    cn.setRequestProperty("Accept", "application/vnd.github+json");
-                    InputStream is = cn.getInputStream();
-                    ByteArrayOutputStream bos = new ByteArrayOutputStream();
-                    byte[] b = new byte[8192];
-                    int n;
-                    while ((n = is.read(b)) > 0) bos.write(b, 0, n);
-                    is.close();
-                    cn.disconnect();
-                    JSONObject obj = new JSONObject(new String(bos.toByteArray(), StandardCharsets.UTF_8));
-                    final String remoteTag = obj.optString("tag_name", "");
+                    RelInfo rel = fetchReleaseInfo();
+                    final String remoteTag = rel.tag;
                     if (compareSemver(local, remoteTag) >= 0) {
+                        progressHide();
                         if (!silent) toast("已是最新版 v" + local);
                         return;
                     }
-                    String apkUrl = null;
-                    JSONArray assets = obj.optJSONArray("assets");
-                    if (assets != null) {
-                        for (int i = 0; i < assets.length(); i++) {
-                            JSONObject a = assets.getJSONObject(i);
-                            if (a.optString("name", "").endsWith(".apk")) {
-                                apkUrl = a.optString("browser_download_url", "");
-                                break;
-                            }
-                        }
-                    }
-                    if (apkUrl == null || apkUrl.length() == 0) {
-                        if (!silent) toast("未找到安装包");
-                        return;
-                    }
-                    final String url = apkUrl;
+                    final String url = rel.apkUrl;
                     runOnUiThread(new Runnable() {
                         public void run() {
                             if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+                                progressHide();
                                 requestInstallPermission();
                                 return;
                             }
-                            toast("正在下载 v" + remoteTag + "…");
                             new Thread(new Runnable() {
                                 public void run() {
                                     try {
-                                        downloadApk(url);
+                                        if (!reuseDownloaded(remoteTag)) {
+                                            downloadApkWithMirrors(url, remoteTag);
+                                        }
+                                        progressShow("下载完成", "正在打开安装程序…", 100);
                                         runOnUiThread(new Runnable() {
-                                            public void run() { installApk(); }
+                                            public void run() {
+                                                progressHide();
+                                                installApk();
+                                            }
                                         });
                                     } catch (final Exception e) {
-                                        if (!silent) toast("下载失败：" + e.getMessage());
+                                        progressHide();
+                                        toast("下载失败：" + e.getMessage());
                                     }
                                 }
                             }).start();
                         }
                     });
                 } catch (final Exception e) {
+                    progressHide();
                     if (!silent) toast("检查更新失败：" + e.getMessage());
                 }
             }
         }).start();
+    }
+
+    private static class RelInfo {
+        String tag;
+        String apkUrl;
+    }
+
+    /** 先走 API；API 全不通时改用仓库里的静态 version.json（静态文件更容易代理）。 */
+    private RelInfo fetchReleaseInfo() throws Exception {
+        RelInfo r = new RelInfo();
+        try {
+            JSONObject obj = fetchLatestRelease();
+            r.tag = obj.optString("tag_name", "");
+            JSONArray assets = obj.optJSONArray("assets");
+            if (assets != null) {
+                for (int i = 0; i < assets.length(); i++) {
+                    JSONObject a = assets.getJSONObject(i);
+                    if (a.optString("name", "").endsWith(".apk")) {
+                        r.apkUrl = a.optString("browser_download_url", "");
+                        break;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            r.tag = fetchTagFallback();
+        }
+        if (r.tag == null || r.tag.length() == 0) throw new Exception("无法获取版本号");
+        if (r.apkUrl == null || r.apkUrl.length() == 0) r.apkUrl = apkUrlFor(r.tag);
+        return r;
+    }
+
+    private String apkUrlFor(String tag) {
+        return RELEASE_DL + tag + "/HZKnowledge-" + tag + ".apk";
+    }
+
+    /** 直连失败时换支持 API 转发的镜像取 release 信息。 */
+    private JSONObject fetchLatestRelease() throws Exception {
+        Exception last = null;
+        for (int i = 0; i <= API_MIRRORS.length; i++) {
+            String u = (i == 0) ? RELEASES_API : API_MIRRORS[i - 1] + RELEASES_API;
+            try {
+                return new JSONObject(httpGetText(u, 5000, 6000));
+            } catch (Exception e) {
+                last = e;
+            }
+        }
+        throw (last == null) ? new Exception("无法连接更新服务器") : last;
+    }
+
+    private String fetchTagFallback() throws Exception {
+        Exception last = null;
+        int tries = Math.min(API_TRIES, MIRRORS.length);
+        for (int i = 0; i <= tries; i++) {
+            String u = (i == 0) ? VERSION_JSON_RAW : MIRRORS[i - 1] + VERSION_JSON_RAW;
+            try {
+                String v = new JSONObject(httpGetText(u, 5000, 6000)).optString("version", "");
+                if (v.length() > 0) return v.startsWith("v") ? v : "v" + v;
+            } catch (Exception e) {
+                last = e;
+            }
+        }
+        throw (last == null) ? new Exception("无法获取版本号") : last;
+    }
+
+    private String httpGetText(String urlStr, int connectMs, int readMs) throws Exception {
+        HttpURLConnection cn = (HttpURLConnection) new URL(urlStr).openConnection();
+        try {
+            cn.setConnectTimeout(connectMs);
+            cn.setReadTimeout(readMs);
+            cn.setInstanceFollowRedirects(true);
+            cn.setRequestProperty("Accept", "application/vnd.github+json");
+            cn.setRequestProperty("User-Agent", "HZKnowledge-Android");
+            InputStream is = cn.getInputStream();
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] b = new byte[8192];
+            int n;
+            while ((n = is.read(b)) > 0) bos.write(b, 0, n);
+            is.close();
+            return new String(bos.toByteArray(), StandardCharsets.UTF_8);
+        } finally {
+            cn.disconnect();
+        }
     }
 
     private void requestInstallPermission() {
@@ -390,25 +477,151 @@ public class MainActivity extends Activity {
         return 0;
     }
 
-    private void downloadApk(String urlStr) throws Exception {
-        URL u = new URL(urlStr);
-        HttpURLConnection cn = (HttpURLConnection) u.openConnection();
-        cn.setConnectTimeout(15000);
-        cn.setReadTimeout(60000);
-        cn.setInstanceFollowRedirects(true);
-        InputStream is = cn.getInputStream();
+    /** 同一个版本下载过一次就直接复用，不再重复下载。 */
+    private boolean reuseDownloaded(String tag) {
+        File f = new File(getFilesDir(), APK_FILE);
+        return f.exists() && f.length() > 200 * 1024 && tag.equals(prefs.getString("apk_tag", ""));
+    }
+
+    /** 直连 + 各镜像依次尝试下载，边下边更新进度；成功后落到 filesDir/update.apk。 */
+    private void downloadApkWithMirrors(String originUrl, String tag) throws Exception {
         File dir = getFilesDir();
-        File tmp = new File(dir, APK_FILE + ".tmp");
-        FileOutputStream fos = new FileOutputStream(tmp);
-        byte[] b = new byte[8192];
-        int n;
-        while ((n = is.read(b)) > 0) fos.write(b, 0, n);
-        fos.close();
-        is.close();
-        cn.disconnect();
-        File dst = new File(dir, APK_FILE);
-        if (dst.exists()) dst.delete();
-        tmp.renameTo(dst);
+        String lastErr = null;
+        for (int i = 0; i <= MIRRORS.length; i++) {
+            String src = sourceName(i);
+            String u = (i == 0) ? originUrl : MIRRORS[i - 1] + originUrl;
+            progressShow("正在下载 v" + tag, i == 0 ? "直连，正在连接…" : "切换镜像 " + src + "…", 0);
+            File tmp = new File(dir, APK_FILE + ".tmp");
+            if (tmp.exists() && !tmp.delete()) { }
+            HttpURLConnection cn = null;
+            FileOutputStream fos = null;
+            try {
+                cn = (HttpURLConnection) new URL(u).openConnection();
+                cn.setConnectTimeout(8000);
+                cn.setReadTimeout(20000);
+                cn.setInstanceFollowRedirects(true);
+                cn.setRequestProperty("User-Agent", "HZKnowledge-Android");
+                int total = cn.getContentLength();
+                InputStream is = cn.getInputStream();
+                fos = new FileOutputStream(tmp);
+                byte[] b = new byte[16384];
+                int n, done = 0, lastPct = -1;
+                long t0 = System.currentTimeMillis();
+                while ((n = is.read(b)) > 0) {
+                    fos.write(b, 0, n);
+                    done += n;
+                    if (done < 150 * 1024 && System.currentTimeMillis() - t0 > 15000) {
+                        throw new Exception("连接太慢");
+                    }
+                    int pct = (total > 0) ? (int) (done * 100L / total) : -1;
+                    if (pct != lastPct) {
+                        lastPct = pct;
+                        progressShow("正在下载 v" + tag, progressText(done, total, src), pct);
+                    }
+                }
+                is.close();
+                fos.close();
+                fos = null;
+                if (total > 0 && done < total) throw new Exception("连接中断");
+                if (done < 200 * 1024) throw new Exception("返回内容不是安装包");
+                File dst = new File(dir, APK_FILE);
+                if (dst.exists() && !dst.delete()) { }
+                if (!tmp.renameTo(dst)) throw new Exception("保存安装包失败");
+                prefs.edit().putString("apk_tag", tag).apply();
+                return;
+            } catch (Exception e) {
+                lastErr = e.getMessage();
+                if (tmp.exists() && !tmp.delete()) { }
+            } finally {
+                if (fos != null) { try { fos.close(); } catch (Exception ignored) { } }
+                if (cn != null) cn.disconnect();
+            }
+        }
+        throw new Exception(lastErr == null ? "所有下载源都失败" : lastErr);
+    }
+
+    private String sourceName(int i) {
+        if (i <= 0) return "直连";
+        String s = MIRRORS[i - 1].replace("https://", "");
+        return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
+    }
+
+    private String progressText(long done, long total, String src) {
+        if (total > 0) {
+            return String.format(Locale.US, "%d%% · %.1f/%.1f MB · %s",
+                    (int) (done * 100L / total), done / 1048576.0, total / 1048576.0, src);
+        }
+        return String.format(Locale.US, "%.1f MB · %s", done / 1048576.0, src);
+    }
+
+    /** 进度卡片：不挡操作、不拦截点击，随时可见下载状态。 */
+    private void progressShow(final String title, final String detail, final int percent) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (root == null) return;
+                if (progBox == null) buildProgressBox();
+                progTitle.setText(title);
+                progDetail.setText(detail);
+                setProgFill(percent);
+                progBox.setVisibility(View.VISIBLE);
+            }
+        });
+    }
+
+    private void progressHide() {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (progBox != null) progBox.setVisibility(View.GONE);
+            }
+        });
+    }
+
+    private void buildProgressBox() {
+        progBarW = dp(140);
+        progBox = new FrameLayout(this);
+        progBox.setVisibility(View.GONE);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(14), dp(11), dp(14), dp(13));
+        card.setBackgroundDrawable(pill(C_CARD));
+        card.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { }
+        });
+
+        progTitle = new TextView(this);
+        progTitle.setTextSize(m.subtitleSize);
+        progTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        progTitle.setTextColor(C_TEXT);
+        card.addView(progTitle, wrap());
+
+        progDetail = new TextView(this);
+        progDetail.setTextSize(m.subtitleSize - 1.5f);
+        progDetail.setTextColor(C_SUB);
+        progDetail.setPadding(0, dp(3), 0, 0);
+        card.addView(progDetail, wrap());
+
+        FrameLayout bar = new FrameLayout(this);
+        bar.setBackgroundDrawable(pill(C_PILL));
+        progFill = new View(this);
+        progFill.setBackgroundDrawable(pill(C_PRIMARY));
+        bar.addView(progFill, new FrameLayout.LayoutParams(0, FrameLayout.LayoutParams.MATCH_PARENT));
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(progBarW, dp(5));
+        blp.topMargin = dp(9);
+        card.addView(bar, blp);
+
+        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+        progBox.addView(card, clp);
+        root.addView(progBox, fp());
+    }
+
+    private void setProgFill(int percent) {
+        if (progFill == null) return;
+        int p = percent < 0 ? 0 : (percent > 100 ? 100 : percent);
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) progFill.getLayoutParams();
+        lp.width = progBarW * p / 100;
+        progFill.setLayoutParams(lp);
     }
 
     private void installApk() {
@@ -1767,11 +1980,17 @@ public class MainActivity extends Activity {
         upd.setBackgroundDrawable(pill(C_PILL));
         upd.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                Toast.makeText(MainActivity.this, "正在检查…", Toast.LENGTH_SHORT).show();
                 checkUpdate(false);
             }
         });
         settingsInner.addView(upd, wrap());
+
+        TextView updHint = new TextView(this);
+        updHint.setText("直连不通会自动换镜像下载；下载时屏幕中央显示进度与下载源，完成后自动打开安装。");
+        updHint.setTextSize(m.subtitleSize - 2f);
+        updHint.setTextColor(C_SUB);
+        updHint.setPadding(dp(4), dp(3), dp(4), dp(2));
+        settingsInner.addView(updHint, wrap());
         TextView orderHint = new TextView(this);
         orderHint.setText("主页科目顺序（点 ↑↓ 调整，自动保存）");
         orderHint.setTextSize(m.subtitleSize - 2f);
