@@ -22,19 +22,26 @@ MANIFEST = "app/src/main/AndroidManifest.xml"
 
 
 def http(url, method="GET", data=None, headers=None):
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    req = urllib.request.Request(url, data=data, method=method)
-    req.add_header("Authorization", "token " + os.environ["GITHUB_TOKEN"])
-    req.add_header("Accept", "application/vnd.github+json")
+    """统一走 curl：本机代理会破坏 urllib 带 Authorization 的 POST（报 Bad credentials）。"""
+    cmd = ["curl", "-sk", "-X", method,
+           "-H", "Authorization: token " + os.environ["GITHUB_TOKEN"],
+           "-H", "Accept: application/vnd.github+json",
+           "-w", "\n%{http_code}"]
     for k, v in (headers or {}).items():
-        req.add_header(k, v)
+        cmd += ["-H", "%s: %s" % (k, v)]
+    if data is not None:
+        cmd += ["--data-binary", "@-"]
+    cmd.append(url)
+    p = subprocess.run(cmd, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out = p.stdout
+    idx = out.rfind(b"\n")
+    if idx < 0:
+        return 0, out
     try:
-        with urllib.request.urlopen(req, context=ctx) as r:
-            return r.status, r.read()
-    except urllib.error.HTTPError as e:
-        return e.code, e.read()
+        code = int(out[idx + 1:].strip() or 0)
+    except ValueError:
+        code = 0
+    return code, out[:idx]
 
 
 def main():
