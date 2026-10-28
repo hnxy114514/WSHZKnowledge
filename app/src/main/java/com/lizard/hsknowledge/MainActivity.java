@@ -2090,7 +2090,7 @@ public class MainActivity extends Activity {
         settingsInner.removeAllViews();
         settingsInner.addView(settingsBackBtn, wrapM());
         settingsInner.addView(sectionHeader("显示"), wrap());
-        settingsInner.addView(settingRow("正文字号", (int) fontSizeSp, new View.OnClickListener() {
+        settingsInner.addView(settingRow("正文字号", (int) fontSizeSp, 11, 22, new View.OnClickListener() {
             public void onClick(View v) {
                 fontSizeSp = clamp(fontSizeSp - 1, 11f, 22f);
                 saveSettings(); renderSettings();
@@ -2101,7 +2101,7 @@ public class MainActivity extends Activity {
                 saveSettings(); renderSettings();
             }
         }), wrap());
-        settingsInner.addView(settingRow("列表字号", (int) listSizeSp, new View.OnClickListener() {
+        settingsInner.addView(settingRow("列表字号", (int) listSizeSp, 12, 20, new View.OnClickListener() {
             public void onClick(View v) {
                 listSizeSp = clamp(listSizeSp - 1, 12f, 20f);
                 saveSettings(); renderSettings();
@@ -2320,7 +2320,7 @@ public class MainActivity extends Activity {
         return row;
     }
 
-    private View settingRow(String label, int value,
+    private View settingRow(String label, int value, int min, int max,
                             View.OnClickListener minus, View.OnClickListener plus) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -2336,12 +2336,14 @@ public class MainActivity extends Activity {
         name.setTextColor(C_TEXT);
         name.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
+        boolean canMinus = value > min;
         TextView minusBtn = new TextView(this);
         minusBtn.setText(" − ");
         minusBtn.setTextSize(16);
         minusBtn.setTypeface(Typeface.DEFAULT_BOLD);
-        minusBtn.setTextColor(C_PRIMARY);
+        minusBtn.setTextColor(canMinus ? C_PRIMARY : 0xFF3E3E3E);
         minusBtn.setPadding(dp(12), dp(4), dp(12), dp(4));
+        minusBtn.setEnabled(canMinus);
         minusBtn.setOnClickListener(minus);
 
         TextView val = new TextView(this);
@@ -2351,12 +2353,14 @@ public class MainActivity extends Activity {
         val.setGravity(Gravity.CENTER);
         val.setPadding(dp(6), 0, dp(6), 0);
 
+        boolean canPlus = value < max;
         TextView plusBtn = new TextView(this);
         plusBtn.setText(" + ");
         plusBtn.setTextSize(16);
         plusBtn.setTypeface(Typeface.DEFAULT_BOLD);
-        plusBtn.setTextColor(C_PRIMARY);
+        plusBtn.setTextColor(canPlus ? C_PRIMARY : 0xFF3E3E3E);
         plusBtn.setPadding(dp(12), dp(4), dp(12), dp(4));
+        plusBtn.setEnabled(canPlus);
         plusBtn.setOnClickListener(plus);
 
         row.addView(name);
