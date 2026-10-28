@@ -139,13 +139,14 @@ App 自带的排版引擎支持这些（不要用斜杠写分数）：
 ==================================================
 八、配图
 ==================================================
-生成：
-  cd tools && python gen_images.py
+生成（每张图一个脚本，在 tools/img_gen/ 下）：
+  cd tools/img_gen && python m_quad.py      # 只重新生成 m_quad.png
+  python gen_all.py                        # 全部重生成
 
-配图库 img_lib.py 支持：\frac、\sqrt、上下标、\vec 等，
+共享绘制能力在 common.py，支持：\frac、\sqrt、上下标、\vec 等，
 文字用 c.t(...) 或 c.rich(...)，含反斜杠的字符串会自动走公式排版。
 
-输出：app/src/main/assets/img/*.png（60 张左右）
+输出：app/src/main/assets/img/*.png（56 张）
 改了配图后，要重新构建 APK 才会生效。
 
 ==================================================

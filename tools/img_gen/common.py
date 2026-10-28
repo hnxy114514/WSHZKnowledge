@@ -13,7 +13,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 W, H = 640, 470
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.abspath(os.path.join(HERE, "..", "app", "src", "main", "assets", "img"))
+ROOT = os.path.dirname(os.path.dirname(HERE))   # <root>/tools/img_gen -> <root>
+OUT = os.path.join(ROOT, "app", "src", "main", "assets", "img")
 FONT_R = "C:/Windows/Fonts/msyh.ttc"
 FONT_B = "C:/Windows/Fonts/msyhbd.ttc"
 _fc = {}
@@ -372,3 +373,38 @@ class C(object):
         p = os.path.join(OUT, name + ".png")
         self.im.convert("P", palette=Image.ADAPTIVE, colors=64).save(p, optimize=True)
         return p, os.path.getsize(p)
+
+# ===================== 颜色与常用常量 =====================
+RED = (198, 58, 58)
+BLUE = (44, 96, 178)
+GREEN = (38, 132, 88)
+GREY = (120, 120, 120)
+dark = (35, 35, 35)
+
+
+def coords(c, xmin, xmax, ymin, ymax, box=(78, 118, 596, 392), labx="x", laby="y"):
+    """建数学坐标→像素映射，并画轴。返回 (px, py)。"""
+    x0, y0, x1, y1 = box
+    X0 = x0 + (0 - xmin) / (xmax - xmin) * (x1 - x0)
+    Y0 = y1 - (0 - ymin) / (ymax - ymin) * (y1 - y0)
+
+    def px(v):
+        return x0 + (v - xmin) / (xmax - xmin) * (x1 - x0)
+
+    def py(v):
+        return y1 - (v - ymin) / (ymax - ymin) * (y1 - y0)
+
+    c.arrow(px(xmin), py(0), px(xmax), py(0), 2, (70, 70, 70), 11)
+    c.arrow(px(0), py(ymin), px(0), py(ymax), 2, (70, 70, 70), 11)
+    c.t(px(xmax) - 4, py(0) + 8, labx, 17, False, GREY, "rt")
+    c.t(px(0) - 12, py(ymax) + 6, laby, 17, False, GREY, "rb")
+    c.t(px(0) - 10, py(0) + 8, "O", 18, False, GREY, "rt")
+    return px, py
+
+
+def save(c, name, acc=None):
+    p, size = c.save(name)
+    if acc is not None:
+        acc.append((name, size))
+    print("  %-14s %6.1f KB" % (name, size / 1024.0))
+    return p, size

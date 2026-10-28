@@ -15,7 +15,7 @@ WSHZKnowledge/
 │   │   │   └── ApkFileProvider.java     APK 覆盖安装用的 ContentProvider
 │   │   ├── assets/
 │   │   │   ├── data/                    九科知识库 JSON（构建时自动生成，勿手改）
-│   │   │   └── img/                     配图 PNG（gen_images.py 生成，勿手改）
+│   │   │   └── img/                     配图 PNG（tools/img_gen 生成，勿手改）
 │   │   ├── res/                         资源（图标、样式、字符串）
 │   │   └── AndroidManifest.xml          版本号、权限、Provider 声明
 │
@@ -26,8 +26,10 @@ WSHZKnowledge/
 │   │   └── politics.py / history.py / geography.py
 │   ├── highlights.py                   人工标注的重点片段清单（key = 科目+标题）
 │   ├── build_authored.py               构建数据：subjects → assets/data + cloud/update.json
-│   ├── img_lib.py                      配图公式排版库（LaTeX 解析 + 分式/根号绘制）
-│   ├── gen_images.py                   生成 60 张配图 → assets/img
+│   ├── img_gen/                       配图生成（每张图一个脚本 + 共享 common.py）
+│   │   ├── common.py                   公式排版库（LaTeX 解析 + 分式/根号绘制）+ 颜色/coords/save
+│   │   ├── <图片名>.py                 每张配图一个脚本，单独运行只生成那一张
+│   │   └── gen_all.py                  一键重新生成全部在用配图
 │   ├── gen_icon.py                     生成应用图标
 │   └── _archive/                       历史旧源归档（只读，不再参与构建）
 │
@@ -62,10 +64,10 @@ App 启动时读取 assets/data，MainActivity 排版引擎渲染
 配图走另一条独立的链：
 
 ```
-tools/img_lib.py + tools/gen_images.py
-        │  直接运行
+tools/img_gen/  （common.py + 每张图一个 <图片名>.py + gen_all.py）
+        │  直接运行某个脚本 / 或 gen_all.py
         ▼
-app/src/main/assets/img/*.png  （60 张）
+app/src/main/assets/img/*.png  （56 张）
         │  打包进 APK
         ▼
 知识点详情页展示，双击可全屏缩放
@@ -90,11 +92,15 @@ JSON 正文里的片段被包成加粗+高亮色
 
 ### 2. 修改 / 新增配图
 
-改 `tools/gen_images.py`（和 `img_lib.py`），然后：
+配图代码在 `tools/img_gen/`：每张图一个 `<图片名>.py`，共享绘制能力在 `common.py`。
+要改某张图，只编辑对应的那个脚本，单独运行即可只重新生成它：
 
 ```bash
-cd tools && python gen_images.py
+cd tools/img_gen && python m_quad.py        # 只重新生成 m_quad.png
+python gen_all.py                           # 需要全部重生成时跑这个
 ```
+
+把新生成的 PNG 放入 `配图核对/` 走一遍人工核对，确认无误后再随 APK 发布。
 
 把新生成的 PNG 放入 `配图核对/` 走一遍人工核对，确认无误后再随 APK 发布。
 
