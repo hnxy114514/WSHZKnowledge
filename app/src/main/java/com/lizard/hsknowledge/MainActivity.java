@@ -57,6 +57,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -116,7 +117,8 @@ public class MainActivity extends Activity {
     private final List<Hit> searchHits = new ArrayList<Hit>();
 
     // ---------- 导航 ----------
-    private static final int S_SUBJECT = 0, S_BLOCK = 1, S_CHILD = 2, S_ITEM = 3, S_DETAIL = 4, S_SETTINGS = 5, S_SEARCH = 6;
+    private static final int S_SUBJECT = 0, S_BLOCK = 1, S_CHILD = 2, S_ITEM = 3, S_DETAIL = 4, S_SETTINGS = 5,
+            S_SEARCH = 6, S_FEEDBACK = 7;
     private int screen = S_SUBJECT;
     private Subject curSubject;
     private Block curBlock;
@@ -134,6 +136,18 @@ public class MainActivity extends Activity {
     private ScrollView detailScroll, settingsScroll;
     private LinearLayout detailInner, settingsInner;
     private FrameLayout fullscreenView;
+
+    // ---------- 反馈 ----------
+    private static final String[] FB_TYPES = {"内容有误", "公式显示", "闪退卡顿", "功能建议"};
+    private LinearLayout feedbackScreen, feedbackInner;
+    private ScrollView feedbackScroll;
+    private TextView fbStatusTxt, fbLoginBtn, fbSubmitBtn;
+    private EditText fbDesc;
+    private final TextView[] fbTypeBtns = new TextView[4];
+    private int fbType = 0;
+    private String fbDraft = "";
+    private String ghToken, ghLogin;
+    private String lastPath = "";
     private FrameLayout progBox;
     private View progFill;
     private TextView progTitle, progDetail;
@@ -193,6 +207,7 @@ public class MainActivity extends Activity {
         fontSizeSp = prefs.getFloat("font_size", m.round ? 13f : 14f);
         listSizeSp = prefs.getFloat("list_size", m.round ? 14f : 15f);
         swipeBack = prefs.getBoolean("swipe_back", true);
+        loadGitHub();
         loadData();
         loadOrderKeys();
         buildUi();
@@ -320,7 +335,7 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             public void run() {
                 try {
-                    final String local = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+                    final String local = appVersion();
                     RelInfo rel = fetchReleaseInfo();
                     final String remoteTag = rel.tag;
                     if (compareSemver(local, remoteTag) >= 0) {
@@ -699,6 +714,7 @@ public class MainActivity extends Activity {
         detailScreen = newScreen();
         settingsScreen = newScreen();
         searchScreen = newScreen();
+        feedbackScreen = newScreen();
 
         root.addView(subjectScreen, fp());
         root.addView(blockScreen, fp());
@@ -707,6 +723,8 @@ public class MainActivity extends Activity {
         root.addView(detailScreen, fp());
         root.addView(settingsScreen, fp());
         root.addView(searchScreen, fp());
+        buildFeedbackScreen();
+        root.addView(feedbackScreen, fp());
 
         // 主页
         subjectList = makeList();
@@ -1374,6 +1392,7 @@ public class MainActivity extends Activity {
 
     private void openDetail(String title, List<Section> secs, String path, int back, String img) {
         detailBack = back;
+        lastPath = (path == null) ? "" : path;
         detailTitle.setText(applyMarkup(title));
         detailPath.setText(applyMarkup(path));
         detailInner.removeAllViews();
@@ -2111,6 +2130,26 @@ public class MainActivity extends Activity {
         updHint.setTextColor(C_SUB);
         updHint.setPadding(dp(4), dp(3), dp(4), dp(2));
         settingsInner.addView(updHint, wrap());
+        TextView fbEntry = new TextView(this);
+        fbEntry.setText("反馈与建议");
+        fbEntry.setTextSize(m.backSize);
+        fbEntry.setTextColor(C_PRIMARY);
+        fbEntry.setGravity(Gravity.CENTER);
+        fbEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
+        fbEntry.setBackgroundDrawable(pill(C_PILL));
+        fbEntry.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { showScreen(S_FEEDBACK); }
+        });
+        LinearLayout.LayoutParams fbLp = wrap();
+        fbLp.topMargin = dp(6);
+        settingsInner.addView(fbEntry, fbLp);
+        TextView fbHint = new TextView(this);
+        fbHint.setText("反馈会以 Issue 形式提交到项目的 GitHub 仓库，需先在手机浏览器完成一次登录授权。");
+        fbHint.setTextSize(m.subtitleSize - 2f);
+        fbHint.setTextColor(C_SUB);
+        fbHint.setPadding(dp(4), dp(3), dp(4), dp(2));
+        settingsInner.addView(fbHint, wrap());
+
         TextView orderHint = new TextView(this);
         orderHint.setText("主页科目顺序（点 ↑↓ 调整，自动保存）");
         orderHint.setTextSize(m.subtitleSize - 2f);
@@ -2134,14 +2173,8 @@ public class MainActivity extends Activity {
                 }
             }
         }
-        String verName = "?";
-        int verCode = 0;
-        try {
-            android.content.pm.PackageInfo pi =
-                    getPackageManager().getPackageInfo(getPackageName(), 0);
-            verName = pi.versionName;
-            verCode = pi.versionCode;
-        } catch (Exception ignored) { }
+        String verName = appVersion();
+        int verCode = appVersionCode();
         about.setText("腕上知识汇总 v" + verName + "（build " + verCode + "）"
                 + "\n屏幕：" + (m.round ? "圆形（已启用圆形安全区）" : "方形")
                 + "\n知识点 " + itemCount + " 条 · 配图 " + imgCount + " 张");
@@ -2331,7 +2364,8 @@ public class MainActivity extends Activity {
     // ================= 页面切换（带动画） =================
     private void showScreen(int s) {
         screen = s;
-        View[] screens = {subjectScreen, blockScreen, childScreen, listScreen, detailScreen, settingsScreen, searchScreen};
+        View[] screens = {subjectScreen, blockScreen, childScreen, listScreen, detailScreen, settingsScreen,
+                searchScreen, feedbackScreen};
         View target = screens[s];
         boolean shown = target.getVisibility() == View.VISIBLE && target.getAlpha() > 0.95f
                 && Math.abs(target.getTranslationX()) < dp(4);
@@ -2366,6 +2400,8 @@ public class MainActivity extends Activity {
         } else if (s == S_SEARCH) {
             // 保留上次输入（只有点 ✕ 才清空），从详情返回时能接着看结果
             refreshGlobalSearch();
+        } else if (s == S_FEEDBACK) {
+            updateFeedbackUi();
         }
     }
 
@@ -2391,6 +2427,7 @@ public class MainActivity extends Activity {
         if (screen == S_BLOCK) return S_SUBJECT;
         if (screen == S_SETTINGS) return S_SUBJECT;
         if (screen == S_SEARCH) return S_SUBJECT;
+        if (screen == S_FEEDBACK) return S_SETTINGS;
         return -1;
     }
 
@@ -2495,6 +2532,7 @@ public class MainActivity extends Activity {
             case S_DETAIL: return detailScreen;
             case S_SETTINGS: return settingsScreen;
             case S_SEARCH: return searchScreen;
+            case S_FEEDBACK: return feedbackScreen;
             default: return subjectScreen;
         }
     }
@@ -2568,4 +2606,395 @@ public class MainActivity extends Activity {
         }
     }
 
+    // ================= 反馈（GitHub Device Flow + Issues） =================
+    /** 在 GitHub 创建 OAuth App 后填这里（client_id 不敏感，可随 APK 分发）。 */
+    private static final String GH_CLIENT_ID = "";
+    private static final String GH_DEVICE_CODE = "https://github.com/login/device/code";
+    private static final String GH_ACCESS_TOKEN = "https://github.com/login/oauth/access_token";
+    private static final String GH_USER = "https://api.github.com/user";
+    private static final String GH_ISSUES = "https://api.github.com/repos/" + REPO + "/issues";
+
+    private boolean loginRunning = false;
+
+    private void buildFeedbackScreen() {
+        feedbackScroll = new ScrollView(this);
+        feedbackScroll.setVerticalScrollBarEnabled(false);
+        feedbackInner = new LinearLayout(this);
+        feedbackInner.setOrientation(LinearLayout.VERTICAL);
+        feedbackScroll.addView(feedbackInner);
+        feedbackScreen.addView(feedbackScroll, lw());
+
+        feedbackInner.addView(makeBack("‹ 返回设置", new View.OnClickListener() {
+            public void onClick(View v) { showScreen(S_SETTINGS); }
+        }), wrapM());
+
+        TextView title = new TextView(this);
+        title.setText("反馈与建议");
+        title.setTextSize(m.titleSize);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(C_PRIMARY);
+        title.setGravity(Gravity.CENTER);
+        feedbackInner.addView(title, wrap());
+
+        fbStatusTxt = new TextView(this);
+        fbStatusTxt.setTextSize(m.subtitleSize - 1f);
+        fbStatusTxt.setTextColor(C_SUB);
+        fbStatusTxt.setGravity(Gravity.CENTER);
+        fbStatusTxt.setPadding(0, dp(4), 0, dp(5));
+        feedbackInner.addView(fbStatusTxt, wrap());
+
+        fbLoginBtn = new TextView(this);
+        fbLoginBtn.setTextSize(m.backSize);
+        fbLoginBtn.setTypeface(Typeface.DEFAULT_BOLD);
+        fbLoginBtn.setGravity(Gravity.CENTER);
+        fbLoginBtn.setPadding(dp(10), dp(9), dp(10), dp(9));
+        fbLoginBtn.setBackgroundDrawable(pill(C_PILL));
+        fbLoginBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (ghToken == null) startDeviceLogin(); else logoutGitHub();
+            }
+        });
+        feedbackInner.addView(fbLoginBtn, wrap());
+
+        feedbackInner.addView(sectionHeader("类型"), wrap());
+        for (int row = 0; row < 2; row++) {
+            LinearLayout line = new LinearLayout(this);
+            line.setOrientation(LinearLayout.HORIZONTAL);
+            for (int col = 0; col < 2; col++) {
+                final int idx = row * 2 + col;
+                TextView b = new TextView(this);
+                b.setText(FB_TYPES[idx]);
+                b.setTextSize(m.subtitleSize - 1f);
+                b.setGravity(Gravity.CENTER);
+                b.setPadding(dp(4), dp(9), dp(4), dp(9));
+                b.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) {
+                        fbType = idx;
+                        updateTypeButtons();
+                    }
+                });
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+                if (col == 0) lp.rightMargin = dp(4); else lp.leftMargin = dp(4);
+                if (row == 0) lp.bottomMargin = dp(4);
+                line.addView(b, lp);
+                fbTypeBtns[idx] = b;
+            }
+            feedbackInner.addView(line, wrap());
+        }
+
+        feedbackInner.addView(sectionHeader("描述"), wrap());
+        fbDesc = new EditText(this);
+        fbDesc.setHint("哪一节、哪句话有问题，或想要什么功能…");
+        fbDesc.setTextSize(m.subtitleSize - 1f);
+        fbDesc.setTextColor(Color.WHITE);
+        fbDesc.setHintTextColor(C_SUB);
+        fbDesc.setBackgroundDrawable(pill(C_PILL));
+        fbDesc.setPadding(dp(10), dp(8), dp(10), dp(8));
+        fbDesc.setMinLines(3);
+        fbDesc.setGravity(Gravity.TOP | Gravity.START);
+        fbDesc.setText(fbDraft);
+        fbDesc.addTextChangedListener(new TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+            public void onTextChanged(CharSequence s, int a, int b, int c) { }
+            public void afterTextChanged(Editable s) { fbDraft = s.toString(); }
+        });
+        feedbackInner.addView(fbDesc, wrap());
+
+        TextView diag = new TextView(this);
+        diag.setText("自动附带：版本 " + appVersion() + "（" + appVersionCode() + "）· " + Build.MODEL
+                + " · Android " + Build.VERSION.RELEASE + " · " + (m.round ? "圆屏" : "方屏"));
+        diag.setTextSize(m.subtitleSize - 2.5f);
+        diag.setTextColor(C_SUB);
+        diag.setPadding(dp(4), dp(5), dp(4), dp(8));
+        feedbackInner.addView(diag, wrap());
+
+        TextView note = new TextView(this);
+        note.setText("提交后会以你的 GitHub 账号在该仓库公开建一条 Issue，别人也能看到。");
+        note.setTextSize(m.subtitleSize - 2.5f);
+        note.setTextColor(C_SUB);
+        note.setPadding(dp(4), 0, dp(4), dp(8));
+        feedbackInner.addView(note, wrap());
+
+        fbSubmitBtn = new TextView(this);
+        fbSubmitBtn.setText("提交反馈");
+        fbSubmitBtn.setTextSize(m.backSize);
+        fbSubmitBtn.setTypeface(Typeface.DEFAULT_BOLD);
+        fbSubmitBtn.setGravity(Gravity.CENTER);
+        fbSubmitBtn.setPadding(dp(10), dp(11), dp(10), dp(11));
+        fbSubmitBtn.setTextColor(C_PRIMARY);
+        fbSubmitBtn.setBackgroundDrawable(pill(0xFF14384A));
+        fbSubmitBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { submitFeedback(); }
+        });
+        feedbackInner.addView(fbSubmitBtn, wrap());
+    }
+
+    private void updateFeedbackUi() {
+        if (fbStatusTxt == null) return;
+        if (ghToken == null) {
+            fbStatusTxt.setText("尚未登录 GitHub，登录后才能提交");
+            fbLoginBtn.setText("登录 GitHub");
+            fbLoginBtn.setTextColor(C_PRIMARY);
+        } else {
+            fbStatusTxt.setText("已登录 " + (ghLogin != null ? "@" + ghLogin : "GitHub"));
+            fbLoginBtn.setText("退出登录");
+            fbLoginBtn.setTextColor(C_SUB);
+        }
+        updateTypeButtons();
+    }
+
+    private void updateTypeButtons() {
+        for (int i = 0; i < fbTypeBtns.length; i++) {
+            TextView b = fbTypeBtns[i];
+            if (b == null) continue;
+            boolean on = (i == fbType);
+            b.setTextColor(on ? C_PRIMARY : C_SUB);
+            b.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            b.setBackgroundDrawable(pill(on ? 0xFF14384A : C_PILL));
+        }
+    }
+
+    private void loadGitHub() {
+        ghToken = prefs.getString("gh_token", null);
+        if (ghToken != null && ghToken.length() == 0) ghToken = null;
+        String lg = prefs.getString("gh_login", "");
+        ghLogin = (lg == null || lg.length() == 0) ? null : lg;
+    }
+
+    private void saveGitHub(String token, String login) {
+        ghToken = token;
+        ghLogin = login;
+        SharedPreferences.Editor e = prefs.edit().putString("gh_token", token == null ? "" : token);
+        if (login != null) e.putString("gh_login", login);
+        e.apply();
+        updateFeedbackUi();
+    }
+
+    private void logoutGitHub() {
+        loginRunning = false;
+        ghToken = null;
+        ghLogin = null;
+        prefs.edit().remove("gh_token").remove("gh_login").apply();
+        updateFeedbackUi();
+        toast("已退出登录");
+    }
+
+    /** Device Flow：手表只显示 8 位码，在手机浏览器授权即可。 */
+    private void startDeviceLogin() {
+        if (GH_CLIENT_ID.length() == 0) {
+            toast("反馈功能尚未启用（缺少 OAuth client_id）");
+            return;
+        }
+        loginRunning = true;
+        progressShow("正在获取登录码…", "连接 GitHub", -1);
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    String body = "client_id=" + GH_CLIENT_ID + "&scope=public_repo";
+                    JSONObject o = new JSONObject(httpPost(GH_DEVICE_CODE, body,
+                            "application/x-www-form-urlencoded", null));
+                    final String device = o.optString("device_code", "");
+                    final String code = o.optString("user_code", "");
+                    int interval = Math.max(5, o.optInt("interval", 5));
+                    if (device.length() == 0) {
+                        throw new Exception(o.optString("error_description", "获取登录码失败"));
+                    }
+                    progressShow("输入码 " + code, "手机浏览器打开 github.com/login/device", -1);
+                    pollDeviceToken(device, interval);
+                } catch (final Exception e) {
+                    loginRunning = false;
+                    progressHide();
+                    toast("登录失败：" + e.getMessage());
+                }
+            }
+        }).start();
+    }
+
+    private void pollDeviceToken(String device, int interval) {
+        long deadline = System.currentTimeMillis() + 5 * 60 * 1000L;
+        while (loginRunning && System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(interval * 1000L);
+            } catch (InterruptedException e) {
+                return;
+            }
+            if (!loginRunning) return;
+            try {
+                String body = "client_id=" + GH_CLIENT_ID
+                        + "&device_code=" + device
+                        + "&grant_type=urn:ietf:params:oauth:grant-type:device_code";
+                JSONObject o = new JSONObject(httpPost(GH_ACCESS_TOKEN, body,
+                        "application/x-www-form-urlencoded", null));
+                String token = o.optString("access_token", "");
+                if (token.length() > 0) {
+                    saveGitHub(token, null);
+                    fetchGitHubLogin();
+                    return;
+                }
+                String err = o.optString("error", "");
+                if ("slow_down".equals(err)) { interval += 5; continue; }
+                if ("authorization_pending".equals(err)) continue;
+                loginRunning = false;
+                progressHide();
+                toast("登录未完成：" + ("access_denied".equals(err) ? "已取消授权" : err));
+                return;
+            } catch (Exception ignored) {
+                // 网络抖动，下一轮继续
+            }
+        }
+        loginRunning = false;
+        progressHide();
+        if (ghToken == null) toast("登录超时，请重试");
+    }
+
+    private void fetchGitHubLogin() {
+        new Thread(new Runnable() {
+            public void run() {
+                String login = null;
+                try {
+                    login = new JSONObject(httpGetAuthed(GH_USER)).optString("login", "");
+                } catch (Exception ignored) { }
+                saveGitHub(ghToken, login);
+                loginRunning = false;
+                progressHide();
+                toast(login == null ? "已登录 GitHub" : "已登录 @" + login);
+            }
+        }).start();
+    }
+
+    private void submitFeedback() {
+        final String desc = fbDesc.getText().toString().trim();
+        if (desc.length() < 5) {
+            toast("请先写清问题或建议（至少 5 个字）");
+            return;
+        }
+        if (ghToken == null) {
+            toast("请先登录 GitHub");
+            return;
+        }
+        fbSubmitBtn.setText("提交中…");
+        fbSubmitBtn.setEnabled(false);
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    JSONObject payload = new JSONObject();
+                    payload.put("title", "[" + FB_TYPES[fbType] + "] " + firstLine(desc, 20));
+                    payload.put("body", feedbackBody(desc));
+                    JSONObject o = new JSONObject(httpPost(GH_ISSUES, payload.toString(),
+                            "application/json", ghToken));
+                    final int num = o.optInt("number", 0);
+                    final String msg = o.optString("message", "");
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            fbSubmitBtn.setEnabled(true);
+                            if (num > 0) {
+                                fbDesc.setText("");
+                                fbDraft = "";
+                                fbSubmitBtn.setText("提交反馈");
+                                toast("已提交，感谢反馈（issue #" + num + "）");
+                            } else {
+                                fbSubmitBtn.setText("提交反馈");
+                                toast("提交失败：" + (msg.length() > 0 ? msg : "未知错误"));
+                                if (msg.contains("Bad credentials") || msg.contains("Not Found")) {
+                                    logoutGitHub();
+                                }
+                            }
+                        }
+                    });
+                } catch (final Exception e) {
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            fbSubmitBtn.setEnabled(true);
+                            fbSubmitBtn.setText("提交反馈");
+                            toast("提交失败：" + e.getMessage());
+                        }
+                    });
+                }
+            }
+        }).start();
+    }
+
+    private String feedbackBody(String desc) {
+        return "**类型**：" + FB_TYPES[fbType] + "\n\n"
+                + "**版本**：" + appVersion() + "（build " + appVersionCode() + "）\n"
+                + "**设备**：" + Build.MODEL + " · Android " + Build.VERSION.RELEASE
+                + " · " + (m.round ? "圆屏" : "方屏") + "\n"
+                + (lastPath.length() > 0 ? "**最近浏览**：" + lastPath + "\n" : "")
+                + "\n---\n\n" + desc + "\n";
+    }
+
+    private String firstLine(String s, int max) {
+        int nl = s.indexOf('\n');
+        String t = nl > 0 ? s.substring(0, nl) : s;
+        if (t.length() > max) t = t.substring(0, max) + "…";
+        return t;
+    }
+
+    private String appVersion() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "?";
+        }
+    }
+
+    private int appVersionCode() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private String httpPost(String url, String body, String contentType, String token) throws Exception {
+        HttpURLConnection cn = (HttpURLConnection) new URL(url).openConnection();
+        try {
+            byte[] data = body.getBytes(StandardCharsets.UTF_8);
+            cn.setRequestMethod("POST");
+            cn.setConnectTimeout(10000);
+            cn.setReadTimeout(15000);
+            cn.setDoOutput(true);
+            cn.setFixedLengthStreamingMode(data.length);
+            cn.setRequestProperty("Content-Type", contentType);
+            cn.setRequestProperty("Accept", "application/json");
+            cn.setRequestProperty("User-Agent", "HZKnowledge-Android");
+            if (token != null) cn.setRequestProperty("Authorization", "token " + token);
+            OutputStream os = cn.getOutputStream();
+            os.write(data);
+            os.close();
+            int code = cn.getResponseCode();
+            InputStream is = (code >= 400) ? cn.getErrorStream() : cn.getInputStream();
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            if (is != null) {
+                byte[] b = new byte[4096];
+                int n;
+                while ((n = is.read(b)) > 0) bos.write(b, 0, n);
+                is.close();
+            }
+            return new String(bos.toByteArray(), StandardCharsets.UTF_8);
+        } finally {
+            cn.disconnect();
+        }
+    }
+
+    private String httpGetAuthed(String url) throws Exception {
+        HttpURLConnection cn = (HttpURLConnection) new URL(url).openConnection();
+        try {
+            cn.setConnectTimeout(8000);
+            cn.setReadTimeout(12000);
+            cn.setRequestProperty("Accept", "application/vnd.github+json");
+            cn.setRequestProperty("User-Agent", "HZKnowledge-Android");
+            cn.setRequestProperty("Authorization", "token " + ghToken);
+            InputStream is = cn.getInputStream();
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] b = new byte[4096];
+            int n;
+            while ((n = is.read(b)) > 0) bos.write(b, 0, n);
+            is.close();
+            return new String(bos.toByteArray(), StandardCharsets.UTF_8);
+        } finally {
+            cn.disconnect();
+        }
+    }
 }
