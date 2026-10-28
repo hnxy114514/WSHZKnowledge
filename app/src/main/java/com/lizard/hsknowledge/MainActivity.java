@@ -143,24 +143,26 @@ public class MainActivity extends Activity {
     private FrameLayout fullscreenView;
 
     // ---------- 反馈 ----------
-    private static final String[] FB_TYPES = {"内容有误", "公式显示", "闪退卡顿", "功能建议"};
+    private static final String[] FB_TYPES = {"内容有误", "公式显示", "闪退卡顿", "功能建议", "其他问题"};
     private LinearLayout feedbackScreen, feedbackInner;
     private ScrollView feedbackScroll;
     private TextView fbStatusTxt, fbLoginBtn, fbSubmitBtn, fbCodeBig;
     private ImageView fbQr;
     private EditText fbDesc;
-    private final TextView[] fbTypeBtns = new TextView[4];
+    private final TextView[] fbTypeBtns = new TextView[FB_TYPES.length];
     private int fbType = 0;
     private String fbDraft = "";
     private String ghToken, ghLogin;
     private String fbCode, fbCodeUrl;
     private AlertDialog codeDialog;
+    private boolean pendingInstall = false;
     private String lastPath = "";
     private boolean subjectDirty = true;
     private String lastQuery = null;
     private final int[] savedPos = new int[9];
     private final int[] savedTop = new int[9];
     private final boolean[] hasSaved = new boolean[9];
+    private final boolean[] restoreNext = new boolean[9];
 
     // 我的反馈记录
     private LinearLayout mineScreen;
@@ -384,6 +386,13 @@ public class MainActivity extends Activity {
                                         runOnUiThread(new Runnable() {
                                             public void run() {
                                                 progressHide();
+                                                if (Build.VERSION.SDK_INT >= 26
+                                                        && !getPackageManager().canRequestPackageInstalls()) {
+                                                    pendingInstall = true;
+                                                    requestInstallPermission();
+                                                    toast("开启「允许安装未知应用」后会自动继续安装");
+                                                    return;
+                                                }
                                                 installApk();
                                             }
                                         });
@@ -681,6 +690,10 @@ public class MainActivity extends Activity {
 
     private void installApk() {
         File f = new File(getFilesDir(), APK_FILE);
+        if (!f.exists() || f.length() < 100 * 1024) {
+            toast("安装包不存在或不完整，请重新检查更新");
+            return;
+        }
         Intent i = new Intent(Intent.ACTION_VIEW);
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         if (Build.VERSION.SDK_INT >= 24) {
@@ -689,7 +702,21 @@ public class MainActivity extends Activity {
         } else {
             i.setDataAndType(Uri.fromFile(f), "application/vnd.android.package-archive");
         }
-        startActivity(i);
+        try {
+            startActivity(i);
+        } catch (Exception e) {
+            toast("打不开安装程序：" + e.getMessage());
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (pendingInstall && Build.VERSION.SDK_INT >= 26
+                && getPackageManager().canRequestPackageInstalls()) {
+            pendingInstall = false;
+            installApk();
+        }
     }
 
     private void toast(final String msg) {
@@ -2448,28 +2475,29 @@ public class MainActivity extends Activity {
                 names.add("设置");
                 subjectList.setAdapter(stringAdapter(names, C_PRIMARY));
                 subjectDirty = false;
+                restoreNext[S_SUBJECT] = true;
             }
         } else if (s == S_SETTINGS) {
             renderSettings();
         } else if (s == S_SEARCH) {
             // 关键词没变就不重设 adapter，返回时列表位置不会跳回顶部
             String q = gSearchBox.getText().toString().trim();
-            if (lastQuery == null || !lastQuery.equals(q)) refreshGlobalSearch();
+            if (lastQuery == null || !lastQuery.equals(q)) {
+                refreshGlobalSearch();
+                restoreNext[S_SEARCH] = true;
+            }
         } else if (s == S_FEEDBACK) {
             updateFeedbackUi();
         }
 
-        final ListView enter = listOf(s);
-        if (enter != null && hasSaved[s]) {
-            final int pos = savedPos[s];
-            final int top = savedTop[s];
-            enter.post(new Runnable() {
-                public void run() {
-                    try {
-                        enter.setSelectionFromTop(pos, top);
-                    } catch (Exception ignored) { }
-                }
-            });
+        // 只有刚重建过列表数据的页面才需要把位置摆回去；其余页面由 ListView 自己保留，
+        // 额外调用 setSelectionFromTop 反而会触发一次重排，看起来像「往上弹一下」。
+        ListView enter = listOf(s);
+        if (enter != null && hasSaved[s] && restoreNext[s]) {
+            restoreNext[s] = false;
+            try {
+                enter.setSelectionFromTop(savedPos[s], savedTop[s]);
+            } catch (Exception ignored) { }
         }
     }
 
@@ -2777,10 +2805,11 @@ public class MainActivity extends Activity {
         feedbackInner.addView(fbLoginBtn, loginLp);
 
         feedbackInner.addView(sectionHeader("类型"), wrap());
-        for (int row = 0; row < 2; row++) {
+        for (int row = 0; row < (FB_TYPES.length + 1) / 2; row++) {
             LinearLayout line = new LinearLayout(this);
             line.setOrientation(LinearLayout.HORIZONTAL);
-            for (int col = 0; col < 2; col++) {
+            int cols = Math.min(2, FB_TYPES.length - row * 2);
+            for (int col = 0; col < cols; col++) {
                 final int idx = row * 2 + col;
                 TextView b = new TextView(this);
                 b.setText(FB_TYPES[idx]);
@@ -2795,8 +2824,10 @@ public class MainActivity extends Activity {
                 });
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
                         LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-                if (col == 0) lp.rightMargin = dp(4); else lp.leftMargin = dp(4);
-                if (row == 0) lp.bottomMargin = dp(4);
+                if (cols == 2) {
+                    if (col == 0) lp.rightMargin = dp(4); else lp.leftMargin = dp(4);
+                }
+                if (row < (FB_TYPES.length + 1) / 2 - 1) lp.bottomMargin = dp(4);
                 line.addView(b, lp);
                 fbTypeBtns[idx] = b;
             }

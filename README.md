@@ -139,8 +139,8 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
 格式 `X.Y.Z`，只改三处之一：
 
 - 第 1 位 `X`：非常大的结构性改动；
-- 第 2 位 `Y`：新增内容 / 功能；
-- 第 3 位 `Z`：修 bug / 小调整。
+- 第 2 位 `Y`：资料库新增内容（知识点、配图、高亮）；
+- 第 3 位 `Z`：功能新增、界面调整、修 bug（小功能也走这一位）。
 
 改 `AndroidManifest.xml` 的 `versionName`（`versionCode` 同步 +1 即可，仅作整数递增，不参与比较）。App 内更新比较用的是 `versionName` 与 Release 的 tag。
 
