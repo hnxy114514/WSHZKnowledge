@@ -14,6 +14,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.BitmapShader;
 import android.graphics.Path;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
@@ -123,7 +124,7 @@ public class MainActivity extends Activity {
 
     // ---------- 导航 ----------
     private static final int S_SUBJECT = 0, S_BLOCK = 1, S_CHILD = 2, S_ITEM = 3, S_DETAIL = 4, S_SETTINGS = 5,
-            S_SEARCH = 6, S_FEEDBACK = 7, S_MYFEEDBACK = 8;
+            S_SEARCH = 6, S_FEEDBACK = 7, S_MYFEEDBACK = 8, S_PROFILE = 9;
     private int screen = S_SUBJECT;
     private Subject curSubject;
     private Block curBlock;
@@ -146,8 +147,11 @@ public class MainActivity extends Activity {
     private static final String[] FB_TYPES = {"内容有误", "公式显示", "闪退卡顿", "功能建议", "其他问题"};
     private LinearLayout feedbackScreen, feedbackInner;
     private ScrollView feedbackScroll;
-    private TextView fbStatusTxt, fbLoginBtn, fbSubmitBtn, fbCodeBig;
-    private ImageView fbQr;
+    private TextView fbStatusTxt, fbSubmitBtn;
+    private LinearLayout profileScreen, profInner;
+    private ScrollView profScroll;
+    private TextView profStatusTxt, profLoginBtn, profCodeBig, profLogin, profName;
+    private ImageView profAvatar, profQr;
     private EditText fbDesc;
     private final TextView[] fbTypeBtns = new TextView[FB_TYPES.length];
     private int fbType = 0;
@@ -156,13 +160,14 @@ public class MainActivity extends Activity {
     private String fbCode, fbCodeUrl;
     private AlertDialog codeDialog;
     private boolean pendingInstall = false;
+    private volatile boolean downloadCancel = false;
     private String lastPath = "";
     private boolean subjectDirty = true;
     private String lastQuery = null;
-    private final int[] savedPos = new int[9];
-    private final int[] savedTop = new int[9];
-    private final boolean[] hasSaved = new boolean[9];
-    private final boolean[] restoreNext = new boolean[9];
+    private final int[] savedPos = new int[10];
+    private final int[] savedTop = new int[10];
+    private final boolean[] hasSaved = new boolean[10];
+    private final boolean[] restoreNext = new boolean[10];
 
     // 我的反馈记录
     private LinearLayout mineScreen;
@@ -356,6 +361,7 @@ public class MainActivity extends Activity {
 
     /** 检查 GitHub Release 最新版，有新版则先申请安装权限，再下载 APK 覆盖安装。 */
     private void checkUpdate(final boolean silent) {
+        downloadCancel = false;
         if (!silent) progressShow("正在检查更新…", "连接更新服务器", -1);
         new Thread(new Runnable() {
             public void run() {
@@ -382,6 +388,12 @@ public class MainActivity extends Activity {
                                         if (!reuseDownloaded(remoteTag)) {
                                             downloadApkWithMirrors(url, remoteTag);
                                         }
+                                        if (downloadCancel) {
+                                            downloadCancel = false;
+                                            progressHide();
+                                            toast("已取消更新");
+                                            return;
+                                        }
                                         progressShow("下载完成", "正在打开安装程序…", 100);
                                         runOnUiThread(new Runnable() {
                                             public void run() {
@@ -398,7 +410,12 @@ public class MainActivity extends Activity {
                                         });
                                     } catch (final Exception e) {
                                         progressHide();
-                                        toast("下载失败：" + e.getMessage());
+                                        if (downloadCancel) {
+                                            downloadCancel = false;
+                                            toast("已取消更新");
+                                        } else {
+                                            toast("下载失败：" + e.getMessage());
+                                        }
                                     }
                                 }
                             }).start();
@@ -552,6 +569,7 @@ public class MainActivity extends Activity {
         File dir = getFilesDir();
         String lastErr = null;
         for (int i = 0; i <= MIRRORS.length; i++) {
+            if (downloadCancel) throw new Exception("已取消");
             String src = sourceName(i);
             String u = (i == 0) ? originUrl : MIRRORS[i - 1] + originUrl;
             progressShow("正在下载 " + tagWithV(tag), i == 0 ? "直连，正在连接…" : "切换镜像 " + src + "…", 0);
@@ -572,6 +590,7 @@ public class MainActivity extends Activity {
                 int n, done = 0, lastPct = -1;
                 long t0 = System.currentTimeMillis();
                 while ((n = is.read(b)) > 0) {
+                    if (downloadCancel) throw new Exception("已取消");
                     fos.write(b, 0, n);
                     done += n;
                     if (done < 150 * 1024 && System.currentTimeMillis() - t0 > 15000) {
@@ -673,6 +692,22 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(progBarW, dp(5));
         blp.topMargin = dp(9);
         card.addView(bar, blp);
+
+        TextView cancelBtn = new TextView(this);
+        cancelBtn.setText("取消");
+        cancelBtn.setTextSize(m.subtitleSize - 1f);
+        cancelBtn.setTextColor(C_SUB);
+        cancelBtn.setGravity(Gravity.CENTER);
+        cancelBtn.setPadding(dp(8), dp(7), dp(8), dp(2));
+        cancelBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                downloadCancel = true;
+                toast("正在取消更新…");
+            }
+        });
+        LinearLayout.LayoutParams cancelLp = wrap();
+        cancelLp.topMargin = dp(5);
+        card.addView(cancelBtn, cancelLp);
 
         FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
@@ -791,6 +826,10 @@ public class MainActivity extends Activity {
             }
         });
         root.addView(mineScreen, fp());
+
+        profileScreen = newScreen();
+        buildProfileScreen();
+        root.addView(profileScreen, fp());
 
         // 主页
         subjectList = makeList();
@@ -2138,6 +2177,19 @@ public class MainActivity extends Activity {
     private void renderSettings() {
         settingsInner.removeAllViews();
         settingsInner.addView(settingsBackBtn, wrapM());
+        TextView profEntry = new TextView(this);
+        profEntry.setText("个人主页");
+        profEntry.setTextSize(m.backSize);
+        profEntry.setTypeface(Typeface.DEFAULT_BOLD);
+        profEntry.setTextColor(C_PRIMARY);
+        profEntry.setGravity(Gravity.CENTER);
+        profEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
+        profEntry.setBackgroundDrawable(pill(C_PILL));
+        profEntry.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { showScreen(S_PROFILE); }
+        });
+        settingsInner.addView(profEntry, wrap());
+
         settingsInner.addView(sectionHeader("显示"), wrap());
         settingsInner.addView(settingRow("正文字号", (int) fontSizeSp, 11, 22, new View.OnClickListener() {
             public void onClick(View v) {
@@ -2443,7 +2495,7 @@ public class MainActivity extends Activity {
         }
         screen = s;
         View[] screens = {subjectScreen, blockScreen, childScreen, listScreen, detailScreen, settingsScreen,
-                searchScreen, feedbackScreen, mineScreen};
+                searchScreen, feedbackScreen, mineScreen, profileScreen};
         View target = screens[s];
         boolean shown = target.getVisibility() == View.VISIBLE && target.getAlpha() > 0.95f
                 && Math.abs(target.getTranslationX()) < dp(4);
@@ -2488,6 +2540,9 @@ public class MainActivity extends Activity {
             }
         } else if (s == S_FEEDBACK) {
             updateFeedbackUi();
+        } else if (s == S_PROFILE) {
+            updateProfileUi();
+            if (ghToken != null) loadProfileFromGitHub();
         }
 
         // 只有刚重建过列表数据的页面才需要把位置摆回去；其余页面由 ListView 自己保留，
@@ -2543,6 +2598,7 @@ public class MainActivity extends Activity {
         if (screen == S_SEARCH) return S_SUBJECT;
         if (screen == S_FEEDBACK) return S_SETTINGS;
         if (screen == S_MYFEEDBACK) return S_FEEDBACK;
+        if (screen == S_PROFILE) return S_SETTINGS;
         return -1;
     }
 
@@ -2649,6 +2705,7 @@ public class MainActivity extends Activity {
             case S_SEARCH: return searchScreen;
             case S_FEEDBACK: return feedbackScreen;
             case S_MYFEEDBACK: return mineScreen;
+            case S_PROFILE: return profileScreen;
             default: return subjectScreen;
         }
     }
@@ -2754,55 +2811,18 @@ public class MainActivity extends Activity {
 
         fbStatusTxt = new TextView(this);
         fbStatusTxt.setTextSize(m.subtitleSize - 1f);
-        fbStatusTxt.setTextColor(C_SUB);
+        fbStatusTxt.setTextColor(C_PRIMARY);
         fbStatusTxt.setGravity(Gravity.CENTER);
-        fbStatusTxt.setPadding(0, dp(4), 0, dp(5));
-        feedbackInner.addView(fbStatusTxt, wrap());
-
-        fbQr = new ImageView(this);
-        fbQr.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        fbQr.setVisibility(View.GONE);
-        try {
-            InputStream qs = getAssets().open("qr_login.png");
-            fbQr.setImageBitmap(BitmapFactory.decodeStream(qs));
-            qs.close();
-        } catch (Exception ignored) { }
-        LinearLayout.LayoutParams qlp = new LinearLayout.LayoutParams(dp(112), dp(112));
-        qlp.gravity = Gravity.CENTER_HORIZONTAL;
-        qlp.topMargin = dp(4);
-        feedbackInner.addView(fbQr, qlp);
-
-        fbCodeBig = new TextView(this);
-        fbCodeBig.setTextSize(m.titleSize + 4f);
-        fbCodeBig.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        fbCodeBig.setTextColor(C_PRIMARY);
-        fbCodeBig.setGravity(Gravity.CENTER);
-        fbCodeBig.setPadding(dp(8), dp(8), dp(8), dp(8));
-        fbCodeBig.setBackgroundDrawable(pill(0xFF14384A));
-        fbCodeBig.setVisibility(View.GONE);
-        LinearLayout.LayoutParams codeLp = wrap();
-        codeLp.topMargin = dp(6);
-        feedbackInner.addView(fbCodeBig, codeLp);
-
-        fbLoginBtn = new TextView(this);
-        fbLoginBtn.setTextSize(m.backSize);
-        fbLoginBtn.setTypeface(Typeface.DEFAULT_BOLD);
-        fbLoginBtn.setGravity(Gravity.CENTER);
-        fbLoginBtn.setPadding(dp(10), dp(9), dp(10), dp(9));
-        fbLoginBtn.setBackgroundDrawable(pill(C_PILL));
-        fbLoginBtn.setOnClickListener(new View.OnClickListener() {
+        fbStatusTxt.setPadding(dp(6), dp(8), dp(6), dp(8));
+        fbStatusTxt.setBackgroundDrawable(pill(C_PILL));
+        fbStatusTxt.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                if (loginRunning) {
-                    if (fbCodeUrl != null) openBrowser(fbCodeUrl);
-                    else toast("正在获取登录码…");
-                    return;
-                }
-                if (ghToken == null) startDeviceLogin(); else logoutGitHub();
+                if (ghToken == null) showScreen(S_PROFILE);
             }
         });
-        LinearLayout.LayoutParams loginLp = wrap();
-        loginLp.topMargin = dp(6);
-        feedbackInner.addView(fbLoginBtn, loginLp);
+        LinearLayout.LayoutParams stLp = wrap();
+        stLp.topMargin = dp(4);
+        feedbackInner.addView(fbStatusTxt, stLp);
 
         feedbackInner.addView(sectionHeader("类型"), wrap());
         for (int row = 0; row < (FB_TYPES.length + 1) / 2; row++) {
@@ -2891,7 +2911,8 @@ public class MainActivity extends Activity {
         mineBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 if (ghToken == null) {
-                    toast("请先登录 GitHub");
+                    toast("请先在个人主页登录 GitHub");
+                    showScreen(S_PROFILE);
                     return;
                 }
                 showScreen(S_MYFEEDBACK);
@@ -2905,36 +2926,46 @@ public class MainActivity extends Activity {
 
     private void updateFeedbackUi() {
         if (fbStatusTxt == null) return;
-        if (loginRunning) {
-            if (fbCode == null) {
-                fbStatusTxt.setText("正在获取登录码…");
-                fbLoginBtn.setText("请稍候…");
-                fbCodeBig.setVisibility(View.GONE);
-                fbQr.setVisibility(View.GONE);
-            } else {
-                fbStatusTxt.setText("手机扫下面二维码，输入这个码授权");
-                fbLoginBtn.setText("或用本机浏览器打开");
-                fbCodeBig.setText(fbCode);
-                fbCodeBig.setVisibility(View.VISIBLE);
-                fbQr.setVisibility(View.VISIBLE);
-            }
-            fbLoginBtn.setTextColor(C_PRIMARY);
-            updateTypeButtons();
-            return;
-        }
-        fbCodeBig.setVisibility(View.GONE);
-        fbQr.setVisibility(View.GONE);
         if (ghToken == null) {
-            fbStatusTxt.setText("尚未登录 GitHub，登录后才能提交");
-            fbLoginBtn.setText("登录 GitHub");
-            fbLoginBtn.setTextColor(C_PRIMARY);
+            fbStatusTxt.setText("未登录 GitHub · 点这里去登录");
+            fbStatusTxt.setTextColor(C_PRIMARY);
         } else {
-            fbCodeBig.setVisibility(View.GONE);
             fbStatusTxt.setText("已登录 " + (ghLogin != null ? "@" + ghLogin : "GitHub"));
-            fbLoginBtn.setText("退出登录");
-            fbLoginBtn.setTextColor(C_SUB);
+            fbStatusTxt.setTextColor(C_SUB);
         }
         updateTypeButtons();
+    }
+
+    private void updateProfileUi() {
+        if (profStatusTxt == null) return;
+        boolean logged = ghToken != null;
+        profAvatar.setVisibility(logged ? View.VISIBLE : View.GONE);
+        profLogin.setVisibility(logged ? View.VISIBLE : View.GONE);
+        profName.setVisibility(logged ? View.VISIBLE : View.GONE);
+
+        if (loginRunning) {
+            boolean hasCode = fbCode != null;
+            profStatusTxt.setText(hasCode ? "手机扫二维码，输入下面的码授权" : "正在获取登录码…");
+            profQr.setVisibility(hasCode ? View.VISIBLE : View.GONE);
+            profCodeBig.setVisibility(hasCode ? View.VISIBLE : View.GONE);
+            if (hasCode) profCodeBig.setText(fbCode);
+            profLoginBtn.setText(hasCode ? "或用本机浏览器打开" : "请稍候…");
+            profLoginBtn.setTextColor(C_PRIMARY);
+            return;
+        }
+        profQr.setVisibility(View.GONE);
+        profCodeBig.setVisibility(View.GONE);
+        if (logged) {
+            profLogin.setText(ghLogin == null ? "已登录" : "@" + ghLogin);
+            profName.setText(prefs.getString("gh_name", ""));
+            profStatusTxt.setText("已登录 GitHub，反馈会以这个账号提交");
+            profLoginBtn.setText("退出登录");
+            profLoginBtn.setTextColor(C_SUB);
+        } else {
+            profStatusTxt.setText("未登录 GitHub");
+            profLoginBtn.setText("登录 GitHub");
+            profLoginBtn.setTextColor(C_PRIMARY);
+        }
     }
 
     private void updateTypeButtons() {
@@ -2969,6 +3000,8 @@ public class MainActivity extends Activity {
             public void run() {
                 dismissCodeDialog();
                 updateFeedbackUi();
+                updateProfileUi();
+                if (ghToken != null) loadProfileFromGitHub();
             }
         });
     }
@@ -2978,8 +3011,11 @@ public class MainActivity extends Activity {
         dismissCodeDialog();
         ghToken = null;
         ghLogin = null;
-        prefs.edit().remove("gh_token").remove("gh_login").apply();
+        prefs.edit().remove("gh_token").remove("gh_login")
+                .remove("gh_name").remove("gh_avatar").apply();
+        profAvatar.setImageDrawable(null);
         updateFeedbackUi();
+        updateProfileUi();
         toast("已退出登录");
     }
 
@@ -3085,7 +3121,8 @@ public class MainActivity extends Activity {
             return;
         }
         if (ghToken == null) {
-            toast("请先登录 GitHub");
+            toast("请先在个人主页登录 GitHub");
+            showScreen(S_PROFILE);
             return;
         }
         fbSubmitBtn.setText("提交中…");
@@ -3498,5 +3535,195 @@ public class MainActivity extends Activity {
                 });
             }
         }).start();
+    }
+    // ================= 个人主页 =================
+
+    private void buildProfileScreen() {
+        profScroll = new ScrollView(this);
+        profScroll.setVerticalScrollBarEnabled(false);
+        profInner = new LinearLayout(this);
+        profInner.setOrientation(LinearLayout.VERTICAL);
+        profScroll.addView(profInner);
+        profileScreen.addView(profScroll, lw());
+
+        profInner.addView(makeBack("‹ 返回设置", new View.OnClickListener() {
+            public void onClick(View v) { showScreen(S_SETTINGS); }
+        }), wrapM());
+
+        TextView title = new TextView(this);
+        title.setText("个人主页");
+        title.setTextSize(m.titleSize);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(C_PRIMARY);
+        title.setGravity(Gravity.CENTER);
+        profInner.addView(title, wrap());
+
+        profAvatar = new ImageView(this);
+        profAvatar.setVisibility(View.GONE);
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(dp(64), dp(64));
+        alp.gravity = Gravity.CENTER_HORIZONTAL;
+        alp.topMargin = dp(10);
+        profInner.addView(profAvatar, alp);
+
+        profLogin = new TextView(this);
+        profLogin.setTextSize(m.titleSize);
+        profLogin.setTypeface(Typeface.DEFAULT_BOLD);
+        profLogin.setTextColor(C_PRIMARY);
+        profLogin.setGravity(Gravity.CENTER);
+        profLogin.setPadding(0, dp(6), 0, 0);
+        profLogin.setVisibility(View.GONE);
+        profInner.addView(profLogin, wrap());
+
+        profName = new TextView(this);
+        profName.setTextSize(m.subtitleSize);
+        profName.setTextColor(C_TEXT);
+        profName.setGravity(Gravity.CENTER);
+        profName.setPadding(0, dp(2), 0, 0);
+        profName.setVisibility(View.GONE);
+        profInner.addView(profName, wrap());
+
+        profStatusTxt = new TextView(this);
+        profStatusTxt.setTextSize(m.subtitleSize - 1f);
+        profStatusTxt.setTextColor(C_SUB);
+        profStatusTxt.setGravity(Gravity.CENTER);
+        profStatusTxt.setPadding(0, dp(6), 0, dp(6));
+        profInner.addView(profStatusTxt, wrap());
+
+        profQr = new ImageView(this);
+        profQr.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        profQr.setVisibility(View.GONE);
+        try {
+            InputStream qs = getAssets().open("qr_login.png");
+            profQr.setImageBitmap(BitmapFactory.decodeStream(qs));
+            qs.close();
+        } catch (Exception ignored) { }
+        LinearLayout.LayoutParams qlp = new LinearLayout.LayoutParams(dp(112), dp(112));
+        qlp.gravity = Gravity.CENTER_HORIZONTAL;
+        qlp.topMargin = dp(4);
+        profInner.addView(profQr, qlp);
+
+        profCodeBig = new TextView(this);
+        profCodeBig.setTextSize(m.titleSize + 4f);
+        profCodeBig.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        profCodeBig.setTextColor(C_PRIMARY);
+        profCodeBig.setGravity(Gravity.CENTER);
+        profCodeBig.setPadding(dp(8), dp(8), dp(8), dp(8));
+        profCodeBig.setBackgroundDrawable(pill(0xFF14384A));
+        profCodeBig.setVisibility(View.GONE);
+        LinearLayout.LayoutParams codeLp = wrap();
+        codeLp.topMargin = dp(6);
+        profInner.addView(profCodeBig, codeLp);
+
+        profLoginBtn = new TextView(this);
+        profLoginBtn.setTextSize(m.backSize);
+        profLoginBtn.setTypeface(Typeface.DEFAULT_BOLD);
+        profLoginBtn.setGravity(Gravity.CENTER);
+        profLoginBtn.setPadding(dp(10), dp(10), dp(10), dp(10));
+        profLoginBtn.setBackgroundDrawable(pill(C_PILL));
+        profLoginBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (loginRunning) {
+                    if (fbCodeUrl != null) openBrowser(fbCodeUrl);
+                    else toast("正在获取登录码…");
+                    return;
+                }
+                if (ghToken == null) startDeviceLogin();
+                else logoutGitHub();
+            }
+        });
+        LinearLayout.LayoutParams blp = wrap();
+        blp.topMargin = dp(8);
+        profInner.addView(profLoginBtn, blp);
+
+        TextView hint = new TextView(this);
+        hint.setText("登录仅用于在 App 内提交反馈；token 只存在手表本地，随时可退出。");
+        hint.setTextSize(m.subtitleSize - 2.5f);
+        hint.setTextColor(C_SUB);
+        hint.setGravity(Gravity.CENTER);
+        hint.setPadding(dp(4), dp(8), dp(4), dp(4));
+        profInner.addView(hint, wrap());
+    }
+
+    /** 拉取昵称与头像（头像落盘缓存，之后离线也能显示）。 */
+    private void loadProfileFromGitHub() {
+        if (ghToken == null) return;
+        final String token = ghToken;
+        new Thread(new Runnable() {
+            public void run() {
+                String login = ghLogin == null ? "" : ghLogin;
+                String name = prefs.getString("gh_name", "");
+                String avatar = prefs.getString("gh_avatar", "");
+                try {
+                    JSONObject o = new JSONObject(httpGetAuthed("https://api.github.com/user"));
+                    login = o.optString("login", login);
+                    name = o.optString("name", "");
+                    avatar = o.optString("avatar_url", "");
+                    prefs.edit().putString("gh_login", login).putString("gh_name", name)
+                            .putString("gh_avatar", avatar).apply();
+                } catch (Exception ignored) { }
+                Bitmap bm = loadAvatarBitmap(avatar, login);
+                final Bitmap fb = bm;
+                final String fl = login;
+                final String fn = (name == null) ? "" : name;
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (token.equals(ghToken)) {
+                            ghLogin = fl;
+                            if (fb != null) profAvatar.setImageBitmap(fb);
+                            profLogin.setText(fl.length() == 0 ? "已登录" : "@" + fl);
+                            profName.setText(fn);
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private Bitmap loadAvatarBitmap(String url, String login) {
+        try {
+            File cache = new File(getFilesDir(), "avatar_" + (login == null || login.length() == 0 ? "me" : login) + ".png");
+            if (cache.exists() && cache.length() > 0) {
+                Bitmap b = BitmapFactory.decodeFile(cache.getAbsolutePath());
+                if (b != null) return circleCrop(b);
+            }
+            if (url == null || url.length() == 0) return null;
+            HttpURLConnection cn = (HttpURLConnection) new URL(url).openConnection();
+            cn.setConnectTimeout(10000);
+            cn.setReadTimeout(15000);
+            cn.setInstanceFollowRedirects(true);
+            cn.setRequestProperty("User-Agent", "HZKnowledge-Android");
+            InputStream is = cn.getInputStream();
+            File tmp = new File(getFilesDir(), "avatar.tmp");
+            FileOutputStream fos = new FileOutputStream(tmp);
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = is.read(buf)) > 0) fos.write(buf, 0, n);
+            fos.close();
+            is.close();
+            cn.disconnect();
+            Bitmap src = BitmapFactory.decodeFile(tmp.getAbsolutePath());
+            if (src == null) return null;
+            if (cache.exists()) cache.delete();
+            tmp.renameTo(cache);
+            return circleCrop(src);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 裁成圆形头像。 */
+    private Bitmap circleCrop(Bitmap src) {
+        try {
+            int size = Math.min(src.getWidth(), src.getHeight());
+            Bitmap out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(out);
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+            p.setShader(new BitmapShader(src, BitmapShader.TileMode.CLAMP, BitmapShader.TileMode.CLAMP));
+            float r = size / 2f;
+            c.drawCircle(r, r, r, p);
+            return out;
+        } catch (Exception e) {
+            return src;
+        }
     }
 }
