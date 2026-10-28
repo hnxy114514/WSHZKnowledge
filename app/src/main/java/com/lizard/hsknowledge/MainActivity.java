@@ -418,6 +418,8 @@ public class MainActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(13), dp(11), dp(13), dp(11));
         box.setBackgroundDrawable(pill(C_CARD));
+        // 整块内容用软件层渲染：滚动时标题等文字才不会随兄弟 ScrollView 重绘而闪烁
+        box.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
 
         TextView t = new TextView(this);
         t.setText("发现新版本 " + ver);
@@ -448,8 +450,6 @@ public class MainActivity extends Activity {
         ScrollView sc = new ScrollView(this);
         sc.setVerticalScrollBarEnabled(false);
         sc.setBackgroundColor(C_CARD);
-        // 软件层渲染：避免手表 GPU 上滚动时硬件合成产生的闪烁
-        sc.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         TextView body = new TextView(this);
         body.setText(desc);
         body.setTextSize(m.subtitleSize - 1f);
