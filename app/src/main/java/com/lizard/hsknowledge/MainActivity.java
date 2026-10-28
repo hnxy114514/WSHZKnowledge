@@ -147,6 +147,10 @@ public class MainActivity extends Activity {
     // 右滑返回手势（设置里可关）
     private boolean swipeBack = true;
     private boolean swipeTracking = false;
+    private boolean swipeActive = false;     // 已进入拖动返回
+    private boolean swipeBusy = false;       // 出场动画进行中
+    private boolean swipeFromInput = false;  // 起手点在输入框内
+    private View swipeView;                  // 正在被拖动的整页
     private float swipeX, swipeY;
     private List<String> orderKeys = new ArrayList<String>();
     private static final String[] DEFAULT_ORDER = {"chinese", "math", "english", "physics", "chem", "bio", "politics", "history", "geography"};
@@ -2076,7 +2080,7 @@ public class MainActivity extends Activity {
             }
         }), wrap());
         TextView swipeHint = new TextView(this);
-        swipeHint.setText("开启后从屏幕左侧向右滑即返回上一页；查看大图时不生效，需点「‹ 关闭」。");
+        swipeHint.setText("从屏幕左侧 1/4 内向右拖动即返回，页面会跟手滑出；滑不够会弹回。查看大图时不生效，需点「‹ 关闭」。");
         swipeHint.setTextSize(m.subtitleSize - 2f);
         swipeHint.setTextColor(C_SUB);
         swipeHint.setPadding(dp(4), dp(2), dp(4), dp(4));
@@ -2370,37 +2374,111 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
-        trackSwipeBack(ev);
+        if (swipeBack && fullscreenView == null) {
+            int action = ev.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                swipeX = ev.getX();
+                swipeY = ev.getY();
+                swipeTracking = true;
+                swipeActive = false;
+                swipeFromInput = inEditText(swipeX, swipeY);
+            } else if (action == MotionEvent.ACTION_MOVE && swipeTracking) {
+                float dx = ev.getX() - swipeX;
+                float dy = Math.abs(ev.getY() - swipeY);
+                if (!swipeActive && !swipeBusy && swipeView == null) {
+                    // 起手必须在左侧 1/4 内（输入框内更严格，避免拖动光标被当成返回）
+                    float zone = swipeFromInput ? dp(18) : swipeZone();
+                    if (screen != S_SUBJECT && swipeX <= zone && dx > dp(16) && dx > dy * 1.5f) {
+                        swipeActive = true;
+                        swipeView = currentScreenView();
+                        swipeView.animate().cancel();
+                    }
+                }
+                if (swipeActive && swipeView != null) {
+                    float d = Math.max(0f, dx);
+                    swipeView.setTranslationX(d * 0.9f);          // 页面跟手右移
+                    float w = Math.max(1f, swipeView.getWidth());
+                    swipeView.setAlpha(1f - Math.min(0.55f, d / w * 1.1f));
+                    return true;
+                }
+            } else if (action == MotionEvent.ACTION_UP) {
+                if (swipeActive) {
+                    swipeTracking = false;
+                    swipeActive = false;
+                    float need = swipeFromInput ? dp(80) : dp(46);
+                    if (ev.getX() - swipeX > need) finishSwipe(); else resetSwipe();
+                    return true;
+                }
+                swipeTracking = false;
+            } else if (action == MotionEvent.ACTION_CANCEL) {
+                swipeTracking = false;
+                if (swipeActive) {
+                    swipeActive = false;
+                    resetSwipe();
+                    return true;
+                }
+            }
+        } else {
+            swipeTracking = false;
+        }
         return super.dispatchTouchEvent(ev);
     }
 
-    /** 右滑返回：抬手时判定，横向位移够大且明显横向才触发；全屏看图、主页不触发。 */
-    private void trackSwipeBack(MotionEvent ev) {
-        if (!swipeBack || fullscreenView != null) {
-            swipeTracking = false;
-            return;
-        }
-        int action = ev.getActionMasked();
-        if (action == MotionEvent.ACTION_DOWN) {
-            swipeX = ev.getX();
-            swipeY = ev.getY();
-            swipeTracking = true;
-        } else if (action == MotionEvent.ACTION_UP) {
-            if (swipeTracking) {
-                float dx = ev.getX() - swipeX;
-                float dy = Math.abs(ev.getY() - swipeY);
-                boolean editing = getCurrentFocus() instanceof EditText;
-                float need = editing ? dp(70) : dp(48);          // 正在输入时要求更长滑动
-                boolean edgeOk = !editing || swipeX <= dp(22);   // 且必须从最左边起手
-                if (screen != S_SUBJECT && dx > need && dx > dy * 1.5f && edgeOk) {
-                    swipeTracking = false;
-                    handleBack();
-                    return;
-                }
-            }
-            swipeTracking = false;
-        } else if (action == MotionEvent.ACTION_CANCEL) {
-            swipeTracking = false;
+    /** 起手判定区：屏幕左侧 1/4。 */
+    private float swipeZone() {
+        int w = (root != null && root.getWidth() > 0)
+                ? root.getWidth() : getResources().getDisplayMetrics().widthPixels;
+        return Math.max(dp(44), w * 0.25f);
+    }
+
+    private boolean inEditText(float x, float y) {
+        return hitIn(gSearchBox, x, y) || hitIn(itemSearchBox, x, y);
+    }
+
+    private boolean hitIn(View v, float x, float y) {
+        if (v == null || v.getVisibility() != View.VISIBLE) return false;
+        int[] loc = new int[2];
+        v.getLocationInWindow(loc);
+        return x >= loc[0] && x <= loc[0] + v.getWidth()
+                && y >= loc[1] && y <= loc[1] + v.getHeight();
+    }
+
+    private View currentScreenView() {
+        switch (screen) {
+            case S_BLOCK: return blockScreen;
+            case S_CHILD: return childScreen;
+            case S_ITEM: return listScreen;
+            case S_DETAIL: return detailScreen;
+            case S_SETTINGS: return settingsScreen;
+            case S_SEARCH: return searchScreen;
+            default: return subjectScreen;
         }
     }
+
+    /** 松手过阈值：整页向右滑出并淡出，结束后再切到上一级。 */
+    private void finishSwipe() {
+        final View v = swipeView;
+        swipeView = null;
+        if (v == null) return;
+        swipeBusy = true;
+        float w = Math.max(v.getWidth(), dp(80));
+        v.animate().translationX(w).alpha(0.1f).setDuration(160)
+                .withEndAction(new Runnable() {
+                    public void run() {
+                        v.setTranslationX(0f);
+                        v.setAlpha(1f);
+                        swipeBusy = false;
+                        handleBack();
+                    }
+                }).start();
+    }
+
+    /** 没滑够：回弹复位。 */
+    private void resetSwipe() {
+        final View v = swipeView;
+        swipeView = null;
+        if (v == null) return;
+        v.animate().translationX(0f).alpha(1f).setDuration(150).start();
+    }
+
 }
