@@ -18,6 +18,7 @@ import android.graphics.BitmapShader;
 import android.graphics.Path;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
@@ -155,6 +156,8 @@ public class MainActivity extends Activity {
     private ScrollView profScroll;
     private TextView profStatusTxt, profLoginBtn, profCodeBig, profLogin, profName;
     private ImageView profAvatar, profQr;
+    private FrameLayout profAvatarBox;
+    private ProgressBar profAvatarSpin;
     private EditText fbDesc;
     private final TextView[] fbTypeBtns = new TextView[FB_TYPES.length];
     private int fbType = 0;
@@ -2491,6 +2494,7 @@ public class MainActivity extends Activity {
         upd.setGravity(Gravity.CENTER);
         upd.setPadding(dp(10), dp(10), dp(10), dp(10));
         upd.setBackgroundDrawable(pill(C_PILL));
+        applyIcon(upd, "ic_update", C_PRIMARY, 15);
         upd.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 checkUpdate(false);
@@ -2511,6 +2515,7 @@ public class MainActivity extends Activity {
         fbEntry.setGravity(Gravity.CENTER);
         fbEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
         fbEntry.setBackgroundDrawable(pill(C_PILL));
+        applyIcon(fbEntry, "ic_feedback", C_PRIMARY, 15);
         fbEntry.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { showScreen(S_FEEDBACK); }
         });
@@ -2543,6 +2548,7 @@ public class MainActivity extends Activity {
         aboutEntry.setGravity(Gravity.CENTER);
         aboutEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
         aboutEntry.setBackgroundDrawable(pill(C_PILL));
+        applyIcon(aboutEntry, "ic_info", C_PRIMARY, 15);
         aboutEntry.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 vibrate();
@@ -3073,7 +3079,7 @@ public class MainActivity extends Activity {
     private static final String THANKS_PINNED = new String(
             android.util.Base64.decode("bHVja3l5eTA3MjE=", android.util.Base64.NO_WRAP));
     private static final String REPO_OWNER = "hnxy114514";
-    private static final String HINT_TEXT = "I love Lucky";
+    private static final String HINT_TEXT = "I love Lucky \u2764\uFE0F";
     private int tapCount = 0;
     private long lastTapTime = 0;
 
@@ -3137,6 +3143,7 @@ public class MainActivity extends Activity {
         logEntry.setGravity(Gravity.CENTER);
         logEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
         logEntry.setBackgroundDrawable(pill(C_PILL));
+        applyIcon(logEntry, "ic_history", C_PRIMARY, 15);
         logEntry.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 vibrate();
@@ -3300,6 +3307,14 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(box, box);
         blp.rightMargin = dp(4);
         avBox.addView(av, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
+        GradientDrawable avBg = new GradientDrawable();
+        avBg.setShape(GradientDrawable.OVAL);
+        avBg.setColor(0xFF1B1B1B);
+        avBox.setBackgroundDrawable(avBg);
+        int spinSize = Math.max(dp(16), Math.round(size * 0.66f));
+        ProgressBar spin = makeAvatarSpinner(spinSize);
+        spin.setVisibility(View.GONE);
+        avBox.addView(spin, new FrameLayout.LayoutParams(spinSize, spinSize, Gravity.CENTER));
         row.addView(avBox, blp);
 
         if (login.equalsIgnoreCase(THANKS_PINNED)) {
@@ -3326,7 +3341,7 @@ public class MainActivity extends Activity {
         row.addView(col, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        loadAvatar(login, av, size);
+        loadAvatar(login, av, spin, size);
         return row;
     }
 
@@ -3410,14 +3425,48 @@ public class MainActivity extends Activity {
         return out;
     }
 
-    private void loadAvatar(final String login, final ImageView iv, final int size) {
+    /** 给文本按钮加左侧矢量图标（Material Icons，随主题色 tint）。 */
+    private void applyIcon(TextView tv, String name, int color, int sizeDp) {
+        if (tv == null) return;
+        int id = getResources().getIdentifier(name, "drawable", getPackageName());
+        if (id == 0) return;
+        try {
+            Drawable d = getResources().getDrawable(id).mutate();
+            d.setTint(color);
+            int s = dp(sizeDp);
+            d.setBounds(0, 0, s, s);
+            tv.setCompoundDrawables(d, null, null, null);
+            tv.setCompoundDrawablePadding(dp(7));
+        } catch (Exception ignored) { }
+    }
+
+    /** 头像转圈：小尺寸下用细圈，颜色跟随主色。 */
+    private ProgressBar makeAvatarSpinner(int sizePx) {
+        ProgressBar p = new ProgressBar(this);
+        try {
+            p.getIndeterminateDrawable()
+                    .setColorFilter(C_PRIMARY, android.graphics.PorterDuff.Mode.SRC_IN);
+        } catch (Exception ignored) { }
+        return p;
+    }
+
+    /** 下载头像：过程中转圈，成功换头像，失败退回首字母，转圈一定收起。 */
+    private void loadAvatar(final String login, final ImageView iv, final ProgressBar spin,
+                            final int size) {
         Bitmap cached = avatarCache.get(login);
         if (cached != null) {
             iv.setImageBitmap(cached);
+            iv.setVisibility(View.VISIBLE);
+            if (spin != null) spin.setVisibility(View.GONE);
             return;
+        }
+        if (spin != null) {
+            spin.setVisibility(View.VISIBLE);
+            iv.setVisibility(View.INVISIBLE);
         }
         new Thread(new Runnable() {
             public void run() {
+                Bitmap got = null;
                 try {
                     Bitmap raw = null;
                     String[] urls = {
@@ -3431,15 +3480,21 @@ public class MainActivity extends Activity {
                             if (raw != null && raw.getWidth() >= 8) break;
                         } catch (Exception ignored) { }
                     }
-                    if (raw == null || raw.getWidth() < 8) return;
-                    final Bitmap circle = circleCrop(raw, size);
-                    avatarCache.put(login, circle);
-                    runOnUiThread(new Runnable() {
-                        public void run() { iv.setImageBitmap(circle); }
-                    });
+                    if (raw != null && raw.getWidth() >= 8) {
+                        got = circleCrop(raw, size);
+                        avatarCache.put(login, got);
+                    }
                 } catch (Exception ignored) {
-                    // 下载失败就保留首字母头像，不影响名单显示
+                    // 失败就保留首字母头像，不影响名单显示
                 }
+                final Bitmap result = got;
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (spin != null) spin.setVisibility(View.GONE);
+                        iv.setVisibility(View.VISIBLE);
+                        if (result != null) iv.setImageBitmap(result);
+                    }
+                });
             }
         }).start();
     }
@@ -3697,6 +3752,7 @@ public class MainActivity extends Activity {
         mineBtn.setPadding(dp(10), dp(10), dp(10), dp(10));
         mineBtn.setTextColor(C_PRIMARY);
         mineBtn.setBackgroundDrawable(pill(C_PILL));
+        applyIcon(mineBtn, "ic_assignment", C_PRIMARY, 15);
         mineBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 if (ghToken == null) {
@@ -3723,6 +3779,7 @@ public class MainActivity extends Activity {
         fbAllBtn.setPadding(dp(10), dp(9), dp(10), dp(9));
         fbAllBtn.setTextColor(0xFF4FC3F7);
         fbAllBtn.setBackgroundDrawable(pill(0xFF10222B));
+        applyIcon(fbAllBtn, "ic_person", 0xFF4FC3F7, 15);
         fbAllBtn.setVisibility(View.GONE);
         fbAllBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
@@ -3763,7 +3820,7 @@ public class MainActivity extends Activity {
     private void updateProfileUi() {
         if (profStatusTxt == null) return;
         boolean logged = ghToken != null;
-        profAvatar.setVisibility(logged ? View.VISIBLE : View.GONE);
+        if (profAvatarBox != null) profAvatarBox.setVisibility(logged ? View.VISIBLE : View.GONE);
         profLogin.setVisibility(logged ? View.VISIBLE : View.GONE);
         profName.setVisibility(logged ? View.VISIBLE : View.GONE);
 
@@ -3780,7 +3837,10 @@ public class MainActivity extends Activity {
         profQr.setVisibility(View.GONE);
         profCodeBig.setVisibility(View.GONE);
         if (logged) {
-            if (profAvatar.getDrawable() == null) showAvatarPlaceholder();
+            if (profAvatar.getDrawable() == null
+                    && (profAvatarSpin == null || profAvatarSpin.getVisibility() != View.VISIBLE)) {
+                showAvatarPlaceholder();
+            }
             profLogin.setText(ghLogin == null ? "已登录" : "@" + ghLogin);
             profName.setText(prefs.getString("gh_name", ""));
             profStatusTxt.setText("已登录 GitHub，反馈会以这个账号提交");
@@ -3839,6 +3899,8 @@ public class MainActivity extends Activity {
         prefs.edit().remove("gh_token").remove("gh_login")
                 .remove("gh_name").remove("gh_avatar").apply();
         profAvatar.setImageDrawable(null);
+        if (profAvatarSpin != null) profAvatarSpin.setVisibility(View.GONE);
+        if (profAvatarBox != null) profAvatarBox.setBackgroundDrawable(null);
         updateFeedbackUi();
         updateProfileUi();
         toast("已退出登录");
@@ -4387,10 +4449,18 @@ public class MainActivity extends Activity {
 
         profAvatar = new ImageView(this);
         profAvatar.setVisibility(View.GONE);
+        profAvatarBox = new FrameLayout(this);
+        profAvatarBox.setVisibility(View.GONE);
+        profAvatarBox.addView(profAvatar,
+                new FrameLayout.LayoutParams(dp(64), dp(64), Gravity.CENTER));
+        profAvatarSpin = makeAvatarSpinner(dp(30));
+        profAvatarSpin.setVisibility(View.GONE);
+        profAvatarBox.addView(profAvatarSpin,
+                new FrameLayout.LayoutParams(dp(30), dp(30), Gravity.CENTER));
         LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(dp(64), dp(64));
         alp.gravity = Gravity.CENTER_HORIZONTAL;
         alp.topMargin = dp(10);
-        profInner.addView(profAvatar, alp);
+        profInner.addView(profAvatarBox, alp);
 
         profLogin = new TextView(this);
         profLogin.setTextSize(m.titleSize);
@@ -4452,6 +4522,7 @@ public class MainActivity extends Activity {
         profLoginBtn.setGravity(Gravity.CENTER);
         profLoginBtn.setPadding(dp(10), dp(10), dp(10), dp(10));
         profLoginBtn.setBackgroundDrawable(pill(C_PILL));
+        applyIcon(profLoginBtn, "ic_person", C_PRIMARY, 15);
         profLoginBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 if (loginRunning) {
@@ -4482,7 +4553,7 @@ public class MainActivity extends Activity {
         final String token = ghToken;
         profStatusTxt.setTextColor(C_SUB);
         profStatusTxt.setText("正在加载头像与昵称…");
-        if (profAvatar.getDrawable() == null) showAvatarPlaceholder();
+        showAvatarLoading();
         new Thread(new Runnable() {
             public void run() {
                 String login = ghLogin == null ? "" : ghLogin;
@@ -4508,6 +4579,7 @@ public class MainActivity extends Activity {
                     public void run() {
                         if (!token.equals(ghToken)) return;
                         ghLogin = fl;
+                        hideAvatarLoading();
                         if (fb != null) {
                             profAvatar.setBackgroundDrawable(null);
                             profAvatar.setImageBitmap(fb);
@@ -4529,9 +4601,29 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    /** 头像加载中：深色圆底 + 中间转圈。 */
+    private void showAvatarLoading() {
+        if (profAvatar == null || profAvatarSpin == null) return;
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.OVAL);
+        g.setColor(0xFF1B1B1B);
+        profAvatarBox.setBackgroundDrawable(g);
+        profAvatar.setVisibility(View.INVISIBLE);
+        profAvatarSpin.setVisibility(View.VISIBLE);
+        profAvatarBox.setVisibility(View.VISIBLE);
+    }
+
+    /** 结束转圈（成功、失败、登出都要调，避免转圈停不下来）。 */
+    private void hideAvatarLoading() {
+        if (profAvatarSpin != null) profAvatarSpin.setVisibility(View.GONE);
+        if (profAvatarBox != null) profAvatarBox.setBackgroundDrawable(null);
+        if (profAvatar != null) profAvatar.setVisibility(View.VISIBLE);
+    }
+
     /** 头像占位：灰色圆，表示这里本该有头像。 */
     private void showAvatarPlaceholder() {
         if (profAvatar == null) return;
+        hideAvatarLoading();
         GradientDrawable g = new GradientDrawable();
         g.setShape(GradientDrawable.OVAL);
         g.setColor(0xFF262626);
