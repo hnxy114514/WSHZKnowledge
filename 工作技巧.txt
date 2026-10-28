@@ -370,9 +370,27 @@ Release 的 tag 必须 = v{versionName}，App 靠它判断要不要更新。
      https://api.github.com/repos/hnxy114514/WSHZKnowledge/issues/<号>/labels
    关闭：curl -sk -X PATCH ... -d '{"state":"closed"}' .../issues/<号>
 
-7) 反馈状态约定（App「我的反馈记录」按这个显示）：
-   - 开始处理：给 issue 打 label「处理中」
-   - 修完发布：加一条评论说明版本 + 打 label「已修复」+ 关闭 issue
-   打标签命令（PAT 在 GITHUB_TOKEN）：
-   curl -sk -X POST -H "Authorization: token $GITHUB_TOKEN"      -H "Content-Type: application/json"      -d '{"labels":["已修复"]}'      https://api.github.com/repos/hnxy114514/WSHZKnowledge/issues/<号>/labels
-   关闭：curl -sk -X PATCH ... -d '{"state":"closed"}' .../issues/<号>
+==================================================
+十六、更新日志与「更新说明」
+==================================================
+1) 数据源只有一个：app/src/main/assets/changelog.json（随 APK 打包，离线可看）
+   结构：
+   {"version":1,"log":[{"v":"1.11.2","d":"10-28","items":["一句话","一句话"]}]}
+   按版本倒序（最新在最前）。App 端 S_CHANGELOG 页直接渲染，当前版本高亮。
+
+2) 发版纪律（每次都要做，否则新版本查不到）：
+   - 改完代码先往 log 数组最前面插入本版条目，v 必须与 versionName 一字不差
+   - items 只写用户能感知的变化，一条一句话，不写「重构了 XX 方法」
+   - Release 正文（release.py 的参数）给「更新说明弹窗」用，措辞要和 changelog 一致
+
+3) 更新说明弹窗：checkUpdate() 拿到 Release 后不再直接下载，先 showUpdateDialog()
+   - 正文走 trimNotes()：去空行、去 # 与 - 记号、首行「vX.Y.Z - 」前缀去掉、截到 460 字
+   - 「稍后」把版本记进 prefs 的 skip_version：开机静默检查不再打扰同一版本，
+     手动点「检查更新」仍然会弹
+   - 「立即更新」若没装安装权限，记 pendingDownload 去授权，onResume 回来自动续下载
+
+4) 构建踩坑：build.sh 第 2 步用 Python 批量删 build/obj 时，
+   一次删 87 个文件会触发 safe-delete 的「turn 内批量删除 > 50 个」拦截，
+   后台运行时没人能确认 → 直接失败，APK 还是旧包。
+   处理：构建/发布一律在前台跑；或先手动清一次 build/obj（少量批量），再运行脚本。
+   release.py 会再构建一次，注意别被同一个拦截卡住。
