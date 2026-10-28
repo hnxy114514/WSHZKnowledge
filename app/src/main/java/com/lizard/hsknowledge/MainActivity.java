@@ -388,6 +388,12 @@ public class MainActivity extends Activity {
         return r;
     }
 
+    /** 版本号统一带一个 v（tag 本身已含 v 时不重复）。 */
+    private String tagWithV(String tag) {
+        if (tag == null || tag.length() == 0) return "";
+        return (tag.startsWith("v") || tag.startsWith("V")) ? tag : "v" + tag;
+    }
+
     private String apkUrlFor(String tag) {
         return RELEASE_DL + tag + "/HZKnowledge-" + tag + ".apk";
     }
@@ -495,7 +501,7 @@ public class MainActivity extends Activity {
         for (int i = 0; i <= MIRRORS.length; i++) {
             String src = sourceName(i);
             String u = (i == 0) ? originUrl : MIRRORS[i - 1] + originUrl;
-            progressShow("正在下载 v" + tag, i == 0 ? "直连，正在连接…" : "切换镜像 " + src + "…", 0);
+            progressShow("正在下载 " + tagWithV(tag), i == 0 ? "直连，正在连接…" : "切换镜像 " + src + "…", 0);
             File tmp = new File(dir, APK_FILE + ".tmp");
             if (tmp.exists() && !tmp.delete()) { }
             HttpURLConnection cn = null;
@@ -521,7 +527,7 @@ public class MainActivity extends Activity {
                     int pct = (total > 0) ? (int) (done * 100L / total) : -1;
                     if (pct != lastPct) {
                         lastPct = pct;
-                        progressShow("正在下载 v" + tag, progressText(done, total, src), pct);
+                        progressShow("正在下载 " + tagWithV(tag), progressText(done, total, src), pct);
                     }
                 }
                 is.close();
