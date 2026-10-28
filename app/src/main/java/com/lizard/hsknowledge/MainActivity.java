@@ -447,6 +447,9 @@ public class MainActivity extends Activity {
 
         ScrollView sc = new ScrollView(this);
         sc.setVerticalScrollBarEnabled(false);
+        sc.setBackgroundColor(C_CARD);
+        // 软件层渲染：避免手表 GPU 上滚动时硬件合成产生的闪烁
+        sc.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         TextView body = new TextView(this);
         body.setText(desc);
         body.setTextSize(m.subtitleSize - 1f);
@@ -515,7 +518,8 @@ public class MainActivity extends Activity {
             Window w = updateDialog.getWindow();
             int sw = getResources().getDisplayMetrics().widthPixels;
             w.setLayout((int) (sw * (m.round ? 0.74f : 0.86f)), WindowManager.LayoutParams.WRAP_CONTENT);
-            w.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            // 不透明窗口背景：透明窗口 + 暗背景叠加在手表 GPU 上滚动会闪烁，故改用不透明底色
+            w.setBackgroundDrawable(new ColorDrawable(C_BG));
         } catch (Exception ignored) { }
     }
 
