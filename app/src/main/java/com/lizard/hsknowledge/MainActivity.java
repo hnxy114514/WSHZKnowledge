@@ -959,6 +959,15 @@ public class MainActivity extends Activity {
 
     /** 拼请求前缀：测出来了就用测出来的，没测出来（或全不通）就直连。 */
     private String apiBase() { return routeApi == null ? "" : routeApi; }
+
+    /**
+     * 带 token 的接口必须直连，不能走镜像。
+     * 镜像（gh-proxy.com 等）按 URL 缓存响应、会忽略 Authorization 头，
+     * 而 /user 这类接口是「凭 token 返回当前用户」，走镜像会拿到缓存里别人的账号。
+     * 实测：同一 URL 带本人的 token 经镜像返回的是 aeroheaven1 / HHPLow，
+     * 带伪造的无效 token 也返回 HHPLow —— 镜像根本没看 token。
+     */
+    private String apiAuthedBase() { return ""; }
     private String rawBase() { return routeRaw == null ? "" : routeRaw; }
 
     private String routeName(String prefix) {
@@ -5007,6 +5016,7 @@ public class MainActivity extends Activity {
         dismissCodeDialog();
         ghToken = null;
         ghLogin = null;
+        // 昵称与头像也要清：否则退出后个人页还显示着上一个人的信息
         prefs.edit().remove("gh_token").remove("gh_login")
                 .remove("gh_name").remove("gh_avatar").apply();
         profAvatar.setImageDrawable(null);
@@ -5102,10 +5112,12 @@ public class MainActivity extends Activity {
             public void run() {
                 String login = null;
                 try {
-                    login = new JSONObject(httpGetAuthed(GH_USER)).optString("login", "");
+                    // 直连取当前账号：镜像会忽略 token 头，拿到的是别人的账号
+                    login = new JSONObject(httpGetAuthed(apiAuthedBase() + GH_USER)).optString("login", "");
                 } catch (Exception ignored) { }
                 loginRunning = false;
-                saveGitHub(ghToken, login);
+                // 取不到账号名时保留原来的（别把已有账号名抹成空），下次进个人页会再拉一次
+                saveGitHub(ghToken, (login == null || login.length() == 0) ? ghLogin : login);
                 afterLoginEnds();
                 toast(login == null ? "已登录 GitHub" : "已登录 @" + login);
             }
@@ -5373,7 +5385,7 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             public void run() {
                 try {
-                    String url = apiBase() + "https://api.github.com/repos/" + REPO + "/issues?state=all&per_page="
+                    String url = apiAuthedBase() + "https://api.github.com/repos/" + REPO + "/issues?state=all&per_page="
                             + (all ? "100" : "40")
                             + (!all && login != null && login.length() > 0 ? "&creator=" + login : "");
                     JSONArray arr = new JSONArray(httpGetAuthed(url));
@@ -5514,7 +5526,7 @@ public class MainActivity extends Activity {
             public void run() {
                 String reply = null;
                 try {
-                    String u = apiBase() + "https://api.github.com/repos/" + REPO
+                    String u = apiAuthedBase() + "https://api.github.com/repos/" + REPO
                             + "/issues/" + number + "/comments?per_page=30";
                     JSONArray arr = new JSONArray(httpGetAuthed(u));
                     for (int i = 0; i < arr.length(); i++) {
@@ -6156,17 +6168,33 @@ public class MainActivity extends Activity {
         showAvatarLoading();
         new Thread(new Runnable() {
             public void run() {
-                String login = ghLogin == null ? "" : ghLogin;
+                // 本地存的只是缓存，真正的账号以直连返回的为准。
+                // （老版本可能把镜像缓存里的别人账号存了进来，这里顺带自愈。）
+                String cachedLogin = ghLogin == null ? "" : ghLogin;
+                String login = cachedLogin;
                 String name = prefs.getString("gh_name", "");
                 String avatar = prefs.getString("gh_avatar", "");
                 boolean netFail = false;
+                boolean fixed = false;
                 try {
-                    JSONObject o = new JSONObject(httpGetAuthed(apiBase() + GH_USER));
-                    login = o.optString("login", login);
-                    name = o.optString("name", "");
-                    avatar = o.optString("avatar_url", "");
-                    prefs.edit().putString("gh_login", login).putString("gh_name", name)
-                            .putString("gh_avatar", avatar).apply();
+                    // 必须直连：镜像会忽略 token 头，/user 会返回缓存里别人的账号
+                    JSONObject o = new JSONObject(httpGetAuthed(apiAuthedBase() + GH_USER));
+                    String got = o.optString("login", "");
+                    if (got.length() == 0) {
+                        netFail = true;
+                    } else {
+                        // 直连是唯一可信来源，无条件以它为准；与本地不同说明本地存错了，直接覆盖
+                        if (cachedLogin.length() > 0 && !got.equalsIgnoreCase(cachedLogin)) {
+                            fixed = true;
+                            // 顺带删掉按旧账号名存的头像文件，免得下次又命中
+                            deleteAvatarCache(cachedLogin);
+                        }
+                        login = got;
+                        name = o.optString("name", "");
+                        avatar = o.optString("avatar_url", "");
+                        prefs.edit().putString("gh_login", login).putString("gh_name", name)
+                                .putString("gh_avatar", avatar).apply();
+                    }
                 } catch (Exception e) {
                     netFail = true;
                 }
@@ -6175,6 +6203,7 @@ public class MainActivity extends Activity {
                 final String fl = login;
                 final String fn = (name == null) ? "" : name;
                 final boolean fail = netFail;
+                final boolean wasFixed = fixed;
                 runOnUiThread(new Runnable() {
                     public void run() {
                         if (!token.equals(ghToken)) return;
@@ -6188,7 +6217,10 @@ public class MainActivity extends Activity {
                         }
                         profLogin.setText(fl.length() == 0 ? "已登录" : "@" + fl);
                         profName.setText(fn.length() == 0 ? (fail ? "（昵称没加载出来）" : "") : fn);
-                        if (fail) {
+                        if (wasFixed) {
+                            profStatusTxt.setTextColor(C_SUB);
+                            profStatusTxt.setText("已登录 GitHub，反馈会以这个账号提交（账号已更正）");
+                        } else if (fail) {
                             profStatusTxt.setTextColor(0xFFFFB74D);
                             profStatusTxt.setText("网络不佳，头像和昵称没加载出来 · 点此重试");
                         } else {
@@ -6230,6 +6262,15 @@ public class MainActivity extends Activity {
         profAvatar.setBackgroundDrawable(g);
         profAvatar.setImageDrawable(null);
         profAvatar.setVisibility(View.VISIBLE);
+    }
+
+    /** 删掉某个账号名对应的头像缓存文件（账号更正时用）。 */
+    private void deleteAvatarCache(String login) {
+        if (login == null || login.length() == 0) return;
+        try {
+            File f = new File(getFilesDir(), "avatar_" + login + ".png");
+            if (f.exists()) f.delete();
+        } catch (Exception ignored) { }
     }
 
     private Bitmap loadAvatarBitmap(String url, String login) {
