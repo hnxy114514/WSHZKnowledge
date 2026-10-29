@@ -230,6 +230,8 @@ public class MainActivity extends Activity {
     private float subSizeSp = 0f;
     private float uiScale = 1f;          // 界面整体缩放（显示大小）
     private boolean tuningFirstRun = false;
+    /** 重建界面后要回到的页面（-1 表示按默认逻辑走）。 */
+    private static int pendingScreen = -1;
     private boolean isRound = false;
     // 右滑返回手势（设置里可关）
     private static final float PREV_PARALLAX = 0.32f;  // 预览页的起始左移比例（视差）
@@ -304,8 +306,13 @@ public class MainActivity extends Activity {
         loadData();
         loadOrderKeys();
         buildUi();
-        if (!prefs.getBoolean("display_tuned", false)) {
-            tuningFirstRun = true;
+        boolean tuned = prefs.getBoolean("display_tuned", false);
+        if (!tuned) tuningFirstRun = true;
+        if (pendingScreen >= 0) {
+            int back = pendingScreen;
+            pendingScreen = -1;
+            showScreen(back);
+        } else if (!tuned) {
             showScreen(S_DISPLAY);
         } else {
             showScreen(S_SUBJECT);
@@ -507,10 +514,7 @@ public class MainActivity extends Activity {
         box.addView(head, wrap());
 
         ScrollView sc = new ScrollView(this);
-        sc.setVerticalScrollBarEnabled(false);
         sc.setBackgroundColor(C_CARD);
-        sc.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        sc.setFadingEdgeLength(0);
         TextView body = new TextView(this);
         body.setText(desc);
         body.setTextSize(m.subtitleSize - 1f);
@@ -521,14 +525,8 @@ public class MainActivity extends Activity {
         int maxH = Math.min(dp(104), (int) (getResources().getDisplayMetrics().heightPixels * 0.30f));
         box.addView(sc, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, maxH));
 
-        // 窗口背景是透明的，滚动时系统可能只重画脏区，上一帧的字会留在原地形成残影；
-        // 每滚一点就整块重绘一次，卡片区域每帧都完整刷新。
-        sc.getViewTreeObserver().addOnScrollChangedListener(
-                new android.view.ViewTreeObserver.OnScrollChangedListener() {
-                    public void onScrollChanged() {
-                        box.invalidate();
-                    }
-                });
+        // 滚动时整块重绘，卡片区域每帧都完整刷新，避免留下上一帧的文字。
+        tuneDialogScroll(sc, box);
 
         TextView go = new TextView(this);
         go.setText("立即更新");
@@ -583,15 +581,8 @@ public class MainActivity extends Activity {
 
         updateDialog = new AlertDialog.Builder(this).setView(box).create();
         updateDialog.setCancelable(true);
-        try {
-            // 窗口背景透明：弹窗以外完全不遮内容。像素格式要显式声明成带透明的，
-            // 否则合成器按不透明窗口处理，滚动时容易留下上一帧。
-            Window w0 = updateDialog.getWindow();
-            if (w0 != null) {
-                w0.setFormat(android.graphics.PixelFormat.TRANSLUCENT);
-                w0.setBackgroundDrawable(new ColorDrawable(0x00000000));
-            }
-        } catch (Exception ignored) { }
+        // 窗口背景透明：弹窗以外完全不遮内容；像素格式也要带透明，否则滚动会留残影。
+        tuneDialogWindow(updateDialog);
         updateDialog.show();
         try {
             Window w = updateDialog.getWindow();
@@ -4359,6 +4350,9 @@ public class MainActivity extends Activity {
     // ================= 显示调节 =================
     private interface OnFloatChange { void onChanged(float v); }
 
+    /** 滑块松手时的回调：用于在用户调完后统一保存并重建界面。 */
+    private interface OnFloatRelease { void onReleased(float v); }
+
     private TextView pvTag, pvTitle, pvBody, pvList, pvSub;
 
     private void buildDisplayScreen() {
@@ -4388,6 +4382,18 @@ public class MainActivity extends Activity {
                 .apply();
     }
 
+    /**
+     * 保存显示设置并重建整个界面。
+     * 字号与整体缩放是在建界面时算进控件的（字号走 Metrics 快照、尺寸走 dp()），
+     * 光改变量不重建，界面看起来就完全没变——所以必须重建。
+     * 重建后回到 backTo 指定的页面，别把用户甩回主页。
+     */
+    private void applyDisplayChange(int backTo) {
+        saveDisplaySettings();
+        pendingScreen = backTo;
+        recreate();
+    }
+
     /** 预览区按当前值实时重算（界面缩放通过放大预览字号来体现）。 */
     private void applyPreview() {
         if (pvTitle == null) return;
@@ -4401,7 +4407,13 @@ public class MainActivity extends Activity {
 
     /** 一行滑块：上方标签与当前值，下方 SeekBar。 */
     private View sliderRow(String label, float value, float min, float max, float step,
-                           final String unit, final OnFloatChange onChange) {
+                           String unit, OnFloatChange onChange) {
+        return sliderRow(label, value, min, max, step, unit, onChange, null);
+    }
+
+    private View sliderRow(String label, float value, float min, float max, float step,
+                           final String unit, final OnFloatChange onChange,
+                           final OnFloatRelease onRelease) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(10), dp(7), dp(10), dp(3));
@@ -4441,13 +4453,18 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) { }
         sb.setPadding(0, 0, 0, 0);
         sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            float cur = value;
             public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
                 float v = min + progress * step;
+                cur = v;
                 val.setText(shownValue(v, unit));
                 onChange.onChanged(v);
             }
             public void onStartTrackingTouch(SeekBar bar) { }
-            public void onStopTrackingTouch(SeekBar bar) { vibrate(); }
+            public void onStopTrackingTouch(SeekBar bar) {
+                vibrate();
+                if (onRelease != null) onRelease.onReleased(cur);
+            }
         });
         box.addView(sb, wrap());
         return box;
@@ -4465,7 +4482,7 @@ public class MainActivity extends Activity {
 
         if (!tuningFirstRun) {
             displayInner.addView(makeBack("‹ 返回设置", new View.OnClickListener() {
-                public void onClick(View v) { showScreen(S_SETTINGS); }
+                public void onClick(View v) { applyDisplayChange(S_SETTINGS); }
             }), wrapM());
         }
 
@@ -4479,8 +4496,8 @@ public class MainActivity extends Activity {
 
         TextView tip = new TextView(this);
         tip.setText(tuningFirstRun
-                ? "第一次使用，先按自己的习惯把字号和界面大小调舒服。下面的预览会跟着变，调好点「完成，开始使用」。"
-                : "拖动滑块调整，上面的预览会实时变化。界面大小改动在下次进入页面时完全生效。");
+                ? "第一次使用，先按自己的习惯把字号和界面大小调舒服。松手后整个界面立刻按新比例重排，调好点「完成，开始使用」。"
+                : "拖动滑块调整，上面的预览实时变化；松手后整个界面（字号、按钮、间距、图标）立刻按新比例重排。");
         tip.setTextSize(Math.max(9f, m.subtitleSize - 1f));
         tip.setTextColor(C_SUB);
         tip.setGravity(Gravity.CENTER);
@@ -4535,18 +4552,26 @@ public class MainActivity extends Activity {
         displayInner.addView(sliderRow("正文字号", fontSizeSp, 11, 22, 1, "sp",
                 new OnFloatChange() {
                     public void onChanged(float v) { fontSizeSp = v; applyPreview(); }
+                }, new OnFloatRelease() {
+                    public void onReleased(float v) { applyDisplayChange(S_DISPLAY); }
                 }), wrap());
         displayInner.addView(sliderRow("列表字号", listSizeSp, 12, 20, 1, "sp",
                 new OnFloatChange() {
                     public void onChanged(float v) { listSizeSp = v; applyPreview(); }
+                }, new OnFloatRelease() {
+                    public void onReleased(float v) { applyDisplayChange(S_DISPLAY); }
                 }), wrap());
         displayInner.addView(sliderRow("标题字号", curTitleSize(), 13, 26, 1, "sp",
                 new OnFloatChange() {
                     public void onChanged(float v) { titleSizeSp = v; applyPreview(); }
+                }, new OnFloatRelease() {
+                    public void onReleased(float v) { applyDisplayChange(S_DISPLAY); }
                 }), wrap());
         displayInner.addView(sliderRow("说明小字", curSubSize(), 9, 16, 1, "sp",
                 new OnFloatChange() {
                     public void onChanged(float v) { subSizeSp = v; applyPreview(); }
+                }, new OnFloatRelease() {
+                    public void onReleased(float v) { applyDisplayChange(S_DISPLAY); }
                 }), wrap());
 
         // ---- 界面大小 ----
@@ -4554,9 +4579,11 @@ public class MainActivity extends Activity {
         displayInner.addView(sliderRow("整体缩放", uiScale, 0.85f, 1.40f, 0.05f, "%",
                 new OnFloatChange() {
                     public void onChanged(float v) { uiScale = v; applyPreview(); }
+                }, new OnFloatRelease() {
+                    public void onReleased(float v) { applyDisplayChange(S_DISPLAY); }
                 }), wrap());
         TextView scaleHint = new TextView(this);
-        scaleHint.setText("调大后文字、按钮、间距、图标一起变大，适合手指粗或看不清的人；表盘小的机型建议不要超过 115%。");
+        scaleHint.setText("调大后文字、按钮、间距、图标一起变大，适合手指粗或看不清的人；松手后立刻生效。表盘小的机型建议不要超过 115%。");
         scaleHint.setTextSize(Math.max(9f, m.subtitleSize - 2f));
         scaleHint.setTextColor(C_SUB);
         scaleHint.setGravity(Gravity.CENTER);
@@ -4575,10 +4602,9 @@ public class MainActivity extends Activity {
         done.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 vibrate();
-                saveDisplaySettings();
                 prefs.edit().putBoolean("display_tuned", true).apply();
                 tuningFirstRun = false;
-                recreate();
+                applyDisplayChange(S_SETTINGS);
             }
         });
         LinearLayout.LayoutParams doneLp = wrap();
@@ -4601,7 +4627,7 @@ public class MainActivity extends Activity {
                 uiScale = 1f;
                 saveDisplaySettings();
                 m = new Metrics();
-                renderDisplayScreen();
+                applyDisplayChange(S_DISPLAY);
             }
         });
         LinearLayout.LayoutParams resetLp = wrap();
@@ -5253,6 +5279,7 @@ public class MainActivity extends Activity {
         codeDialog.setCancelable(false);
         codeDialog.setCanceledOnTouchOutside(false);
         codeDialog.show();
+        tuneDialogWindow(codeDialog);
         try {
             Window w = codeDialog.getWindow();
             int sw = getResources().getDisplayMetrics().widthPixels;
@@ -5615,8 +5642,17 @@ public class MainActivity extends Activity {
         final int[] type = new int[]{parseIssueType(oldBody)};
         String desc = parseIssueDesc(oldBody);
 
+        // 外层：竖排容器 = 上面可滚动的内容区 + 底部固定的操作按钮条。
+        // 按钮必须固定在滚动区外，否则屏幕小的时候它被内容顶到下面，用户看不到「保存」按钮。
+        LinearLayout outer = new LinearLayout(this);
+        outer.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable og = new GradientDrawable();
+        og.setColor(0xFF151515);
+        og.setCornerRadius(dp(16));
+        outer.setBackgroundDrawable(og);
+
         // 内容比屏幕高时只让里面滚，弹窗本身不能顶出屏幕（手表屏小）
-        final int maxDlgH = (int) (getResources().getDisplayMetrics().heightPixels * 0.74f);
+        final int maxDlgH = (int) (getResources().getDisplayMetrics().heightPixels * 0.56f);
         ScrollView sc = new ScrollView(this) {
             @Override
             protected void onMeasure(int wSpec, int hSpec) {
@@ -5624,15 +5660,12 @@ public class MainActivity extends Activity {
                         View.MeasureSpec.makeMeasureSpec(maxDlgH, View.MeasureSpec.AT_MOST));
             }
         };
-        sc.setVerticalScrollBarEnabled(false);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(12), dp(12), dp(12), dp(10));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0xFF151515);
-        bg.setCornerRadius(dp(16));
-        box.setBackgroundDrawable(bg);
+        box.setPadding(dp(12), dp(12), dp(12), dp(4));
         sc.addView(box);
+        outer.addView(sc, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView cap = new TextView(this);
         cap.setText("编辑这条反馈");
@@ -5688,6 +5721,12 @@ public class MainActivity extends Activity {
         elp.topMargin = dp(6);
         box.addView(ed, elp);
 
+        // ---- 底部固定操作条：保存与取消永远看得见 ----
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(dp(12), dp(4), dp(12), dp(10));
+
         final TextView save = new TextView(this);
         save.setText("保存修改");
         save.setTextSize(m.backSize);
@@ -5696,20 +5735,23 @@ public class MainActivity extends Activity {
         save.setTextColor(C_PRIMARY);
         save.setPadding(dp(10), dp(11), dp(10), dp(11));
         save.setBackgroundDrawable(pill(0xFF14384A));
-        LinearLayout.LayoutParams slp = wrap();
-        slp.topMargin = dp(8);
-        box.addView(save, slp);
+        bar.addView(save, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 2f));
 
         TextView cancel = new TextView(this);
         cancel.setText("取消");
         cancel.setTextSize(m.subtitleSize - 1f);
         cancel.setGravity(Gravity.CENTER);
         cancel.setTextColor(C_SUB);
-        cancel.setPadding(dp(8), dp(9), dp(8), dp(2));
+        cancel.setPadding(dp(8), dp(11), dp(8), dp(11));
         cancel.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { vibrate(); dismissEditIssueDialog(); }
         });
-        box.addView(cancel, wrap());
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        clp.leftMargin = dp(8);
+        bar.addView(cancel, clp);
+        outer.addView(bar, wrap());
 
         save.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
@@ -5752,9 +5794,13 @@ public class MainActivity extends Activity {
             }
         });
 
-        editIssueDlg = new AlertDialog.Builder(this).setView(sc).create();
+        // 滚动时整块重绘，避免内容区留上一帧的字（残影并伴随闪烁）
+        tuneDialogScroll(sc, outer);
+
+        editIssueDlg = new AlertDialog.Builder(this).setView(outer).create();
         editIssueDlg.setCancelable(true);
         editIssueDlg.show();
+        tuneDialogWindow(editIssueDlg);
         sizeDialog(editIssueDlg, 0.90f);
     }
 
@@ -5774,11 +5820,43 @@ public class MainActivity extends Activity {
         editIssueDlg = null;
     }
 
+    /**
+     * 弹窗窗口统一处理：像素格式必须声明成带透明。
+     * 否则合成器按不透明窗口处理，滚动时只重画脏区，上一帧的内容会留在原地形成残影。
+     */
+    private void tuneDialogWindow(AlertDialog d) {
+        try {
+            Window w = d.getWindow();
+            if (w == null) return;
+            w.setFormat(android.graphics.PixelFormat.TRANSLUCENT);
+            w.setBackgroundDrawable(new ColorDrawable(0x00000000));
+        } catch (Exception ignored) { }
+    }
+
+    /**
+     * 弹窗里的滚动区：去掉边缘光晕与越界回弹，滚动时整块 invalidate。
+     * 不这么做的话，内层 ScrollView 一滚，窗口就留着上一帧的字（残影并伴随闪烁）。
+     */
+    private void tuneDialogScroll(final ScrollView sc, final View card) {
+        sc.setVerticalScrollBarEnabled(false);
+        sc.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        sc.setFadingEdgeLength(0);
+        try {
+            sc.getViewTreeObserver().addOnScrollChangedListener(
+                    new android.view.ViewTreeObserver.OnScrollChangedListener() {
+                        public void onScrollChanged() {
+                            if (card != null) card.invalidate();
+                        }
+                    });
+        } catch (Exception ignored) { }
+    }
+
     /** 弹窗宽度按屏宽比例给，圆屏再收一点。必须在 show() 之后调。 */
     private void sizeDialog(AlertDialog d, float ratio) {
         try {
             Window w = d.getWindow();
             if (w == null) return;
+            w.setFormat(android.graphics.PixelFormat.TRANSLUCENT);
             w.setBackgroundDrawable(new ColorDrawable(0x00000000));
             int sw = getResources().getDisplayMetrics().widthPixels;
             w.setLayout((int) (sw * (m.round ? ratio - 0.08f : ratio)),
@@ -5919,6 +5997,7 @@ public class MainActivity extends Activity {
             }
         });
         d.show();
+        tuneDialogWindow(d);
         sizeDialog(d, 0.86f);
     }
 
