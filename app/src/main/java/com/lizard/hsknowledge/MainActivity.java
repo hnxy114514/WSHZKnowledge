@@ -147,10 +147,23 @@ public class MainActivity extends Activity {
     private FrameLayout fullscreenView;
 
     // ---------- 反馈 ----------
-    private static final String[] FB_TYPES = {"内容有误", "公式显示", "闪退卡顿", "功能建议", "其他问题"};
+    // 反馈类型：按「用户看到什么现象」分类，方便一眼对上号。
+    private static final String[] FB_TYPES = {"显示问题", "内容有误", "闪退卡顿", "功能建议", "其他问题"};
+    /** 每个类型下面的一句话说明，随选中类型变化，告诉用户什么情况该选它。 */
+    private static final String[] FB_TYPE_HINTS = {
+            "界面看着不对：公式错位、显示不全、有残影、缩放没生效、按钮找不到",
+            "知识点内容写错了：答案不对、史实记错、公式写错",
+            "用着用着退出、卡住不动、反应很慢",
+            "想要个新功能，或者哪里用着别扭、想改一改",
+            "上面几种都不是，先放这儿",
+    };
+    /** 旧反馈里用过的类型名，解析历史反馈时映射到新分类。 */
+    private static final String[] FB_TYPES_OLD = {"内容有误", "公式显示", "闪退卡顿", "功能建议", "其他问题"};
     private LinearLayout feedbackScreen, feedbackInner;
     private ScrollView feedbackScroll;
     private TextView fbStatusTxt, fbSubmitBtn, fbAllBtn;
+    /** 类型说明行：告诉用户「什么情况该选这一类」。 */
+    private TextView fbTypeHint;
     private LinearLayout profileScreen, profInner;
     private ScrollView profScroll;
     private TextView profStatusTxt, profLoginBtn, profCodeBig, profLogin, profName;
@@ -4403,6 +4416,22 @@ public class MainActivity extends Activity {
         recreate();
     }
 
+    /**
+     * 拖动缩放滑块时的实时预览：把整个界面等比放大。
+     * 不重建界面，所以滑块不会被销毁、拖动不会断——Android 的触摸分发会按变换矩阵
+     * 逆变换坐标，缩放后的控件照样能准确接收触摸。
+     * 松手后再由 applyDisplayChange 精确重建（那时每个控件的 dp 与字号都是按新比例算好的）。
+     */
+    private void applyLiveScale(float k) {
+        if (root == null) return;
+        // 以屏幕中心为基准放大：内容从中间往外长，四个角不会跑到屏幕外看不见。
+        // 只做视觉预览，不重建界面——滑块不会销毁，拖动不会断。
+        root.setPivotX(root.getWidth() / 2f);
+        root.setPivotY(root.getHeight() / 2f);
+        root.setScaleX(k);
+        root.setScaleY(k);
+    }
+
     /** 预览区按当前值实时重算（界面缩放通过放大预览字号来体现）。 */
     private void applyPreview() {
         if (pvTitle == null) return;
@@ -4587,12 +4616,20 @@ public class MainActivity extends Activity {
         displayInner.addView(sectionHeader("界面大小"), wrap());
         displayInner.addView(sliderRow("整体缩放", uiScale, 0.85f, 1.40f, 0.05f, "%",
                 new OnFloatChange() {
-                    public void onChanged(float v) { uiScale = v; applyPreview(); }
+                    public void onChanged(float v) {
+                        uiScale = v;
+                        applyPreview();
+                        applyLiveScale(v);   // 拖动过程中界面就跟着变
+                    }
                 }, new OnFloatRelease() {
-                    public void onReleased(float v) { applyDisplayChange(S_DISPLAY); }
+                    public void onReleased(float v) {
+                        // 先把预览缩放复位，再精确重建，避免两套缩放叠在一起
+                        if (root != null) { root.setScaleX(1f); root.setScaleY(1f); }
+                        applyDisplayChange(S_DISPLAY);
+                    }
                 }), wrap());
         TextView scaleHint = new TextView(this);
-        scaleHint.setText("调大后文字、按钮、间距、图标一起变大，适合手指粗或看不清的人；松手后立刻生效。表盘小的机型建议不要超过 115%。");
+        scaleHint.setText("拖动时界面会实时放大，松手后按新比例精确排版。调大后文字、按钮、间距、图标一起变大，适合手指粗或看不清的人；表盘小的机型建议不要超过 115%。");
         scaleHint.setTextSize(Math.max(9f, m.subtitleSize - 2f));
         scaleHint.setTextColor(C_SUB);
         scaleHint.setGravity(Gravity.CENTER);
@@ -4816,6 +4853,16 @@ public class MainActivity extends Activity {
             feedbackInner.addView(line, wrap());
         }
 
+        // 类型说明：跟着当前选中的类型变，用户不用猜哪个合适
+        fbTypeHint = new TextView(this);
+        fbTypeHint.setTextSize(Math.max(9f, m.subtitleSize - 2f));
+        fbTypeHint.setTextColor(C_SUB);
+        fbTypeHint.setGravity(Gravity.CENTER);
+        fbTypeHint.setPadding(dp(6), dp(4), dp(6), dp(6));
+        LinearLayout.LayoutParams thp = wrap();
+        thp.bottomMargin = dp(2);
+        feedbackInner.addView(fbTypeHint, thp);
+
         feedbackInner.addView(sectionHeader("描述"), wrap());
         fbDesc = new EditText(this);
         fbDesc.setHint("哪一节、哪句话有问题，或想要什么功能…");
@@ -4981,6 +5028,10 @@ public class MainActivity extends Activity {
             b.setTextColor(on ? C_PRIMARY : C_SUB);
             b.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
             b.setBackgroundDrawable(pill(on ? 0xFF14384A : C_PILL));
+        }
+        // 说明行跟着当前选中的类型变，用户不用猜哪个合适
+        if (fbTypeHint != null && fbType >= 0 && fbType < FB_TYPE_HINTS.length) {
+            fbTypeHint.setText(FB_TYPE_HINTS[fbType]);
         }
     }
 
@@ -5663,8 +5714,9 @@ public class MainActivity extends Activity {
         og.setCornerRadius(dp(16));
         outer.setBackgroundDrawable(og);
 
-        // 内容比屏幕高时只让里面滚，弹窗本身不能顶出屏幕（手表屏小）
-        final int maxDlgH = (int) (getResources().getDisplayMetrics().heightPixels * 0.56f);
+        // 结构：上面是可滚的类型选择，下面是常驻的输入框，再下面是操作按钮条。
+        // 输入框必须常驻（不能塞进滚动区），否则屏小的时候它被顶到可视区外看不见。
+        final int maxDlgH = (int) (getResources().getDisplayMetrics().heightPixels * 0.30f);
         ScrollView sc = new ScrollView(this) {
             @Override
             protected void onMeasure(int wSpec, int hSpec) {
@@ -5672,22 +5724,31 @@ public class MainActivity extends Activity {
                         View.MeasureSpec.makeMeasureSpec(maxDlgH, View.MeasureSpec.AT_MOST));
             }
         };
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(12), dp(12), dp(12), dp(4));
-        sc.addView(box);
-        outer.addView(sc, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
+        // 顺序：标题 → 可滚的类型选择 → 常驻输入框 → 底部按钮条
         TextView cap = new TextView(this);
         cap.setText("编辑这条反馈");
         cap.setTextSize(m.subtitleSize);
         cap.setTypeface(Typeface.DEFAULT_BOLD);
         cap.setTextColor(C_PRIMARY);
         cap.setGravity(Gravity.CENTER);
-        box.addView(cap, wrap());
+        cap.setPadding(dp(12), dp(10), dp(12), dp(6));
+        outer.addView(cap, wrap());
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(12), dp(4), dp(12), dp(2));
+        sc.addView(box);
+        outer.addView(sc, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         final TextView[] btns = new TextView[FB_TYPES.length];
+        // 类型说明：告诉用户每一类对应什么现象，编辑时也能对上号
+        final TextView typeHint = new TextView(this);
+        typeHint.setTextSize(Math.max(8f, m.subtitleSize - 3f));
+        typeHint.setTextColor(C_SUB);
+        typeHint.setGravity(Gravity.CENTER);
+        typeHint.setPadding(dp(4), dp(2), dp(4), dp(4));
+        typeHint.setText(FB_TYPE_HINTS[type[0]]);
         for (int row = 0; row < (FB_TYPES.length + 1) / 2; row++) {
             LinearLayout line = new LinearLayout(this);
             line.setOrientation(LinearLayout.HORIZONTAL);
@@ -5704,6 +5765,7 @@ public class MainActivity extends Activity {
                         vibrate();
                         type[0] = idx;
                         paintEditTypes(btns, type[0]);
+                        typeHint.setText(FB_TYPE_HINTS[idx]);
                     }
                 });
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
@@ -5718,7 +5780,9 @@ public class MainActivity extends Activity {
             box.addView(line, wrap());
         }
         paintEditTypes(btns, type[0]);
+        box.addView(typeHint, wrap());
 
+        // 输入框常驻在滚动区外面，永远看得见；高度限死，避免把弹窗顶出屏幕
         final EditText ed = new EditText(this);
         ed.setText(desc);
         ed.setTextSize(m.subtitleSize - 1f);
@@ -5727,11 +5791,15 @@ public class MainActivity extends Activity {
         ed.setHintTextColor(C_SUB);
         ed.setBackgroundDrawable(pill(C_PILL));
         ed.setPadding(dp(10), dp(8), dp(10), dp(8));
-        ed.setMinLines(3);
+        ed.setMinLines(2);
+        ed.setMaxLines(4);
         ed.setGravity(Gravity.TOP | Gravity.START);
-        LinearLayout.LayoutParams elp = wrap();
-        elp.topMargin = dp(6);
-        box.addView(ed, elp);
+        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(72));
+        elp.topMargin = dp(4);
+        elp.leftMargin = dp(12);
+        elp.rightMargin = dp(12);
+        outer.addView(ed, elp);
 
         // ---- 底部固定操作条：保存与取消永远看得见 ----
         LinearLayout bar = new LinearLayout(this);
@@ -5808,6 +5876,12 @@ public class MainActivity extends Activity {
 
         // 滚动时整块重绘，避免内容区留上一帧的字（残影并伴随闪烁）
         tuneDialogScroll(sc, outer);
+        // 输入框是 EditText，它自己会缓存绘制；滚动时让它也重画一遍，否则会留旧帧
+        ed.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            public void onFocusChange(View v, boolean hasFocus) {
+                if (!hasFocus) ed.invalidate();
+            }
+        });
 
         editIssueDlg = new AlertDialog.Builder(this).setView(outer).create();
         editIssueDlg.setCancelable(true);
@@ -6023,6 +6097,16 @@ public class MainActivity extends Activity {
             v = v.trim();
             for (int k = 0; k < FB_TYPES.length; k++) {
                 if (FB_TYPES[k].equals(v)) return k;
+            }
+            // 老反馈用的类型名：映射到新分类（「公式显示」归到「显示问题」）
+            for (int k = 0; k < FB_TYPES_OLD.length; k++) {
+                if (FB_TYPES_OLD[k].equals(v)) {
+                    if ("公式显示".equals(v)) return 0;      // 显示问题
+                    if ("内容有误".equals(v)) return 1;
+                    if ("闪退卡顿".equals(v)) return 2;
+                    if ("功能建议".equals(v)) return 3;
+                    return FB_TYPES.length - 1;
+                }
             }
         }
         return FB_TYPES.length - 1;
