@@ -4376,6 +4376,8 @@ public class MainActivity extends Activity {
     private interface OnFloatRelease { void onReleased(float v); }
 
     private TextView pvTag, pvTitle, pvBody, pvList, pvSub;
+    /** 预览卡片（拖动缩放时实时放大的那一张）。 */
+    private LinearLayout pvCard;
 
     private void buildDisplayScreen() {
         ScrollView sv = new ScrollView(this);
@@ -4417,19 +4419,26 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 拖动缩放滑块时的实时预览：把整个界面等比放大。
-     * 不重建界面，所以滑块不会被销毁、拖动不会断——Android 的触摸分发会按变换矩阵
-     * 逆变换坐标，缩放后的控件照样能准确接收触摸。
-     * 松手后再由 applyDisplayChange 精确重建（那时每个控件的 dp 与字号都是按新比例算好的）。
+     * 拖动缩放滑块时的实时预览：**只放大预览卡片**。
+     *
+     * 之前试过把整个 root 等比缩放，问题很明显：内容超出屏幕被裁、滑块自己被放大变形、
+     * 缩放是「拉伸」而非「重排」，比例跟真正缩放后的结果对不上，看着很怪。
+     * 现在只让预览卡片按比例长大——卡片本来就是用来预览效果的，
+     * 界面本体保持不动，松手后再由 applyDisplayChange 精确重排。
      */
     private void applyLiveScale(float k) {
-        if (root == null) return;
-        // 以屏幕中心为基准放大：内容从中间往外长，四个角不会跑到屏幕外看不见。
-        // 只做视觉预览，不重建界面——滑块不会销毁，拖动不会断。
-        root.setPivotX(root.getWidth() / 2f);
-        root.setPivotY(root.getHeight() / 2f);
-        root.setScaleX(k);
-        root.setScaleY(k);
+        if (pvCard == null) return;
+        pvCard.setPivotX(pvCard.getWidth() / 2f);
+        pvCard.setPivotY(pvCard.getHeight() / 2f);
+        pvCard.setScaleX(k);
+        pvCard.setScaleY(k);
+    }
+
+    /** 复位预览卡片的缩放（松手重建前调用，避免和新的比例叠加）。 */
+    private void resetLiveScale() {
+        if (pvCard == null) return;
+        pvCard.setScaleX(1f);
+        pvCard.setScaleY(1f);
     }
 
     /** 预览区按当前值实时重算（界面缩放通过放大预览字号来体现）。 */
@@ -4517,6 +4526,7 @@ public class MainActivity extends Activity {
         if (displayInner == null) return;
         displayInner.removeAllViews();
         pvTag = pvTitle = pvBody = pvList = pvSub = null;
+        pvCard = null;
 
         if (!tuningFirstRun) {
             displayInner.addView(makeBack("‹ 返回设置", new View.OnClickListener() {
@@ -4535,7 +4545,7 @@ public class MainActivity extends Activity {
         TextView tip = new TextView(this);
         tip.setText(tuningFirstRun
                 ? "第一次使用，先按自己的习惯把字号和界面大小调舒服。松手后整个界面立刻按新比例重排，调好点「完成，开始使用」。"
-                : "拖动滑块调整，上面的预览实时变化；松手后整个界面（字号、按钮、间距、图标）立刻按新比例重排。");
+                : "拖动滑块调整，上面的预览卡片会实时放大；松手后整个界面（字号、按钮、间距、图标）按新比例重新排版。");
         tip.setTextSize(Math.max(9f, m.subtitleSize - 1f));
         tip.setTextColor(C_SUB);
         tip.setGravity(Gravity.CENTER);
@@ -4544,6 +4554,7 @@ public class MainActivity extends Activity {
 
         // ---- 预览卡片 ----
         LinearLayout card = new LinearLayout(this);
+        pvCard = card;
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(11), dp(9), dp(11), dp(10));
         card.setBackgroundDrawable(pill(C_CARD));
@@ -4623,13 +4634,13 @@ public class MainActivity extends Activity {
                     }
                 }, new OnFloatRelease() {
                     public void onReleased(float v) {
-                        // 先把预览缩放复位，再精确重建，避免两套缩放叠在一起
-                        if (root != null) { root.setScaleX(1f); root.setScaleY(1f); }
+                        // 先把预览卡片的缩放复位，再精确重建，避免两套缩放叠在一起
+                        resetLiveScale();
                         applyDisplayChange(S_DISPLAY);
                     }
                 }), wrap());
         TextView scaleHint = new TextView(this);
-        scaleHint.setText("拖动时界面会实时放大，松手后按新比例精确排版。调大后文字、按钮、间距、图标一起变大，适合手指粗或看不清的人；表盘小的机型建议不要超过 115%。");
+        scaleHint.setText("拖动时上面的预览卡片会实时放大，松手后整个界面按新比例重新排版。调大后文字、按钮、间距、图标一起变大，适合手指粗或看不清的人；表盘小的机型建议不要超过 115%。");
         scaleHint.setTextSize(Math.max(9f, m.subtitleSize - 2f));
         scaleHint.setTextColor(C_SUB);
         scaleHint.setGravity(Gravity.CENTER);
@@ -4824,17 +4835,19 @@ public class MainActivity extends Activity {
         feedbackInner.addView(fbStatusTxt, stLp);
 
         feedbackInner.addView(sectionHeader("类型"), wrap());
-        for (int row = 0; row < (FB_TYPES.length + 1) / 2; row++) {
+        // 3 列排 2 行：2 列排 3 行的话最后一行会被屏幕下缘/圆弧裁掉，点不到
+        final int fbCols = 3;
+        for (int row = 0; row * fbCols < FB_TYPES.length; row++) {
             LinearLayout line = new LinearLayout(this);
             line.setOrientation(LinearLayout.HORIZONTAL);
-            int cols = Math.min(2, FB_TYPES.length - row * 2);
+            int cols = Math.min(fbCols, FB_TYPES.length - row * fbCols);
             for (int col = 0; col < cols; col++) {
-                final int idx = row * 2 + col;
+                final int idx = row * fbCols + col;
                 TextView b = new TextView(this);
                 b.setText(FB_TYPES[idx]);
-                b.setTextSize(m.subtitleSize - 1f);
+                b.setTextSize(Math.max(9f, m.subtitleSize - 2f));
                 b.setGravity(Gravity.CENTER);
-                b.setPadding(dp(4), dp(9), dp(4), dp(9));
+                b.setPadding(dp(3), dp(9), dp(3), dp(9));
                 b.setOnClickListener(new View.OnClickListener() {
                     public void onClick(View v) {
                         fbType = idx;
@@ -4843,14 +4856,14 @@ public class MainActivity extends Activity {
                 });
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
                         LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-                if (cols == 2) {
-                    if (col == 0) lp.rightMargin = dp(4); else lp.leftMargin = dp(4);
-                }
-                if (row < (FB_TYPES.length + 1) / 2 - 1) lp.bottomMargin = dp(4);
+                if (col > 0) lp.leftMargin = dp(3);
+                if (col < cols - 1) lp.rightMargin = dp(3);
                 line.addView(b, lp);
                 fbTypeBtns[idx] = b;
             }
-            feedbackInner.addView(line, wrap());
+            LinearLayout.LayoutParams llp = wrap();
+            llp.bottomMargin = dp(4);
+            feedbackInner.addView(line, llp);
         }
 
         // 类型说明：跟着当前选中的类型变，用户不用猜哪个合适
@@ -5734,6 +5747,8 @@ public class MainActivity extends Activity {
         cap.setPadding(dp(12), dp(10), dp(12), dp(6));
         outer.addView(cap, wrap());
 
+        // 滚动区必须有不透明背景：背景透明的话滚动只重画脏区，上一帧的像素留在原地就是残影
+        sc.setBackgroundColor(0xFF151515);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(12), dp(4), dp(12), dp(2));
@@ -5749,17 +5764,19 @@ public class MainActivity extends Activity {
         typeHint.setGravity(Gravity.CENTER);
         typeHint.setPadding(dp(4), dp(2), dp(4), dp(4));
         typeHint.setText(FB_TYPE_HINTS[type[0]]);
-        for (int row = 0; row < (FB_TYPES.length + 1) / 2; row++) {
+        // 3 列排 2 行：2 列排 3 行的话最后一行会被屏幕下缘/圆弧裁掉，点不到
+        final int edCols = 3;
+        for (int row = 0; row * edCols < FB_TYPES.length; row++) {
             LinearLayout line = new LinearLayout(this);
             line.setOrientation(LinearLayout.HORIZONTAL);
-            int cols = Math.min(2, FB_TYPES.length - row * 2);
+            int cols = Math.min(edCols, FB_TYPES.length - row * edCols);
             for (int col = 0; col < cols; col++) {
-                final int idx = row * 2 + col;
+                final int idx = row * edCols + col;
                 TextView b = new TextView(this);
                 b.setText(FB_TYPES[idx]);
-                b.setTextSize(m.subtitleSize - 1f);
+                b.setTextSize(Math.max(9f, m.subtitleSize - 2f));
                 b.setGravity(Gravity.CENTER);
-                b.setPadding(dp(4), dp(9), dp(4), dp(9));
+                b.setPadding(dp(3), dp(9), dp(3), dp(9));
                 b.setOnClickListener(new View.OnClickListener() {
                     public void onClick(View v) {
                         vibrate();
@@ -5770,14 +5787,14 @@ public class MainActivity extends Activity {
                 });
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
                         LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-                if (cols == 2) {
-                    if (col == 0) lp.rightMargin = dp(4); else lp.leftMargin = dp(4);
-                }
-                lp.bottomMargin = dp(4);
+                if (col > 0) lp.leftMargin = dp(3);
+                if (col < cols - 1) lp.rightMargin = dp(3);
                 btns[idx] = b;
                 line.addView(b, lp);
             }
-            box.addView(line, wrap());
+            LinearLayout.LayoutParams llp = wrap();
+            llp.bottomMargin = dp(4);
+            box.addView(line, llp);
         }
         paintEditTypes(btns, type[0]);
         box.addView(typeHint, wrap());
@@ -5945,7 +5962,9 @@ public class MainActivity extends Activity {
             w.setFormat(android.graphics.PixelFormat.TRANSLUCENT);
             w.setBackgroundDrawable(new ColorDrawable(0x00000000));
             int sw = getResources().getDisplayMetrics().widthPixels;
-            w.setLayout((int) (sw * (m.round ? ratio - 0.08f : ratio)),
+            // 圆屏要收窄：矩形弹窗的左右角会伸到圆弧外（内容被裁、按钮点不到）。
+            // 0.78 是折中：再窄 3 列按钮放不下 4 个字，再宽角就出圆弧了。
+            w.setLayout((int) (sw * (m.round ? 0.78f : ratio)),
                     WindowManager.LayoutParams.WRAP_CONTENT);
         } catch (Exception ignored) { }
     }
