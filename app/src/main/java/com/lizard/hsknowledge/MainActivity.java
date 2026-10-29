@@ -5354,8 +5354,8 @@ public class MainActivity extends Activity {
         codeDialog = new AlertDialog.Builder(this).setView(box).create();
         codeDialog.setCancelable(false);
         codeDialog.setCanceledOnTouchOutside(false);
+        tuneDialogWindow(codeDialog);   // 必须在 show() 之前
         codeDialog.show();
-        tuneDialogWindow(codeDialog);
         try {
             Window w = codeDialog.getWindow();
             int sw = getResources().getDisplayMetrics().widthPixels;
@@ -5729,14 +5729,11 @@ public class MainActivity extends Activity {
 
         // 结构：上面是可滚的类型选择，下面是常驻的输入框，再下面是操作按钮条。
         // 输入框必须常驻（不能塞进滚动区），否则屏小的时候它被顶到可视区外看不见。
-        final int maxDlgH = (int) (getResources().getDisplayMetrics().heightPixels * 0.30f);
-        ScrollView sc = new ScrollView(this) {
-            @Override
-            protected void onMeasure(int wSpec, int hSpec) {
-                super.onMeasure(wSpec,
-                        View.MeasureSpec.makeMeasureSpec(maxDlgH, View.MeasureSpec.AT_MOST));
-            }
-        };
+        // 限高方式跟更新弹窗保持一致：用 LayoutParams 给固定高度，
+        // 不要重写 onMeasure 传 AT_MOST（那种方式下滚动时重绘范围算不准，容易留残影）
+        final int maxDlgH = Math.min(dp(120),
+                (int) (getResources().getDisplayMetrics().heightPixels * 0.30f));
+        ScrollView sc = new ScrollView(this);
         // 顺序：标题 → 可滚的类型选择 → 常驻输入框 → 底部按钮条
         TextView cap = new TextView(this);
         cap.setText("编辑这条反馈");
@@ -5754,7 +5751,7 @@ public class MainActivity extends Activity {
         box.setPadding(dp(12), dp(4), dp(12), dp(2));
         sc.addView(box);
         outer.addView(sc, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                LinearLayout.LayoutParams.MATCH_PARENT, maxDlgH));
 
         final TextView[] btns = new TextView[FB_TYPES.length];
         // 类型说明：告诉用户每一类对应什么现象，编辑时也能对上号
@@ -5811,6 +5808,9 @@ public class MainActivity extends Activity {
         ed.setMinLines(2);
         ed.setMaxLines(4);
         ed.setGravity(Gravity.TOP | Gravity.START);
+        // 不自动抢焦点：抢了就会弹出输入法，键盘挡住弹窗内容还让窗口跳动
+        ed.setFocusableInTouchMode(true);
+        ed.setFocusable(true);
         LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(72));
         elp.topMargin = dp(4);
@@ -5902,8 +5902,10 @@ public class MainActivity extends Activity {
 
         editIssueDlg = new AlertDialog.Builder(this).setView(outer).create();
         editIssueDlg.setCancelable(true);
-        editIssueDlg.show();
+        // 顺序要紧：窗口格式与输入法策略都要在 show() 之前设好，之后再设就无效了
         tuneDialogWindow(editIssueDlg);
+        tuneDialogInput(editIssueDlg);
+        editIssueDlg.show();
         sizeDialog(editIssueDlg, 0.90f);
     }
 
@@ -5926,6 +5928,10 @@ public class MainActivity extends Activity {
     /**
      * 弹窗窗口统一处理：像素格式必须声明成带透明。
      * 否则合成器按不透明窗口处理，滚动时只重画脏区，上一帧的内容会留在原地形成残影。
+     *
+     * **必须在 show() 之前调用**：窗口 show 的时候才真正创建，
+     * 之后再 setFormat 是无效的（窗口已经按不透明格式建好了）。
+     * 这是「更新弹窗没残影、编辑弹窗有残影」的根本差别。
      */
     private void tuneDialogWindow(AlertDialog d) {
         try {
@@ -5933,6 +5939,22 @@ public class MainActivity extends Activity {
             if (w == null) return;
             w.setFormat(android.graphics.PixelFormat.TRANSLUCENT);
             w.setBackgroundDrawable(new ColorDrawable(0x00000000));
+        } catch (Exception ignored) { }
+    }
+
+    /**
+     * 输入框在弹窗里时的窗口设置：
+     * · 不自动弹输入法（打开弹窗就把键盘顶上来，内容全被挡住）；
+     * · 键盘弹出时不改变窗口尺寸（ADJUST_NOTHING），否则弹窗会整体跳一下，
+     *   跳动过程中合成器只重画脏区，于是出现拖影和闪烁。
+     * 用户点输入框时键盘照常弹出，只是弹窗不动。
+     */
+    private void tuneDialogInput(AlertDialog d) {
+        try {
+            Window w = d.getWindow();
+            if (w == null) return;
+            w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
+                    | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
         } catch (Exception ignored) { }
     }
 
@@ -6101,8 +6123,8 @@ public class MainActivity extends Activity {
                 try { d.dismiss(); } catch (Exception ignored) { }
             }
         });
+        tuneDialogWindow(d);   // 必须在 show() 之前
         d.show();
-        tuneDialogWindow(d);
         sizeDialog(d, 0.86f);
     }
 
