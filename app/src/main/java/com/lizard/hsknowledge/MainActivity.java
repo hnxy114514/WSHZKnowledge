@@ -1846,10 +1846,10 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 圆屏过滚/占位距离：45% 屏高，方屏 0。 */
+    /** 圆屏过滚/占位距离：35% 屏高，方屏 0。 */
     private int overDist() {
         return (m != null && m.round)
-                ? (int) (getResources().getDisplayMetrics().heightPixels * 0.45f) : 0;
+                ? (int) (getResources().getDisplayMetrics().heightPixels * 0.35f) : 0;
     }
 
     private View makeListSpacer() {

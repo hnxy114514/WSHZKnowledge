@@ -334,9 +334,9 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
   圆弧以内的安全位置；顶部默认贴最顶端。方屏不受影响。
   - **顶部标题/搜索框随内容滚动**：知识点列表页、搜索页的标题和搜索框作为列表 `addHeaderView`；
     详情页、例题页的标题/路径放进滚动区 `inner` 第一项，随内容一起滚。
-  - **列表顶部/底部占位 + 定位**：圆屏列表在头部/尾部各放一个透明占位（`makeListSpacer()`，高 45% 屏高，
+  - **列表顶部/底部占位 + 定位**：圆屏列表在头部/尾部各放一个透明占位（`makeListSpacer()`，高 35% 屏高，
     `addHeaderView`/`addFooterView`），让首尾内容能滑到屏幕中间；进入页面时 `setSelection(1)` 跳过顶部占位、
-    第一个内容贴最顶端。边界回弹走系统 `overScrollBy`（`setMaxOver`）。
+    第一个内容贴最顶端。列表边界回弹走自定义阻尼动画（每帧减半，手感同 springBack，不再卡顿）。
   - **正文占位 + 定位**：详情、例题、设置等页面在 `inner` 顶部/底部各加一个透明占位（`makeScrollSpacer()`），
     进入时 `scrollToTop()`（scrollTo 到占位高度）跳过顶部占位贴顶；滚到顶/底时首尾内容停在屏幕中间。
     边界回弹走系统 `overScrollBy`。方屏 overDist=0，不加占位。
