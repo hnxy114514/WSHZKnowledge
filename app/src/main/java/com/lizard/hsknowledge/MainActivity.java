@@ -1835,28 +1835,8 @@ public class MainActivity extends Activity {
         lv.setVerticalScrollBarEnabled(false);
         lv.setPadding(0, dp(4), 0, dp(4));
         lv.setClipToPadding(false);
-        // 滚动时中间的项放大、边缘的项缩小变淡，最大化利用（圆）屏显示面积
-        lv.setOnScrollListener(new AbsListView.OnScrollListener() {
-            @Override
-            public void onScrollStateChanged(AbsListView view, int scrollState) { }
-            @Override
-            public void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount, int totalItemCount) {
-                int listCenter = view.getHeight() / 2;
-                for (int i = 0; i < visibleItemCount; i++) {
-                    View v = view.getChildAt(i);
-                    if (v == null) continue;
-                    int cy = v.getTop() + v.getHeight() / 2;
-                    float dist = Math.abs(cy - listCenter) / (float) Math.max(1, view.getHeight());
-                    float k = Math.min(dist, 1f);
-                    float sc = 1.0f - 0.15f * k;
-                    v.setPivotX(v.getWidth() / 2f);
-                    v.setPivotY(v.getHeight() / 2f);
-                    v.setScaleX(sc);
-                    v.setScaleY(sc);
-                    v.setAlpha(0.55f + 0.45f * (1f - k));
-                }
-            }
-        });
+        // 不做滚动缩放：setScale 只缩放绘制、布局位置不变，滚动时文字会跟着跳、不跟手，
+        // 用户反馈「上下滑动时 UI 和文字偏移」。保持原始大小、位置，滚动才完美跟随手指。
         return lv;
     }
 
