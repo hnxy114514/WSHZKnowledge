@@ -52,15 +52,10 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.view.ViewGroup;
-import android.widget.AdapterView;
-import android.widget.AbsListView;
-import android.widget.ArrayAdapter;
-import android.widget.BaseAdapter;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ListView;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
@@ -152,7 +147,7 @@ public class MainActivity extends Activity {
     // ---------- UI ----------
     private FrameLayout root;
     private LinearLayout subjectScreen, blockScreen, childScreen, listScreen, detailScreen, settingsScreen, searchScreen, examplesScreen;
-    private ListView subjectList, blockList, childList, itemList, searchList;
+    private SvList subjectList, blockList, childList, itemList, searchList;
     private TextView listTitle, detailTitle, detailPath, searchTitle, examplesTitle, examplesPath;
     private TextView detailBackBtn, settingsBackBtn, examplesBackBtn;
     private EditText itemSearchBox, gSearchBox;
@@ -206,10 +201,7 @@ public class MainActivity extends Activity {
     private String lastPath = "";
     private boolean subjectDirty = true;
     private String lastQuery = null;
-    private final int[] savedPos = new int[15];
-    private final int[] savedTop = new int[15];
-    private final boolean[] hasSaved = new boolean[15];
-    private final boolean[] restoreNext = new boolean[15];
+    private final boolean[] restoreNext = new boolean[15];   // 下一刻进入该页时回到离开时的位置（只有「返回上一级」才置）
 
     // 关于 / 感谢名单
     private LinearLayout aboutScreen, aboutInner, thanksBox, thanksLoading;
@@ -219,9 +211,8 @@ public class MainActivity extends Activity {
 
     // 今日新增（分页加载）
     private LinearLayout todayScreen;
-    private ListView todayList;
+    private SvList todayList;
     private TextView todayTitle;
-    private ArrayAdapter<Hit> todayAdapter;
     private final List<Hit> todayAll = new ArrayList<Hit>();
     private final List<Hit> todayShown = new ArrayList<Hit>();
     private String todayBuiltFor = "";
@@ -242,7 +233,7 @@ public class MainActivity extends Activity {
 
     // 我的反馈记录
     private LinearLayout mineScreen;
-    private ListView mineList;
+    private SvList mineList;
     private TextView mineHeader;
     private boolean mineAllMode = false;   // true=查看仓库全部反馈（仅项目所有者）
     private boolean mineDirty = false;     // 反馈被编辑/撤回/删除过，回到列表要重新拉取
@@ -1564,21 +1555,12 @@ public class MainActivity extends Activity {
         root.addView(feedbackScreen, fp());
 
         mineScreen = newScreen();
-        mineList = makeList();
+        mineList = new SvList();
         mineHeader = makeBackHeader("‹ 返回反馈", new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_FEEDBACK); }
+            public void onClick(View v) { goBack(S_FEEDBACK); }
         });
-        mineList.addHeaderView(mineHeader);
-        mineScreen.addView(mineList, lw());
-        mineList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                if (pos <= 1) return;   // 顶部占位 + mineHeader
-                vibrate();
-                int idx = pos - 2;
-                if (idx < 0 || idx >= mineIssues.size()) return;
-                openIssueDetail(mineIssues.get(idx));
-            }
-        });
+        mineList.addHead(mineHeader);
+        mineScreen.addView(mineList.sc, lw());
         root.addView(mineScreen, fp());
 
         profileScreen = newScreen();
@@ -1602,54 +1584,22 @@ public class MainActivity extends Activity {
         root.addView(todayScreen, fp());
 
         // 主页
-        subjectList = makeList();
-        subjectList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                if (pos == 0) return;   // 顶部占位
-                vibrate();
-                int idx = pos - 2;
-                if (idx < 0) { showScreen(S_SEARCH); return; }
-                if (idx == orderKeys.size()) { showScreen(S_TODAY); return; }
-                if (idx > orderKeys.size()) { showScreen(S_SETTINGS); return; }
-                curSubject = subjectMap.get(orderKeys.get(idx));
-                if (curSubject != null) openBlocks();
-            }
-        });
-        subjectScreen.addView(subjectList, lw());
+        subjectList = new SvList();
+        subjectScreen.addView(subjectList.sc, lw());
 
         // 章页
-        blockList = makeList();
-        blockList.addHeaderView(makeBackHeader("‹ 返回学科", new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_SUBJECT); }
+        blockList = new SvList();
+        blockList.addHead(makeBackHeader("‹ 返回学科", new View.OnClickListener() {
+            public void onClick(View v) { goBack(S_SUBJECT); }
         }));
-        blockList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                if (pos <= 1) return;   // 顶部占位 + 返回键
-                vibrate();
-                curBlock = curSubject.blocks.get(pos - 2);
-                openChildren();
-            }
-        });
-        blockScreen.addView(blockList, lw());
+        blockScreen.addView(blockList.sc, lw());
 
         // 节页
-        childList = makeList();
-        childList.addHeaderView(makeBackHeader("‹ 返回上一页", new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_BLOCK); }
+        childList = new SvList();
+        childList.addHead(makeBackHeader("‹ 返回上一页", new View.OnClickListener() {
+            public void onClick(View v) { goBack(S_BLOCK); }
         }));
-        childList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                if (pos <= 1) return;   // 顶部占位 + 返回键
-                vibrate();
-                curChild = curBlock.children.get(pos - 2);
-                if ("topic".equals(curChild.type) && curChild.items.isEmpty()) {
-                    openDetail(curChild.name, curChild.sec, curSubject.name + " › " + curBlock.name, S_CHILD, null);
-                } else {
-                    openItems();
-                }
-            }
-        });
-        childScreen.addView(childList, lw());
+        childScreen.addView(childList.sc, lw());
 
         // 知识点页：标题和搜索框作为列表 header，随列表一起滚动
         listTitle = new TextView(this);
@@ -1659,8 +1609,6 @@ public class MainActivity extends Activity {
         listTitle.setGravity(Gravity.CENTER);
         listTitle.setPadding(0, 0, 0, dp(4));
         listTitle.setMaxLines(2);
-        listTitle.setLayoutParams(new AbsListView.LayoutParams(
-                AbsListView.LayoutParams.MATCH_PARENT, AbsListView.LayoutParams.WRAP_CONTENT));
 
         itemSearchBox = new EditText(this);
         itemSearchBox.setHint("在本节内搜索…");
@@ -1670,33 +1618,23 @@ public class MainActivity extends Activity {
         itemSearchBox.setSingleLine(true);
         itemSearchBox.setBackgroundDrawable(pill(C_PILL));
         itemSearchBox.setPadding(dp(12), dp(8), dp(12), dp(8));
-        itemSearchBox.setLayoutParams(new AbsListView.LayoutParams(
-                AbsListView.LayoutParams.MATCH_PARENT, AbsListView.LayoutParams.WRAP_CONTENT));
         itemSearchBox.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
             public void onTextChanged(CharSequence s, int a, int b, int c) { }
             public void afterTextChanged(Editable s) { refreshItems(); }
         });
 
-        itemList = makeList();
-        itemList.addHeaderView(makeBackHeader("‹ 返回上一页", new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_CHILD); }
+        itemList = new SvList();
+        itemList.addHead(makeBackHeader("‹ 返回上一页", new View.OnClickListener() {
+            public void onClick(View v) { goBack(S_CHILD); }
         }));
-        itemList.addHeaderView(listTitle);
-        itemList.addHeaderView(itemSearchBox);
-        listScreen.addView(itemList, lw());
-        itemList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                if (pos <= 3) return;   // 顶部占位 + 返回键 + 标题 + 搜索框
-                vibrate();
-                Item it = shownItems.get(pos - 4);
-                openDetail(it.t, it.sec, curSubject.name + " › " + curBlock.name + " › " + curChild.name, S_ITEM, it.img, it.ex);
-            }
-        });
+        itemList.addHead(listTitle);
+        itemList.addHead(itemSearchBox);
+        listScreen.addView(itemList.sc, lw());
 
         // 详情页
         detailBackBtn = makeBack("‹ 返回", new View.OnClickListener() {
-            public void onClick(View v) { showScreen(detailBack); }
+            public void onClick(View v) { goBack(detailBack); }
         });
         detailPath = new TextView(this);
         detailPath.setTextSize(m.subtitleSize - 2f);
@@ -1723,7 +1661,7 @@ public class MainActivity extends Activity {
 
         // 例题页
         examplesBackBtn = makeBack("‹ 返回知识点", new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_DETAIL); }
+            public void onClick(View v) { goBack(S_DETAIL); }
         });
         examplesPath = new TextView(this);
         examplesPath.setTextSize(m.subtitleSize - 2f);
@@ -1752,7 +1690,7 @@ public class MainActivity extends Activity {
 
         // 设置页
         settingsBackBtn = makeBack("‹ 返回", new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_SUBJECT); }
+            public void onClick(View v) { goBack(S_SUBJECT); }
         });
         settingsScroll = new OverScrollScrollView(this);
         settingsScroll.setFillViewport(true);
@@ -1772,8 +1710,6 @@ public class MainActivity extends Activity {
         searchTitle.setTextColor(C_PRIMARY);
         searchTitle.setGravity(Gravity.CENTER);
         searchTitle.setPadding(0, 0, 0, dp(3));
-        searchTitle.setLayoutParams(new AbsListView.LayoutParams(
-                AbsListView.LayoutParams.MATCH_PARENT, AbsListView.LayoutParams.WRAP_CONTENT));
         gSearchBox = new EditText(this);
         gSearchBox.setHint("输入关键词（如 导数、电场、光合作用）…");
         gSearchBox.setTextSize(m.subtitleSize - 1f);
@@ -1804,29 +1740,19 @@ public class MainActivity extends Activity {
         });
         searchBar.addView(clearBtn, clrp);
 
-        searchBar.setLayoutParams(new AbsListView.LayoutParams(
-                AbsListView.LayoutParams.MATCH_PARENT, AbsListView.LayoutParams.WRAP_CONTENT));
+        // 搜索框行：输入框 + 清空按钮
         gSearchBox.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
             public void onTextChanged(CharSequence s, int a, int b, int c) { }
             public void afterTextChanged(Editable s) { refreshGlobalSearch(); }
         });
-        searchList = makeList();
-        searchList.addHeaderView(makeBackHeader("‹ 返回", new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_SUBJECT); }
+        searchList = new SvList();
+        searchList.addHead(makeBackHeader("‹ 返回", new View.OnClickListener() {
+            public void onClick(View v) { goBack(S_SUBJECT); }
         }));
-        searchList.addHeaderView(searchTitle);
-        searchList.addHeaderView(searchBar);
-        searchScreen.addView(searchList, lw());
-        searchList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                if (pos <= 3) return;                       // 顶部占位 + 返回键 + 标题 + 搜索框
-                vibrate();
-                if (pos - 4 >= searchHits.size()) return;   // 空提示行
-                Hit h = searchHits.get(pos - 4);
-                openDetail(h.item.t, h.item.sec, h.path, S_SEARCH, h.item.img, h.item.ex);
-            }
-        });
+        searchList.addHead(searchTitle);
+        searchList.addHead(searchBar);
+        searchScreen.addView(searchList.sc, lw());
     }
 
     private LinearLayout newScreen() {
@@ -1846,17 +1772,10 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 圆屏过滚/占位距离：35% 屏高，方屏 0。 */
+    /** 圆屏占位距离：25% 屏高，方屏 0。 */
     private int overDist() {
         return (m != null && m.round)
-                ? (int) (getResources().getDisplayMetrics().heightPixels * 0.35f) : 0;
-    }
-
-    private View makeListSpacer() {
-        View v = new View(this);
-        v.setLayoutParams(new AbsListView.LayoutParams(
-                AbsListView.LayoutParams.MATCH_PARENT, overDist()));
-        return v;
+                ? (int) (getResources().getDisplayMetrics().heightPixels * 0.25f) : 0;
     }
 
     private View makeScrollSpacer() {
@@ -1876,21 +1795,286 @@ public class MainActivity extends Activity {
         }
     }
 
-    private ListView makeList() {
-        OverScrollListView lv = new OverScrollListView(this);
-        lv.setDivider(new ColorDrawable(Color.TRANSPARENT));
-        lv.setDividerHeight(dp(6));
-        lv.setVerticalScrollBarEnabled(false);
-        // 禁用 ListView 默认 selector（系统矩形涟漪会盖掉 item 的圆角涟漪）
-        lv.setSelector(new ColorDrawable(Color.TRANSPARENT));
-        // 边界过滚回弹距离（系统 overScrollBy）
-        lv.setMaxOver(overDist());
-        // 顶端/底端空白占位：滚到顶/底时首尾内容停在屏幕中间
-        if (overDist() > 0) {
-            lv.addHeaderView(makeListSpacer(), null, false);
-            lv.addFooterView(makeListSpacer(), null, false);
+    /** 行数据源：只告诉列表「一共几行、第几行长什么样」，行由列表按需造，不一次全建。 */
+    private interface RowSource {
+        int size();
+        View make(int index);
+    }
+
+    /** 列表容器：ScrollView + 竖排 LinearLayout，行就是普通 View（不再用 ListView）。
+     *  · 回弹走系统 overScrollBy / springBack，手感与设置页、详情页一致；
+     *  · 圆屏首尾各加一段透明占位，首尾内容能滑到屏幕中间；
+     *  · 大列表分页：首屏 30 行，滚到还剩约一屏时续载下一批 40 行，每帧只追加 15 行，滑动不顿。 */
+    private class SvList {
+        private final int first = 30, page = 40, chunk = 15;
+        final OverScrollScrollView sc;
+        final LinearLayout box;
+        private final List<View> heads = new ArrayList<View>();
+        private final List<View> rows = new ArrayList<View>();
+        private final View topSp, botSp;
+        private RowSource src;
+        private int shown, want;
+        private boolean busy;
+        private int gen, stepGen;
+        int savedY = -1;
+        /** 续载时先让外部把下一批数据补进来（数据全集不是一次就有的列表用，如「今日新增」）。 */
+        Runnable fill;
+
+        SvList() {
+            sc = new OverScrollScrollView(MainActivity.this);
+            sc.setVerticalScrollBarEnabled(false);
+            sc.setMaxOver(overDist());
+            box = new LinearLayout(MainActivity.this);
+            box.setOrientation(LinearLayout.VERTICAL);
+            sc.addView(box, new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            topSp = makeScrollSpacer();
+            box.addView(topSp);
+            botSp = makeScrollSpacer();
+            box.addView(botSp);
+            sc.setScrollListener(new OverScrollScrollView.OnScrollListener() {
+                public void onScroll(int y, int h, int contentH) {
+                    if (nearEnd()) more();
+                }
+            });
         }
-        return lv;
+
+        /** 顶部占位之后、底部占位之前的固定头部（返回键、标题、搜索框），随内容一起滚动。 */
+        void addHead(View v) {
+            heads.add(v);
+            box.addView(v, box.indexOfChild(botSp), wrap());
+        }
+
+        /** 换一批数据：清空已有行，从头分页渲染。gen 换了旧的续载帧会自己退出，不会串到新数据上。 */
+        void bind(RowSource s) {
+            clearRows();
+            src = s;
+            shown = 0;
+            gen++;
+            want = Math.min(s == null ? 0 : s.size(), first);
+            if (want > 0) {
+                stepGen = gen;
+                busy = true;
+                sc.post(step);
+            } else {
+                busy = false;
+            }
+        }
+
+        private void start(int target) {
+            if (src == null || busy) return;
+            if (fill != null && target > src.size()) fill.run();
+            want = Math.min(src.size(), target);
+            if (want <= shown) return;
+            stepGen = gen;
+            busy = true;
+            sc.post(step);
+        }
+
+        private void more() { start(shown + page); }
+
+        private void clearRows() {
+            for (View v : rows) box.removeView(v);
+            rows.clear();
+            shown = 0;
+        }
+
+        private final Runnable step = new Runnable() {
+            public void run() {
+                if (src == null || gen != stepGen) { busy = false; return; }
+                int end = Math.min(want, shown + chunk);
+                while (shown < end && shown < src.size()) {
+                    View v = src.make(shown);
+                    rows.add(v);
+                    box.addView(v, box.getChildCount() - 1, wrapM());
+                    shown++;
+                }
+                if (shown < want && shown < src.size()) {
+                    sc.post(this);
+                } else {
+                    busy = false;
+                    fitSpacers();
+                    if (nearEnd()) more();   // 一批加完时人还停在底部，接着补
+                }
+            }
+        };
+
+        /** 内容不足一屏时把上下占位收掉：这时候本来就滚不动，留着只会让顶部空一大块。
+         *  占位变化同步补偿 scrollY，续载把内容撑过一屏时画面不会突然往下跳。 */
+        private void fitSpacers() {
+            int h = sc.getHeight();
+            if (h <= 0) return;
+            int content = box.getHeight() - topSp.getHeight() - botSp.getHeight();
+            int pad = (content >= h) ? overDist() : 0;
+            int oldPad = topSp.getHeight();
+            if (pad == oldPad) return;
+            setSpacer(topSp, pad);
+            setSpacer(botSp, pad);
+            sc.scrollBy(0, pad - oldPad);
+        }
+
+        private void setSpacer(View v, int h) {
+            v.setLayoutParams(new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, h));
+        }
+
+        /** 还剩不到一屏就提前续载，滑到那儿时行已经在，不会卡一下。 */
+        private boolean nearEnd() {
+            int h = sc.getHeight();
+            if (h <= 0) return false;
+            return box.getHeight() - (sc.getScrollY() + h) < h + dp(40);
+        }
+
+        /** 进入页面：跳过顶部占位，让第一个内容贴最顶端。
+         *  行是分帧加的，第一帧可能还没铺够高度，这里没到位就下一帧再定一次（用户已滑动就不再动）。 */
+        void enter() {
+            savedY = -1;
+            final int top = overDist();
+            final int[] tries = new int[]{0};
+            final Runnable r = new Runnable() {
+                public void run() {
+                    sc.scrollTo(0, top);
+                    if (tries[0]++ < 4 && sc.getScrollY() == 0 && top > 0
+                            && box.getHeight() - sc.getHeight() >= top) sc.post(this);
+                }
+            };
+            sc.post(r);
+        }
+
+        /** 返回到本页：回到离开时的位置；没记过就按首次进入处理。 */
+        void restore() {
+            if (savedY < 0) { enter(); return; }
+            final int y = savedY;
+            sc.post(new Runnable() { public void run() { sc.scrollTo(0, y); } });
+        }
+    }
+
+    /** 可点击行统一带震动，点击区域就是整行。 */
+    private View.OnClickListener rowClick(final Runnable act) {
+        return new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                if (act != null) act.run();
+            }
+        };
+    }
+
+    /** 普通文字行（主页学科、章、节这类）。 */
+    private TextView textRow(String text, int color, Runnable act) {
+        TextView tv = new TextView(this);
+        applyClickBg(tv, C_PILL);
+        tv.setText(applyMarkup(text));
+        tv.setTextSize(lsSp());
+        tv.setTextColor(color);
+        tv.setTypeface(Typeface.DEFAULT_BOLD);
+        tv.setGravity(Gravity.CENTER);
+        tv.setPadding(dp(10), dp(9), dp(10), dp(9));
+        tv.setMaxLines(6);
+        tv.setEllipsize(null);
+        tv.setLineSpacing(dp(1), 1.08f);
+        if (act != null) tv.setOnClickListener(rowClick(act));
+        return tv;
+    }
+
+    /** 知识点行：标题 + 右侧「（例）」标记（只有含例题的条目才显示）。 */
+    private View itemRow(final Item it, Runnable act) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        applyClickBg(row, C_PILL);
+        row.setPadding(dp(10), dp(9), dp(10), dp(9));
+
+        TextView tv = new TextView(this);
+        tv.setTextSize(lsSp());
+        tv.setTextColor(0xFFF0F0F0);
+        tv.setTypeface(Typeface.DEFAULT_BOLD);
+        tv.setGravity(Gravity.CENTER);
+        tv.setMaxLines(6);
+        tv.setLineSpacing(dp(1), 1.08f);
+        tv.setText(applyMarkup(starText(it.star) + "  " + it.t));
+        row.addView(tv, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView tag = new TextView(this);
+        tag.setTextSize(lsSp() - 1f);
+        tag.setTypeface(Typeface.DEFAULT_BOLD);
+        tag.setGravity(Gravity.CENTER);
+        if (it.ex != null && !it.ex.isEmpty()) {
+            SpannableStringBuilder ss = new SpannableStringBuilder("（例）");
+            ss.setSpan(new ForegroundColorSpan(C_HI), 1, 2, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            tag.setText(ss);
+        } else {
+            tag.setVisibility(View.GONE);
+        }
+        row.addView(tag, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        if (act != null) row.setOnClickListener(rowClick(act));
+        return row;
+    }
+
+    /** 搜索 / 今日新增的结果行：标题占主位，路径小字排在下面。 */
+    private View hitRow(String title, String path, Runnable act) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER);
+        box.setPadding(dp(10), dp(8), dp(10), dp(8));
+        applyClickBg(box, C_PILL);
+
+        TextView t = new TextView(this);
+        t.setTextSize(lsSp());
+        t.setTextColor(0xFFF0F0F0);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setGravity(Gravity.CENTER);
+        t.setMaxLines(2);
+        t.setEllipsize(TextUtils.TruncateAt.END);
+        t.setText(applyMarkup(title));
+        box.addView(t, wrap());
+
+        TextView p = new TextView(this);
+        p.setTextSize(m.subtitleSize - 2f);
+        p.setTextColor(C_SUB);
+        p.setGravity(Gravity.CENTER);
+        p.setMaxLines(1);
+        p.setEllipsize(TextUtils.TruncateAt.END);
+        p.setPadding(0, dp(2), 0, 0);
+        p.setText(path);
+        box.addView(p, wrap());
+        if (act != null) box.setOnClickListener(rowClick(act));
+        return box;
+    }
+
+    /** 两行行：主行 + 状态小字（我的反馈记录）。 */
+    private View pairRow(String a, String b, String colorHex, Runnable act) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER);
+        box.setPadding(dp(10), dp(8), dp(10), dp(8));
+        applyClickBg(box, C_PILL);
+
+        TextView t = new TextView(this);
+        t.setTextSize(lsSp() - 1f);
+        t.setTextColor(0xFFF0F0F0);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setGravity(Gravity.CENTER);
+        t.setMaxLines(2);
+        t.setEllipsize(TextUtils.TruncateAt.END);
+        t.setText(a);
+        box.addView(t, wrap());
+
+        TextView s = new TextView(this);
+        s.setTextSize(m.subtitleSize - 2f);
+        s.setGravity(Gravity.CENTER);
+        s.setMaxLines(1);
+        s.setPadding(0, dp(2), 0, 0);
+        s.setText(b);
+        try {
+            s.setTextColor(Color.parseColor(colorHex));
+        } catch (Exception ignored) {
+            s.setTextColor(C_SUB);
+        }
+        box.addView(s, wrap());
+        if (act != null) box.setOnClickListener(rowClick(act));
+        return box;
     }
 
     private TextView makeBack(String label, View.OnClickListener onClick) {
@@ -1912,12 +2096,9 @@ public class MainActivity extends Activity {
         return b;
     }
 
-    /** 作为列表/正文首项的返回键：随内容一起滚动，滚出屏幕后不再占用顶部空间。 */
+    /** 作为列表首项的返回键：随内容一起滚动，滚出屏幕后不再占用顶部空间。 */
     private TextView makeBackHeader(String label, View.OnClickListener onClick) {
-        TextView b = makeBack(label, onClick);
-        b.setLayoutParams(new AbsListView.LayoutParams(
-                AbsListView.LayoutParams.MATCH_PARENT, AbsListView.LayoutParams.WRAP_CONTENT));
-        return b;
+        return makeBack(label, onClick);
     }
 
     /** 交互震动反馈：轻点一下。受设置开关与节流控制，避免连点狂震。 */
@@ -1935,29 +2116,6 @@ public class MainActivity extends Activity {
                 v.vibrate(18);
             }
         } catch (Exception ignored) { }
-    }
-
-    private ArrayAdapter<String> stringAdapter(final List<String> data, final int color) {
-        return new ArrayAdapter<String>(this, 0, data) {
-            @Override
-            public View getView(int position, View convertView, ViewGroup parent) {
-                TextView tv = (convertView instanceof TextView) ? (TextView) convertView : null;
-                if (tv == null) {
-                    tv = new TextView(MainActivity.this);
-                    applyClickBg(tv, C_PILL);
-                }
-                tv.setText(applyMarkup(getItem(position)));
-                tv.setTextSize(lsSp());
-                tv.setTextColor(color);
-                tv.setTypeface(Typeface.DEFAULT_BOLD);
-                tv.setGravity(Gravity.CENTER);
-                tv.setPadding(dp(10), dp(9), dp(10), dp(9));
-                tv.setMaxLines(6);
-                tv.setEllipsize(null);
-                tv.setLineSpacing(dp(1), 1.08f);
-                return tv;
-            }
-        };
     }
 
     private GradientDrawable pill(int fill) {
@@ -2011,20 +2169,43 @@ public class MainActivity extends Activity {
 
     // ================= 导航 =================
     private void openBlocks() {
-        List<String> names = new ArrayList<String>();
-        for (Block b : curSubject.blocks) names.add(b.name);
-        blockList.setAdapter(stringAdapter(names, 0xFFF5F5F5));
+        final List<Block> blocks = curSubject.blocks;
+        blockList.bind(new RowSource() {
+            public int size() { return blocks.size(); }
+            public View make(final int i) {
+                return textRow(blocks.get(i).name, 0xFFF5F5F5, new Runnable() {
+                    public void run() {
+                        curBlock = blocks.get(i);
+                        openChildren();
+                    }
+                });
+            }
+        });
         showScreen(S_BLOCK);
     }
 
     private void openChildren() {
-        List<String> names = new ArrayList<String>();
-        for (Child c : curBlock.children) {
-            String tag = "topic".equals(c.type) ? "［专题］" : "";
-            int cnt = c.items.size();
-            names.add(tag + c.name + (cnt > 0 ? "  (" + cnt + ")" : ""));
-        }
-        childList.setAdapter(stringAdapter(names, 0xFFF5F5F5));
+        final List<Child> chs = curBlock.children;
+        childList.bind(new RowSource() {
+            public int size() { return chs.size(); }
+            public View make(final int i) {
+                Child c = chs.get(i);
+                String tag = "topic".equals(c.type) ? "［专题］" : "";
+                int cnt = c.items.size();
+                return textRow(tag + c.name + (cnt > 0 ? "  (" + cnt + ")" : ""), 0xFFF5F5F5,
+                        new Runnable() {
+                            public void run() {
+                                curChild = chs.get(i);
+                                if ("topic".equals(curChild.type) && curChild.items.isEmpty()) {
+                                    openDetail(curChild.name, curChild.sec,
+                                            curSubject.name + " › " + curBlock.name, S_CHILD, null);
+                                } else {
+                                    openItems();
+                                }
+                            }
+                        });
+            }
+        });
         showScreen(S_CHILD);
     }
 
@@ -2054,52 +2235,17 @@ public class MainActivity extends Activity {
 
     private void renderItems() {
         // 知识点列表：标题旁边带黄色「（例）」标记（只有含例题的知识点才显示）
-        itemList.setAdapter(new BaseAdapter() {
-            public int getCount() { return shownItems.size(); }
-            public Object getItem(int i) { return shownItems.get(i); }
-            public long getItemId(int i) { return i; }
-            public View getView(int position, View convertView, ViewGroup parent) {
-                LinearLayout row = (convertView instanceof LinearLayout) ? (LinearLayout) convertView : null;
-                if (row == null) {
-                    row = new LinearLayout(MainActivity.this);
-                    row.setOrientation(LinearLayout.HORIZONTAL);
-                    row.setGravity(Gravity.CENTER_VERTICAL);
-                    applyClickBg(row, C_PILL);
-                    row.setPadding(dp(10), dp(9), dp(10), dp(9));
-
-                    TextView tv = new TextView(MainActivity.this);
-                    tv.setId(0x7f0f0001);
-                    tv.setTextSize(lsSp());
-                    tv.setTextColor(0xFFF0F0F0);
-                    tv.setTypeface(Typeface.DEFAULT_BOLD);
-                    tv.setGravity(Gravity.CENTER);
-                    tv.setMaxLines(6);
-                    tv.setLineSpacing(dp(1), 1.08f);
-                    row.addView(tv, new LinearLayout.LayoutParams(0,
-                            ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-                    TextView tag = new TextView(MainActivity.this);
-                    tag.setId(0x7f0f0002);
-                    tag.setTextSize(lsSp() - 1f);
-                    tag.setTypeface(Typeface.DEFAULT_BOLD);
-                    tag.setGravity(Gravity.CENTER);
-                    row.addView(tag, new LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-                }
-                Item it = shownItems.get(position);
-                TextView tv = (TextView) row.findViewById(0x7f0f0001);
-                TextView tag = (TextView) row.findViewById(0x7f0f0002);
-                tv.setText(applyMarkup(starText(it.star) + "  " + it.t));
-                if (it.ex != null && !it.ex.isEmpty()) {
-                    // 「（例）」：括号普通色，例字黄色
-                    SpannableStringBuilder ss = new SpannableStringBuilder("（例）");
-                    ss.setSpan(new ForegroundColorSpan(C_HI), 1, 2, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-                    tag.setText(ss);
-                    tag.setVisibility(View.VISIBLE);
-                } else {
-                    tag.setVisibility(View.GONE);
-                }
-                return row;
+        itemList.bind(new RowSource() {
+            public int size() { return shownItems.size(); }
+            public View make(final int i) {
+                final Item it = shownItems.get(i);
+                return itemRow(it, new Runnable() {
+                    public void run() {
+                        openDetail(it.t, it.sec,
+                                curSubject.name + " › " + curBlock.name + " › " + curChild.name,
+                                S_ITEM, it.img, it.ex);
+                    }
+                });
             }
         });
     }
@@ -2110,62 +2256,34 @@ public class MainActivity extends Activity {
         searchHits.clear();
         if (q.length() == 0) {
             searchTitle.setText("搜索全部知识点");
-            List<String> tip = new ArrayList<String>();
-            tip.add("输入关键词开始搜索");
-            searchList.setAdapter(stringAdapter(tip, C_SUB));
+            searchList.bind(new RowSource() {
+                public int size() { return 1; }
+                public View make(int i) { return textRow("输入关键词开始搜索", C_SUB, null); }
+            });
             return;
         }
         String ql = q.toLowerCase();
+        int total = 0;
         for (Hit h : allHits) {
             String blob = (h.item.t + " " + plain(h.item.sec)).toLowerCase();
-            if (blob.contains(ql)) searchHits.add(h);
+            if (!blob.contains(ql)) continue;
+            total++;
+            if (searchHits.size() < HIT_LIMIT) searchHits.add(h);
         }
-        searchTitle.setText(searchHits.size() == 0 ? "没有找到「" + q + "」"
-                : "命中 " + searchHits.size() + " 条 · " + q);
-        searchList.setAdapter(searchAdapter(searchHits));
-    }
-
-    /** 搜索结果的列表项：标题占主位，路径小字排在下面，避免挤在一行看不清。 */
-    private ArrayAdapter<Hit> searchAdapter(final List<Hit> data) {
-        return new ArrayAdapter<Hit>(this, 0, data) {
-            @Override
-            public View getView(int position, View convertView, ViewGroup parent) {
-                LinearLayout box;
-                TextView title, path;
-                if (convertView instanceof LinearLayout) {
-                    box = (LinearLayout) convertView;
-                    title = (TextView) box.getChildAt(0);
-                    path = (TextView) box.getChildAt(1);
-                } else {
-                    box = new LinearLayout(MainActivity.this);
-                    box.setOrientation(LinearLayout.VERTICAL);
-                    box.setGravity(Gravity.CENTER);
-                    box.setPadding(dp(10), dp(8), dp(10), dp(8));
-                    applyClickBg(box, C_PILL);
-                    title = new TextView(MainActivity.this);
-                    title.setTextSize(lsSp());
-                    title.setTextColor(0xFFF0F0F0);
-                    title.setTypeface(Typeface.DEFAULT_BOLD);
-                    title.setGravity(Gravity.CENTER);
-                    title.setMaxLines(2);
-                    title.setEllipsize(TextUtils.TruncateAt.END);
-                    box.addView(title, wrap());
-
-                    path = new TextView(MainActivity.this);
-                    path.setTextSize(m.subtitleSize - 2f);
-                    path.setTextColor(C_SUB);
-                    path.setGravity(Gravity.CENTER);
-                    path.setMaxLines(1);
-                    path.setEllipsize(TextUtils.TruncateAt.END);
-                    path.setPadding(0, dp(2), 0, 0);
-                    box.addView(path, wrap());
-                }
-                Hit h = getItem(position);
-                title.setText(applyMarkup(h.item.t));
-                path.setText(shortPath(h.path));
-                return box;
+        searchTitle.setText(total == 0 ? "没有找到「" + q + "」"
+                : "命中 " + total + " 条 · " + q
+                + (total > HIT_LIMIT ? "（先列出前 " + HIT_LIMIT + " 条）" : ""));
+        searchList.bind(new RowSource() {
+            public int size() { return searchHits.size(); }
+            public View make(final int i) {
+                final Hit h = searchHits.get(i);
+                return hitRow(h.item.t, shortPath(h.path), new Runnable() {
+                    public void run() {
+                        openDetail(h.item.t, h.item.sec, h.path, S_SEARCH, h.item.img, h.item.ex);
+                    }
+                });
             }
-        };
+        });
     }
 
     /** 路径只留「科目 › 章」，节名省掉，给标题腾地方。 */
@@ -3329,7 +3447,7 @@ public class MainActivity extends Activity {
         fbEntry.setBackground(clickBg(C_PILL));
         applyIcon(fbEntry, "ic_feedback", C_PRIMARY, 15);
         fbEntry.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_FEEDBACK); }
+            public void onClick(View v) { goBack(S_FEEDBACK); }
         });
         LinearLayout.LayoutParams fbLp = wrap();
         fbLp.topMargin = dp(6);
@@ -3642,13 +3760,8 @@ public class MainActivity extends Activity {
 
     // ================= 页面切换（带动画） =================
     private void showScreen(int s) {
-        // 记下离开页面的滚动位置，回来时原样恢复（避免淡入后跳回顶部）
-        ListView leaving = listOf(screen);
-        if (leaving != null && leaving.getChildCount() > 0) {
-            savedPos[screen] = leaving.getFirstVisiblePosition();
-            savedTop[screen] = leaving.getChildAt(0).getTop();
-            hasSaved[screen] = true;
-        }
+        SvList leaving = svOf(screen);
+        if (leaving != null) leaving.savedY = leaving.sc.getScrollY();
         screen = s;
         View[] screens = {subjectScreen, blockScreen, childScreen, listScreen, detailScreen, settingsScreen,
                 searchScreen, feedbackScreen, mineScreen, profileScreen, changelogScreen, aboutScreen,
@@ -3675,26 +3788,41 @@ public class MainActivity extends Activity {
 
         if (s == S_SUBJECT) {
             if (subjectDirty) {
-                List<String> names = new ArrayList<String>();
-                names.add("搜索（全部知识点）");
-                for (String k : orderKeys) {
-                    Subject su = subjectMap.get(k);
-                    if (su != null) names.add(su.name);
-                }
-                names.add("新增知识点（今日）");
-                names.add("设置");
-                subjectList.setAdapter(stringAdapter(names, C_PRIMARY));
+                final List<String> keys = new ArrayList<String>(orderKeys);
+                subjectList.bind(new RowSource() {
+                    public int size() { return keys.size() + 3; }
+                    public View make(final int i) {
+                        Runnable toSearch = new Runnable() {
+                            public void run() { showScreen(S_SEARCH); }
+                        };
+                        Runnable toToday = new Runnable() {
+                            public void run() { showScreen(S_TODAY); }
+                        };
+                        Runnable toSettings = new Runnable() {
+                            public void run() { showScreen(S_SETTINGS); }
+                        };
+                        if (i == 0) return textRow("搜索（全部知识点）", C_PRIMARY, toSearch);
+                        if (i == keys.size() + 1) return textRow("新增知识点（今日）", C_PRIMARY, toToday);
+                        if (i == keys.size() + 2) return textRow("设置", C_PRIMARY, toSettings);
+                        final String k = keys.get(i - 1);
+                        Subject su = subjectMap.get(k);
+                        return textRow(su == null ? k : su.name, C_PRIMARY, new Runnable() {
+                            public void run() {
+                                curSubject = subjectMap.get(k);
+                                if (curSubject != null) openBlocks();
+                            }
+                        });
+                    }
+                });
                 subjectDirty = false;
-                restoreNext[S_SUBJECT] = true;
             }
         } else if (s == S_SETTINGS) {
             renderSettings();
         } else if (s == S_SEARCH) {
-            // 关键词没变就不重设 adapter，返回时列表位置不会跳回顶部
+            // 关键词没变就不重设数据，返回时列表位置不会跳回顶部
             String q = gSearchBox.getText().toString().trim();
             if (lastQuery == null || !lastQuery.equals(q)) {
                 refreshGlobalSearch();
-                restoreNext[S_SEARCH] = true;
             }
         } else if (s == S_MYFEEDBACK) {
             if (mineDirty) { mineDirty = false; loadMyIssues(); }
@@ -3718,24 +3846,19 @@ public class MainActivity extends Activity {
             if (!changelogFilled) fillChangelog();
         }
 
-        // 只有刚重建过列表数据的页面才需要把位置摆回去；其余页面由 ListView 自己保留，
-        // 额外调用 setSelectionFromTop 反而会触发一次重排，看起来像「往上弹一下」。
-        ListView enter = listOf(s);
-        if (enter != null && hasSaved[s] && restoreNext[s]) {
-            restoreNext[s] = false;
-            try {
-                enter.setSelectionFromTop(savedPos[s], savedTop[s]);
-            } catch (Exception ignored) { }
-        } else if (enter != null && m.round && !hasSaved[s]) {
-            // 首次进入：跳过顶部占位，让第一个内容贴最顶端
-            final ListView e = enter;
-            e.post(new Runnable() {
-                public void run() { e.setSelection(1); }
-            });
+        // 只有「返回上一级」才回到离开时的位置；正向点进页面一律回到默认位置（跳过顶部占位贴顶）。
+        SvList enter = svOf(s);
+        if (enter != null) {
+            if (restoreNext[s]) {
+                restoreNext[s] = false;
+                enter.restore();
+            } else {
+                enter.enter();
+            }
         }
     }
 
-    private ListView listOf(int s) {
+    private SvList svOf(int s) {
         switch (s) {
             case S_SUBJECT: return subjectList;
             case S_BLOCK: return blockList;
@@ -3746,6 +3869,14 @@ public class MainActivity extends Activity {
             case S_TODAY: return todayList;
             default: return null;
         }
+    }
+
+    /** 返回上一级：先把「恢复位置」标记打在目标页上，再切页。
+     *  这样从子页退回时回到原处，之后重新点进这一页则是默认位置，不会停在半中间。 */
+    private void goBack(int t) {
+        if (t < 0) return;
+        restoreNext[t] = true;
+        showScreen(t);
     }
 
     @Override
@@ -3771,8 +3902,7 @@ public class MainActivity extends Activity {
             toast("先点下面的「完成，开始使用」");
             return;
         }
-        int t = backTarget();
-        if (t >= 0) showScreen(t);
+        goBack(backTarget());
     }
 
     /** 当前页的上一级页面（主页返回 -1）。 */
@@ -4059,7 +4189,7 @@ public class MainActivity extends Activity {
         aboutScreen.addView(aboutScroll, lw());
 
         aboutInner.addView(makeBack("‹ 返回设置", new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_SETTINGS); }
+            public void onClick(View v) { goBack(S_SETTINGS); }
         }), wrapM());
 
         TextView title = new TextView(this);
@@ -4751,8 +4881,15 @@ public class MainActivity extends Activity {
 
     // ================= 今日新增 =================
     private static final int TODAY_PAGE = 40;
+    /** 一次最多渲染多少行：再多行 View 堆在 ScrollView 里会拖垮手表，宁可提示换个词。 */
+    private static final int HIT_LIMIT = 400;
 
     private void buildTodayScreen() {
+        todayList = new SvList();
+        todayList.addHead(makeBackHeader("\u2039 返回学科", new View.OnClickListener() {
+            public void onClick(View v) { goBack(S_SUBJECT); }
+        }));
+
         todayTitle = new TextView(this);
         todayTitle.setText("今日新增");
         todayTitle.setTextSize(m.subtitleSize + 2f);
@@ -4760,7 +4897,7 @@ public class MainActivity extends Activity {
         todayTitle.setTextColor(C_PRIMARY);
         todayTitle.setGravity(Gravity.CENTER);
         todayTitle.setPadding(0, 0, 0, dp(3));
-        todayScreen.addView(todayTitle, wrap());
+        todayList.addHead(todayTitle);
 
         todayFallbackBtn = new TextView(this);
         todayFallbackBtn.setTextSize(m.subtitleSize - 1f);
@@ -4769,30 +4906,9 @@ public class MainActivity extends Activity {
         todayFallbackBtn.setPadding(dp(8), dp(6), dp(8), dp(6));
         todayFallbackBtn.setBackground(clickBg(C_PILL));
         todayFallbackBtn.setVisibility(View.GONE);
-        todayScreen.addView(todayFallbackBtn, wrap());
+        todayList.addHead(todayFallbackBtn);
 
-        todayList = makeList();
-        todayList.addHeaderView(makeBackHeader("\u2039 返回学科", new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_SUBJECT); }
-        }));
-        todayList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                if (pos <= 1) return;                      // 顶部占位 + 返回键
-                int idx = pos - 2;
-                if (idx < 0 || idx >= todayShown.size()) return;
-                vibrate();
-                Hit h = todayShown.get(idx);
-                openDetail(h.item.t, h.item.sec, h.path, S_TODAY, h.item.img, h.item.ex);
-            }
-        });
-        // 滚到接近底部再追加，避免一次把上千条都塞进列表
-        todayList.setOnScrollListener(new AbsListView.OnScrollListener() {
-            public void onScrollStateChanged(AbsListView v, int state) { }
-            public void onScroll(AbsListView v, int first, int visible, int total) {
-                if (total > 0 && first + visible >= total - 5) loadMoreToday();
-            }
-        });
-        todayScreen.addView(todayList, lw());
+        todayScreen.addView(todayList.sc, lw());
     }
 
     /** 重新收集「今日新增」的知识点，先只放出第一页。
@@ -4834,7 +4950,7 @@ public class MainActivity extends Activity {
                             if (it.d == null || !it.d.equals(pick)) continue;
                             Hit h = new Hit();
                             h.item = it;
-                            h.path = su.name + " \u203a " + b.name
+                            h.path = su.name + " › " + b.name
                                     + (it.id != null && it.id.length() > 0 ? "  \u00b7  " + it.id : "");
                             todayAll.add(h);
                         }
@@ -4854,9 +4970,21 @@ public class MainActivity extends Activity {
         }
         applyTodayFallbackBtn(hasToday, newest, newestLabel);
 
-        todayAdapter = searchAdapter(todayShown);
-        todayList.setAdapter(todayAdapter);
-        loadMoreToday();
+        // 数据不是一次到位的：续载时先由 fill 补一批，再渲染
+        todayList.fill = new Runnable() {
+            public void run() { loadMoreToday(); }
+        };
+        todayList.bind(new RowSource() {
+            public int size() { return todayShown.size(); }
+            public View make(final int i) {
+                final Hit h = todayShown.get(i);
+                return hitRow(h.item.t, shortPath(h.path), new Runnable() {
+                    public void run() {
+                        openDetail(h.item.t, h.item.sec, h.path, S_TODAY, h.item.img, h.item.ex);
+                    }
+                });
+            }
+        });
     }
 
     /** 今天没新增时给一个「看最近一批」的入口；已经在看最近一批时给一个「只看今天」的回路。 */
@@ -4874,14 +5002,12 @@ public class MainActivity extends Activity {
         });
     }
 
-    /** 追加一页，无感：只 notifyDataSetChanged，不重建整表。 */
+    /** 往数据里补一页；行由 SvList 分帧追加，滑起来无感。 */
     private void loadMoreToday() {
-        if (todayAdapter == null) return;
-        if (todayShown.size() >= todayAll.size()) return;
+        if (todayShown.size() >= todayAll.size() || todayShown.size() >= HIT_LIMIT) return;
         int from = todayShown.size();
-        int to = Math.min(todayAll.size(), from + TODAY_PAGE);
+        int to = Math.min(Math.min(todayAll.size(), from + TODAY_PAGE), HIT_LIMIT);
         for (int i = from; i < to; i++) todayShown.add(todayAll.get(i));
-        todayAdapter.notifyDataSetChanged();
     }
 
     // ================= 显示调节 =================
@@ -5220,7 +5346,7 @@ public class MainActivity extends Activity {
         changelogScreen.addView(changelogScroll, lw());
 
         changelogInner.addView(makeBack("‹ 返回", new View.OnClickListener() {
-            public void onClick(View v) { showScreen(backTarget()); }
+            public void onClick(View v) { goBack(backTarget()); }
         }), wrapM());
 
         TextView title = new TextView(this);
@@ -5327,7 +5453,7 @@ public class MainActivity extends Activity {
         feedbackScreen.addView(feedbackScroll, lw());
 
         feedbackInner.addView(makeBack("‹ 返回设置", new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_SETTINGS); }
+            public void onClick(View v) { goBack(S_SETTINGS); }
         }), wrapM());
 
         TextView title = new TextView(this);
@@ -5996,11 +6122,29 @@ public class MainActivity extends Activity {
     }
     // ================= 我的反馈记录 =================
 
+    /** 我的反馈列表：主行标题 + 状态小字；加载中 / 空 / 失败都只是一行提示，不可点。 */
+    private void bindMine() {
+        mineList.bind(new RowSource() {
+            public int size() { return mineRows.size(); }
+            public View make(final int i) {
+                final String[] r = mineRows.get(i);
+                Runnable act = null;
+                if (i < mineIssues.size()) {
+                    final JSONObject o = mineIssues.get(i);
+                    act = new Runnable() {
+                        public void run() { openIssueDetail(o); }
+                    };
+                }
+                return pairRow(r[0], r[1], r[2], act);
+            }
+        });
+    }
+
     private void loadMyIssues() {
         mineIssues.clear();
         mineRows.clear();
         mineRows.add(new String[]{"正在加载…", "", "#FF8A8A8A"});
-        mineList.setAdapter(pairAdapter(mineRows));
+        bindMine();
         final String login = ghLogin;
         final boolean all = mineAllMode;
         new Thread(new Runnable() {
@@ -6031,7 +6175,7 @@ public class MainActivity extends Activity {
                             } else {
                                 mineRows.addAll(rows);
                             }
-                            mineList.setAdapter(pairAdapter(mineRows));
+                            bindMine();
                         }
                     });
                 } catch (final Exception e) {
@@ -6039,7 +6183,7 @@ public class MainActivity extends Activity {
                         public void run() {
                             mineRows.clear();
                             mineRows.add(new String[]{"加载失败：" + e.getMessage(), "", "#FFE57373"});
-                            mineList.setAdapter(pairAdapter(mineRows));
+                            bindMine();
                         }
                     });
                 }
@@ -6080,52 +6224,6 @@ public class MainActivity extends Activity {
     private String shortTime(String iso) {
         if (iso == null || iso.length() < 10) return "";
         return iso.substring(5, 10);
-    }
-
-    /** 两行列表：第一行标题，第二行小字（状态 · 日期）。 */
-    private ArrayAdapter<String[]> pairAdapter(final List<String[]> rows) {
-        return new ArrayAdapter<String[]>(this, 0, rows) {
-            @Override
-            public View getView(int position, View convertView, ViewGroup parent) {
-                LinearLayout box;
-                TextView title, sub;
-                if (convertView instanceof LinearLayout) {
-                    box = (LinearLayout) convertView;
-                    title = (TextView) box.getChildAt(0);
-                    sub = (TextView) box.getChildAt(1);
-                } else {
-                    box = new LinearLayout(MainActivity.this);
-                    box.setOrientation(LinearLayout.VERTICAL);
-                    box.setGravity(Gravity.CENTER);
-                    box.setPadding(dp(10), dp(8), dp(10), dp(8));
-                    applyClickBg(box, C_PILL);
-                    title = new TextView(MainActivity.this);
-                    title.setTextSize(lsSp() - 1f);
-                    title.setTextColor(0xFFF0F0F0);
-                    title.setTypeface(Typeface.DEFAULT_BOLD);
-                    title.setGravity(Gravity.CENTER);
-                    title.setMaxLines(2);
-                    title.setEllipsize(TextUtils.TruncateAt.END);
-                    box.addView(title, wrap());
-
-                    sub = new TextView(MainActivity.this);
-                    sub.setTextSize(m.subtitleSize - 2f);
-                    sub.setGravity(Gravity.CENTER);
-                    sub.setMaxLines(1);
-                    sub.setPadding(0, dp(2), 0, 0);
-                    box.addView(sub, wrap());
-                }
-                String[] r = getItem(position);
-                title.setText(r[0]);
-                sub.setText(r[1]);
-                try {
-                    sub.setTextColor(Color.parseColor(r[2]));
-                } catch (Exception ignored) {
-                    sub.setTextColor(C_SUB);
-                }
-                return box;
-            }
-        };
     }
 
     /** 打开单条反馈：正文 + 最新回复。 */
@@ -6723,7 +6821,7 @@ public class MainActivity extends Activity {
         profileScreen.addView(profScroll, lw());
 
         profInner.addView(makeBack("‹ 返回设置", new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_SETTINGS); }
+            public void onClick(View v) { goBack(S_SETTINGS); }
         }), wrapM());
 
         TextView title = new TextView(this);

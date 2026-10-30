@@ -2,6 +2,7 @@ package com.lizard.hsknowledge;
 
 import android.content.Context;
 import android.util.AttributeSet;
+import android.view.View;
 import android.widget.ScrollView;
 
 /**
@@ -10,6 +11,14 @@ import android.widget.ScrollView;
  */
 public class OverScrollScrollView extends ScrollView {
     private int maxOver;
+    private OnScrollListener scrollL;
+
+    public interface OnScrollListener {
+        void onScroll(int y, int h, int contentH);
+    }
+
+    /** 滚近底部时的续载回调（大列表分页用），由外部在 onScroll 里判断。 */
+    public void setScrollListener(OnScrollListener l) { scrollL = l; }
 
     public OverScrollScrollView(Context c) {
         super(c);
@@ -21,9 +30,16 @@ public class OverScrollScrollView extends ScrollView {
         setOverScrollMode(OVER_SCROLL_ALWAYS);
     }
 
-    /** 设置过滚距离（圆屏传 45% 屏高，方屏传 0）。 */
+    /** 设置过滚距离（圆屏传 25% 屏高，方屏传 0）。 */
     public void setMaxOver(int v) {
         maxOver = v;
+    }
+
+    @Override
+    protected void onScrollChanged(int l, int t, int oldl, int oldt) {
+        super.onScrollChanged(l, t, oldl, oldt);
+        View child = getChildAt(0);
+        if (scrollL != null) scrollL.onScroll(t, getHeight(), child == null ? 0 : child.getHeight());
     }
 
     @Override
