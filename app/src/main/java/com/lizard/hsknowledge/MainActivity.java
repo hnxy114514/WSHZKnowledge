@@ -23,6 +23,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.os.Bundle;
@@ -50,6 +52,7 @@ import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.AbsListView;
 import android.widget.ArrayAdapter;
+import android.widget.BaseAdapter;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -65,6 +68,9 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.PrintWriter;
+import java.io.RandomAccessFile;
+import java.io.StringWriter;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
@@ -72,6 +78,8 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -114,7 +122,8 @@ public class MainActivity extends Activity {
 
     // ---------- 数据模型 ----------
     static class Section { String h, c, body; }
-    static class Item { String t; int star; String img; String id, d; List<Section> sec = new ArrayList<Section>(); }
+    static class Example { String t, body; }
+    static class Item { String t; int star; String img; String id, d; List<Section> sec = new ArrayList<Section>(); List<Example> ex = new ArrayList<Example>(); }
     static class Child { String type; String name; List<Item> items = new ArrayList<Item>(); List<Section> sec = new ArrayList<Section>(); }
     static class Block { String name, id; List<Child> children = new ArrayList<Child>(); }
     static class Subject { String key, name; List<Block> blocks = new ArrayList<Block>(); }
@@ -127,23 +136,25 @@ public class MainActivity extends Activity {
 
     // ---------- 导航 ----------
     private static final int S_SUBJECT = 0, S_BLOCK = 1, S_CHILD = 2, S_ITEM = 3, S_DETAIL = 4, S_SETTINGS = 5,
-            S_SEARCH = 6, S_FEEDBACK = 7, S_MYFEEDBACK = 8, S_PROFILE = 9, S_CHANGELOG = 10, S_ABOUT = 11, S_DISPLAY = 12, S_TODAY = 13;
+            S_SEARCH = 6, S_FEEDBACK = 7, S_MYFEEDBACK = 8, S_PROFILE = 9, S_CHANGELOG = 10, S_ABOUT = 11, S_DISPLAY = 12, S_TODAY = 13, S_EXAMPLES = 14;
     private int screen = S_SUBJECT;
     private Subject curSubject;
     private Block curBlock;
     private Child curChild;
     private final List<Item> shownItems = new ArrayList<Item>();
     private int detailBack = S_ITEM;
+    /** 当前详情页知识点的例题列表（为空则不显示例题按钮）。 */
+    private List<Example> curExamples = new ArrayList<Example>();
 
     // ---------- UI ----------
     private FrameLayout root;
-    private LinearLayout subjectScreen, blockScreen, childScreen, listScreen, detailScreen, settingsScreen, searchScreen;
+    private LinearLayout subjectScreen, blockScreen, childScreen, listScreen, detailScreen, settingsScreen, searchScreen, examplesScreen;
     private ListView subjectList, blockList, childList, itemList, searchList;
-    private TextView listTitle, detailTitle, detailPath, searchTitle;
-    private TextView detailBackBtn, settingsBackBtn;
+    private TextView listTitle, detailTitle, detailPath, searchTitle, examplesTitle, examplesPath;
+    private TextView detailBackBtn, settingsBackBtn, examplesBackBtn;
     private EditText itemSearchBox, gSearchBox;
-    private ScrollView detailScroll, settingsScroll;
-    private LinearLayout detailInner, settingsInner;
+    private ScrollView detailScroll, settingsScroll, examplesScroll;
+    private LinearLayout detailInner, settingsInner, examplesInner;
     private FrameLayout fullscreenView;
 
     // ---------- 反馈 ----------
@@ -183,13 +194,17 @@ public class MainActivity extends Activity {
     private boolean pendingInstall = false;
     private volatile boolean downloadCancel = false;
     private boolean foreground = false;
+    // 日志记录：默认关闭，需在设置里手动开启（开启要 3 秒倒计时确认）
+    private boolean logEnabled = false;
+    private File logFile = null;
+    private boolean fbAttachLog = false;
     private String lastPath = "";
     private boolean subjectDirty = true;
     private String lastQuery = null;
-    private final int[] savedPos = new int[14];
-    private final int[] savedTop = new int[14];
-    private final boolean[] hasSaved = new boolean[14];
-    private final boolean[] restoreNext = new boolean[14];
+    private final int[] savedPos = new int[15];
+    private final int[] savedTop = new int[15];
+    private final boolean[] hasSaved = new boolean[15];
+    private final boolean[] restoreNext = new boolean[15];
 
     // 关于 / 感谢名单
     private LinearLayout aboutScreen, aboutInner, thanksBox, thanksLoading;
@@ -333,6 +348,7 @@ public class MainActivity extends Activity {
         // 后台探测最优通道（直连 / 镜像），探测结果给所有联网页面共用
         startRouteProbe();
         checkUpdate(true);
+        installCrashHandler();
     }
 
     private void loadOrderKeys() {
@@ -473,6 +489,7 @@ public class MainActivity extends Activity {
                     final String notes = rel.notes;
                     runOnUiThread(new Runnable() {
                         public void run() {
+                            if (!alive()) return;
                             progressHide();
                             showUpdateDialog(remoteTag, notes, url, silent);
                         }
@@ -892,7 +909,10 @@ public class MainActivity extends Activity {
                 routeProbing = false;
                 final String pick = (api != null) ? api : raw;
                 runOnUiThread(new Runnable() {
-                    public void run() { refreshRouteHint(); }
+                    public void run() {
+                        if (!alive()) return;
+                        refreshRouteHint();
+                    }
                 });
                 if (manual) {
                     // 手动点的，成败都要有回话
@@ -1290,8 +1310,172 @@ public class MainActivity extends Activity {
 
     private void toast(final String msg) {
         runOnUiThread(new Runnable() {
-            public void run() { Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show(); }
+            public void run() {
+                // 用 application context：Activity 销毁后 Toast 照常能弹，不会 BadTokenException
+                try {
+                    Toast.makeText(getApplicationContext(), msg, Toast.LENGTH_LONG).show();
+                } catch (Exception ignored) { }
+            }
         });
+    }
+
+    /** Activity 是否还活着。后台线程回来碰 UI 前先查这个，销毁了就别动。 */
+    private boolean alive() {
+        return !isFinishing() && !isDestroyed();
+    }
+
+    // ================= 日志记录（默认关，手动开） =================
+
+    /** 写一条日志。只有开启后才会落盘；平时零开销。 */
+    private void log(String tag, String msg) {
+        if (!logEnabled) return;
+        try {
+            if (logFile == null) {
+                File dir = new File(getFilesDir(), "logs");
+                if (!dir.exists()) dir.mkdirs();
+                String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+                logFile = new File(dir, "app_" + ts + ".log");
+            }
+            String line = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(new Date())
+                    + " [" + tag + "] " + msg + "\n";
+            FileOutputStream fos = new FileOutputStream(logFile, true);
+            fos.write(line.getBytes(StandardCharsets.UTF_8));
+            fos.close();
+        } catch (Exception ignored) { }
+    }
+
+    /** 开启日志记录：先落一条启动信息，方便定位版本与设备。 */
+    private void startLogging() {
+        logEnabled = true;
+        log("APP", "开始记录日志 · 版本 " + appVersion() + "（build " + appVersionCode() + "）· "
+                + Build.MODEL + " · Android " + Build.VERSION.RELEASE + " · " + (m.round ? "圆屏" : "方屏"));
+    }
+
+    /** 关闭日志记录。 */
+    private void stopLogging() {
+        if (logEnabled) log("APP", "停止记录日志");
+        logEnabled = false;
+    }
+
+    /** 全局崩溃捕获：只在日志开启时写堆栈，其余情况交给系统默认处理。 */
+    private void installCrashHandler() {
+        final Thread.UncaughtExceptionHandler prev = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
+            @Override
+            public void uncaughtException(Thread t, Throwable e) {
+                if (logEnabled) {
+                    try {
+                        StringWriter sw = new StringWriter();
+                        e.printStackTrace(new PrintWriter(sw));
+                        log("CRASH", "线程 " + t.getName() + "\n" + sw.toString());
+                    } catch (Exception ignored) { }
+                }
+                if (prev != null) prev.uncaughtException(t, e);
+            }
+        });
+    }
+
+    /** 读日志末尾最多 maxChars 个字符（给反馈附带用）。 */
+    private String readLogTail(int maxChars) {
+        if (logFile == null || !logFile.exists()) return "";
+        try {
+            long len = logFile.length();
+            long start = Math.max(0, len - maxChars);
+            RandomAccessFile raf = new RandomAccessFile(logFile, "r");
+            raf.seek(start);
+            byte[] buf = new byte[(int) (len - start)];
+            raf.readFully(buf);
+            raf.close();
+            String out = new String(buf, StandardCharsets.UTF_8);
+            // 起点可能落在半个中文字符上，跳过第一行之前的内容
+            int nl = out.indexOf('\n');
+            if (nl >= 0 && start > 0) out = out.substring(nl + 1);
+            return out;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /** 3 秒倒计时确认框：倒计时结束后「开启」按钮才可点。 */
+    private void showLogEnableDialog() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(14), dp(14), dp(14), dp(12));
+        box.setBackgroundDrawable(pill(C_CARD));
+
+        TextView title = new TextView(this);
+        title.setText("开启记录日志");
+        title.setTextSize(m.subtitleSize + 1f);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(C_PRIMARY);
+        title.setGravity(Gravity.CENTER);
+        box.addView(title, wrap());
+
+        TextView hint = new TextView(this);
+        hint.setText("日志会保存在本机，用于排查问题（比如闪退）。倒计时结束后点「开启」开始记录。");
+        hint.setTextSize(m.subtitleSize - 1.5f);
+        hint.setTextColor(C_TEXT);
+        hint.setGravity(Gravity.CENTER);
+        hint.setPadding(dp(4), dp(8), dp(4), dp(8));
+        box.addView(hint, wrap());
+
+        final TextView btn = new TextView(this);
+        btn.setTextSize(m.backSize);
+        btn.setTypeface(Typeface.DEFAULT_BOLD);
+        btn.setGravity(Gravity.CENTER);
+        btn.setPadding(dp(10), dp(11), dp(10), dp(11));
+        btn.setBackgroundDrawable(pill(0xFF14384A));
+        btn.setTextColor(C_SUB);
+        btn.setEnabled(false);
+        box.addView(btn, wrap());
+
+        TextView cancel = new TextView(this);
+        cancel.setText("取消");
+        cancel.setTextSize(m.subtitleSize - 1f);
+        cancel.setTextColor(C_SUB);
+        cancel.setGravity(Gravity.CENTER);
+        cancel.setPadding(dp(8), dp(9), dp(8), dp(2));
+        box.addView(cancel, wrap());
+
+        final AlertDialog d = new AlertDialog.Builder(this).setView(box).create();
+        d.setCancelable(true);
+        tuneDialogWindow(d);
+        d.show();
+
+        cancel.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                try { d.dismiss(); } catch (Exception ignored) { }
+            }
+        });
+        btn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (!btn.isEnabled()) return;
+                try { d.dismiss(); } catch (Exception ignored) { }
+                startLogging();
+                toast("已开启记录日志");
+                renderSettings();
+            }
+        });
+
+        final int[] left = {3};
+        final Handler h = new Handler(Looper.getMainLooper());
+        final Runnable[] step = new Runnable[1];
+        step[0] = new Runnable() {
+            @Override
+            public void run() {
+                if (!d.isShowing()) return;
+                if (left[0] > 0) {
+                    btn.setText("请稍候（" + left[0] + " 秒）");
+                    left[0]--;
+                    h.postDelayed(step[0], 1000);
+                } else {
+                    btn.setText("开启");
+                    btn.setTextColor(C_PRIMARY);
+                    btn.setEnabled(true);
+                }
+            }
+        };
+        h.postDelayed(step[0], 1000);
     }
 
     private List<Section> parseSections(JSONArray arr) throws Exception {
@@ -1318,6 +1502,19 @@ public class MainActivity extends Activity {
             JSONArray secs = io.optJSONArray("sec");
             if (secs != null) it.sec = parseSections(secs);
         } catch (Exception ignored) { }
+        try {
+            JSONArray exs = io.optJSONArray("ex");
+            if (exs != null) {
+                for (int i = 0; i < exs.length(); i++) {
+                    JSONObject eo = exs.optJSONObject(i);
+                    if (eo == null) continue;
+                    Example e = new Example();
+                    e.t = eo.optString("t", "");
+                    e.body = eo.optString("body", "");
+                    if (e.t.length() > 0 || e.body.length() > 0) it.ex.add(e);
+                }
+            }
+        } catch (Exception ignored) { }
         return it;
     }
 
@@ -1333,6 +1530,7 @@ public class MainActivity extends Activity {
         childScreen = newScreen();
         listScreen = newScreen();
         detailScreen = newScreen();
+        examplesScreen = newScreen();
         settingsScreen = newScreen();
         searchScreen = newScreen();
         feedbackScreen = newScreen();
@@ -1342,6 +1540,7 @@ public class MainActivity extends Activity {
         root.addView(childScreen, fp());
         root.addView(listScreen, fp());
         root.addView(detailScreen, fp());
+        root.addView(examplesScreen, fp());
         root.addView(settingsScreen, fp());
         root.addView(searchScreen, fp());
         buildFeedbackScreen();
@@ -1472,7 +1671,7 @@ public class MainActivity extends Activity {
                 if (pos == 0) return;   // 返回键 header
                 vibrate();
                 Item it = shownItems.get(pos - 1);
-                openDetail(it.t, it.sec, curSubject.name + " › " + curBlock.name + " › " + curChild.name, S_ITEM, it.img);
+                openDetail(it.t, it.sec, curSubject.name + " › " + curBlock.name + " › " + curChild.name, S_ITEM, it.img, it.ex);
             }
         });
 
@@ -1503,6 +1702,34 @@ public class MainActivity extends Activity {
         detailScroll.addView(detailInner, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         detailScreen.addView(detailScroll, lw());
+
+        // 例题页
+        examplesBackBtn = makeBack("‹ 返回知识点", new View.OnClickListener() {
+            public void onClick(View v) { showScreen(S_DETAIL); }
+        });
+        examplesPath = new TextView(this);
+        examplesPath.setTextSize(m.subtitleSize - 2f);
+        examplesPath.setTextColor(C_SUB);
+        examplesPath.setPadding(dp(2), 0, dp(2), dp(1));
+        examplesPath.setMaxLines(2);
+        examplesScreen.addView(examplesPath, wrap());
+
+        examplesTitle = new TextView(this);
+        examplesTitle.setTextSize(m.titleSize);
+        examplesTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        examplesTitle.setTextColor(C_PRIMARY);
+        examplesTitle.setGravity(Gravity.CENTER);
+        examplesTitle.setPadding(0, dp(2), 0, dp(6));
+        examplesTitle.setMaxLines(3);
+        examplesScreen.addView(examplesTitle, wrap());
+
+        examplesScroll = new ScrollView(this);
+        examplesScroll.setFillViewport(true);
+        examplesInner = new LinearLayout(this);
+        examplesInner.setOrientation(LinearLayout.VERTICAL);
+        examplesScroll.addView(examplesInner, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        examplesScreen.addView(examplesScroll, lw());
 
         // 设置页
         settingsBackBtn = makeBack("‹ 返回", new View.OnClickListener() {
@@ -1576,7 +1803,7 @@ public class MainActivity extends Activity {
                 vibrate();
                 if (pos - 1 >= searchHits.size()) return;   // 空提示行
                 Hit h = searchHits.get(pos - 1);
-                openDetail(h.item.t, h.item.sec, h.path, S_SEARCH, h.item.img);
+                openDetail(h.item.t, h.item.sec, h.path, S_SEARCH, h.item.img, h.item.ex);
             }
         });
     }
@@ -1768,9 +1995,63 @@ public class MainActivity extends Activity {
     }
 
     private void renderItems() {
-        List<String> names = new ArrayList<String>();
-        for (Item it : shownItems) names.add(starText(it.star) + "  " + it.t);
-        itemList.setAdapter(stringAdapter(names, 0xFFF0F0F0));
+        // 知识点列表：标题旁边带黄色「（例）」标记（只有含例题的知识点才显示）
+        itemList.setAdapter(new BaseAdapter() {
+            public int getCount() { return shownItems.size(); }
+            public Object getItem(int i) { return shownItems.get(i); }
+            public long getItemId(int i) { return i; }
+            public View getView(int position, View convertView, ViewGroup parent) {
+                LinearLayout row = (convertView instanceof LinearLayout) ? (LinearLayout) convertView : null;
+                if (row == null) {
+                    row = new LinearLayout(MainActivity.this);
+                    row.setOrientation(LinearLayout.HORIZONTAL);
+                    row.setGravity(Gravity.CENTER_VERTICAL);
+                    GradientDrawable content = pill(C_PILL);
+                    GradientDrawable mask = new GradientDrawable();
+                    mask.setColor(Color.WHITE);
+                    mask.setCornerRadius(dp(13));
+                    try {
+                        row.setBackground(new RippleDrawable(ColorStateList.valueOf(0x334FC3F7), content, mask));
+                    } catch (Exception ignored) {
+                        row.setBackgroundDrawable(content);
+                    }
+                    row.setPadding(dp(10), dp(9), dp(10), dp(9));
+
+                    TextView tv = new TextView(MainActivity.this);
+                    tv.setId(0x7f0f0001);
+                    tv.setTextSize(lsSp());
+                    tv.setTextColor(0xFFF0F0F0);
+                    tv.setTypeface(Typeface.DEFAULT_BOLD);
+                    tv.setGravity(Gravity.CENTER);
+                    tv.setMaxLines(6);
+                    tv.setLineSpacing(dp(1), 1.08f);
+                    row.addView(tv, new LinearLayout.LayoutParams(0,
+                            ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+                    TextView tag = new TextView(MainActivity.this);
+                    tag.setId(0x7f0f0002);
+                    tag.setTextSize(lsSp() - 1f);
+                    tag.setTypeface(Typeface.DEFAULT_BOLD);
+                    tag.setGravity(Gravity.CENTER);
+                    row.addView(tag, new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+                }
+                Item it = shownItems.get(position);
+                TextView tv = (TextView) row.findViewById(0x7f0f0001);
+                TextView tag = (TextView) row.findViewById(0x7f0f0002);
+                tv.setText(applyMarkup(starText(it.star) + "  " + it.t));
+                if (it.ex != null && !it.ex.isEmpty()) {
+                    // 「（例）」：括号普通色，例字黄色
+                    SpannableStringBuilder ss = new SpannableStringBuilder("（例）");
+                    ss.setSpan(new ForegroundColorSpan(C_HI), 1, 2, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    tag.setText(ss);
+                    tag.setVisibility(View.VISIBLE);
+                } else {
+                    tag.setVisibility(View.GONE);
+                }
+                return row;
+            }
+        });
     }
 
     private void refreshGlobalSearch() {
@@ -2076,11 +2357,16 @@ public class MainActivity extends Activity {
 
     // ================= 详情 =================
     private void openDetail(String title, List<Section> secs, String path, int back) {
-        openDetail(title, secs, path, back, null);
+        openDetail(title, secs, path, back, null, null);
     }
 
     private void openDetail(String title, List<Section> secs, String path, int back, String img) {
+        openDetail(title, secs, path, back, img, null);
+    }
+
+    private void openDetail(String title, List<Section> secs, String path, int back, String img, List<Example> ex) {
         detailBack = back;
+        curExamples = (ex == null) ? new ArrayList<Example>() : ex;
         lastPath = (path == null) ? "" : path;
         detailTitle.setText(applyMarkup(title));
         detailPath.setText(applyMarkup(path));
@@ -2136,8 +2422,112 @@ public class MainActivity extends Activity {
                 detailInner.addView(card, clp);
             }
         }
+        if (curExamples != null && !curExamples.isEmpty()) {
+            TextView exBtn = new TextView(this);
+            exBtn.setText("例题 · " + curExamples.size() + " 道");
+            exBtn.setTextSize(m.subtitleSize);
+            exBtn.setTypeface(Typeface.DEFAULT_BOLD);
+            exBtn.setTextColor(0xFF1A242E);
+            exBtn.setGravity(Gravity.CENTER);
+            exBtn.setPadding(dp(10), dp(11), dp(10), dp(11));
+            exBtn.setBackgroundDrawable(pill(C_HI));
+            final String ttl = title;
+            exBtn.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    vibrate();
+                    openExamples(ttl, curExamples, lastPath);
+                }
+            });
+            LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            elp.topMargin = dp(2);
+            detailInner.addView(exBtn, elp);
+        }
         detailScroll.smoothScrollTo(0, 0);
         showScreen(S_DETAIL);
+    }
+
+    /** 例题页：展示某知识点的例题（题干 + 选项 + 答案与解析）。 */
+    private void openExamples(String title, List<Example> exs, String path) {
+        examplesTitle.setText(applyMarkup(title));
+        examplesPath.setText(applyMarkup(path));
+        examplesInner.removeAllViews();
+        examplesInner.addView(examplesBackBtn, wrapM());
+        int no = 1;
+        for (Example e : exs) {
+            LinearLayout q = new LinearLayout(this);
+            q.setOrientation(LinearLayout.VERTICAL);
+            q.setPadding(dp(11), dp(9), dp(11), dp(9));
+            GradientDrawable qb = new GradientDrawable();
+            qb.setColor(C_CARD);
+            qb.setCornerRadius(dp(11));
+            q.setBackgroundDrawable(qb);
+
+            TextView qTag = new TextView(this);
+            qTag.setText("例题 " + no);
+            qTag.setTextSize(m.secTagSize);
+            qTag.setTypeface(Typeface.DEFAULT_BOLD);
+            qTag.setTextColor(Color.WHITE);
+            qTag.setPadding(dp(9), dp(3), dp(9), dp(3));
+            GradientDrawable qt = new GradientDrawable();
+            qt.setColor(secColor("K"));
+            qt.setCornerRadius(dp(9));
+            qTag.setBackgroundDrawable(qt);
+            LinearLayout.LayoutParams qtp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            qtp.bottomMargin = dp(5);
+            q.addView(qTag, qtp);
+
+            TextView qBody = new TextView(this);
+            qBody.setText(applyMarkup(e.t));
+            qBody.setTextSize(fsSp());
+            qBody.setTextColor(C_TEXT);
+            qBody.setLineSpacing(dp(3), 1.25f);
+            q.addView(qBody, wrap());
+
+            LinearLayout.LayoutParams qlp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            qlp.bottomMargin = dp(8);
+            examplesInner.addView(q, qlp);
+
+            LinearLayout a = new LinearLayout(this);
+            a.setOrientation(LinearLayout.VERTICAL);
+            a.setPadding(dp(11), dp(9), dp(11), dp(9));
+            GradientDrawable ab = new GradientDrawable();
+            ab.setColor(0xFF1A242E);
+            ab.setCornerRadius(dp(11));
+            a.setBackgroundDrawable(ab);
+
+            TextView aTag = new TextView(this);
+            aTag.setText("答案与解析");
+            aTag.setTextSize(m.secTagSize);
+            aTag.setTypeface(Typeface.DEFAULT_BOLD);
+            aTag.setTextColor(0xFF1A242E);
+            aTag.setPadding(dp(9), dp(3), dp(9), dp(3));
+            GradientDrawable at = new GradientDrawable();
+            at.setColor(C_HI);
+            at.setCornerRadius(dp(9));
+            aTag.setBackgroundDrawable(at);
+            LinearLayout.LayoutParams atp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            atp.bottomMargin = dp(5);
+            a.addView(aTag, atp);
+
+            TextView aBody = new TextView(this);
+            aBody.setText(applyMarkup(e.body));
+            aBody.setTextSize(fsSp());
+            aBody.setTextColor(C_TEXT);
+            aBody.setLineSpacing(dp(3), 1.25f);
+            a.addView(aBody, wrap());
+
+            LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            alp.bottomMargin = dp(12);
+            examplesInner.addView(a, alp);
+            no++;
+        }
+        examplesScroll.smoothScrollTo(0, 0);
+        showScreen(S_EXAMPLES);
     }
 
     // ================= LaTeX 渲染引擎（子集） =================
@@ -2923,6 +3313,26 @@ public class MainActivity extends Activity {
         settingsInner.addView(routeHint, wrap());
         refreshRouteHint();
 
+        // 记录日志开关：点击后由 toggleRow 自己震动，这里只处理状态切换
+        settingsInner.addView(toggleRow("记录日志", logEnabled, new View.OnClickListener() {
+            public void onClick(View v) {
+                if (logEnabled) {
+                    stopLogging();
+                    toast("已停止记录日志");
+                    renderSettings();
+                } else {
+                    showLogEnableDialog();
+                }
+            }
+        }), wrap());
+        TextView logHint = new TextView(this);
+        logHint.setText("平时不记录；开启后把运行日志存在本机，提交反馈时可附带，方便排查问题。");
+        logHint.setTextSize(m.subtitleSize - 2f);
+        logHint.setTextColor(C_SUB);
+        logHint.setGravity(Gravity.CENTER);
+        logHint.setPadding(dp(4), dp(3), dp(4), dp(2));
+        settingsInner.addView(logHint, wrap());
+
         TextView fbEntry = new TextView(this);
         fbEntry.setText("反馈与建议");
         fbEntry.setTextSize(m.backSize);
@@ -3188,7 +3598,7 @@ public class MainActivity extends Activity {
         screen = s;
         View[] screens = {subjectScreen, blockScreen, childScreen, listScreen, detailScreen, settingsScreen,
                 searchScreen, feedbackScreen, mineScreen, profileScreen, changelogScreen, aboutScreen,
-                displayScreen, todayScreen};
+                displayScreen, todayScreen, examplesScreen};
         View target = screens[s];
         boolean shown = target.getVisibility() == View.VISIBLE && target.getAlpha() > 0.95f
                 && Math.abs(target.getTranslationX()) < dp(4);
@@ -3280,6 +3690,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        log("APP", "onDestroy");
         dismissCodeDialog();
         dismissUpdateDialog();
         super.onDestroy();
@@ -3307,6 +3718,7 @@ public class MainActivity extends Activity {
     /** 当前页的上一级页面（主页返回 -1）。 */
     private int backTarget() {
         if (screen == S_DETAIL) return detailBack;
+        if (screen == S_EXAMPLES) return S_DETAIL;
         if (screen == S_ITEM) return S_CHILD;
         if (screen == S_CHILD) return S_BLOCK;
         if (screen == S_BLOCK) return S_SUBJECT;
@@ -3329,6 +3741,7 @@ public class MainActivity extends Activity {
             case S_CHILD: return childScreen;
             case S_ITEM: return listScreen;
             case S_DETAIL: return detailScreen;
+            case S_EXAMPLES: return examplesScreen;
             case S_SETTINGS: return settingsScreen;
             case S_SEARCH: return searchScreen;
             case S_CHANGELOG: return changelogScreen;
@@ -3425,6 +3838,7 @@ public class MainActivity extends Activity {
             case S_CHILD: return childScreen;
             case S_ITEM: return listScreen;
             case S_DETAIL: return detailScreen;
+            case S_EXAMPLES: return examplesScreen;
             case S_SETTINGS: return settingsScreen;
             case S_SEARCH: return searchScreen;
             case S_FEEDBACK: return feedbackScreen;
@@ -4267,7 +4681,7 @@ public class MainActivity extends Activity {
                 if (idx < 0 || idx >= todayShown.size()) return;
                 vibrate();
                 Hit h = todayShown.get(idx);
-                openDetail(h.item.t, h.item.sec, h.path, S_TODAY, h.item.img);
+                openDetail(h.item.t, h.item.sec, h.path, S_TODAY, h.item.img, h.item.ex);
             }
         });
         // 滚到接近底部再追加，避免一次把上千条都塞进列表
@@ -4894,6 +5308,30 @@ public class MainActivity extends Activity {
         });
         feedbackInner.addView(fbDesc, wrap());
 
+        // 附带日志开关：只在日志开启时可开，方便排查闪退类问题
+        final TextView attachBtn = new TextView(this);
+        attachBtn.setText("附带日志（当前：关）");
+        attachBtn.setTextSize(m.backSize);
+        attachBtn.setTextColor(logEnabled ? C_PRIMARY : C_SUB);
+        attachBtn.setGravity(Gravity.CENTER);
+        attachBtn.setPadding(dp(10), dp(10), dp(10), dp(10));
+        attachBtn.setBackgroundDrawable(pill(logEnabled && fbAttachLog ? 0xFF14384A : C_PILL));
+        attachBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                if (!logEnabled) {
+                    toast("请先在「设置 → 记录日志」里开启日志");
+                    return;
+                }
+                fbAttachLog = !fbAttachLog;
+                attachBtn.setText("附带日志（当前：" + (fbAttachLog ? "开" : "关") + "）");
+                attachBtn.setBackgroundDrawable(pill(fbAttachLog ? 0xFF14384A : C_PILL));
+            }
+        });
+        LinearLayout.LayoutParams atLp = wrap();
+        atLp.bottomMargin = dp(6);
+        feedbackInner.addView(attachBtn, atLp);
+
         TextView diag = new TextView(this);
         diag.setText("自动附带：版本 " + appVersion() + "（" + appVersionCode() + "）· " + Build.MODEL
                 + " · Android " + Build.VERSION.RELEASE + " · " + (m.round ? "圆屏" : "方屏"));
@@ -5067,6 +5505,7 @@ public class MainActivity extends Activity {
     private void afterLoginEnds() {
         runOnUiThread(new Runnable() {
             public void run() {
+                if (!alive()) return;
                 dismissCodeDialog();
                 updateFeedbackUi();
                 updateProfileUi();
@@ -5076,6 +5515,7 @@ public class MainActivity extends Activity {
     }
 
     private void logoutGitHub() {
+        log("LOGIN", "退出登录");
         loginRunning = false;
         dismissCodeDialog();
         ghToken = null;
@@ -5119,6 +5559,7 @@ public class MainActivity extends Activity {
                             : "https://github.com/login/device?user_code=" + code;
                     runOnUiThread(new Runnable() {
                         public void run() {
+                            if (!alive()) return;
                             copyToClipboard(code);
                             updateFeedbackUi();
                             showCodeDialog(code, fbCodeUrl);
@@ -5182,6 +5623,7 @@ public class MainActivity extends Activity {
                 loginRunning = false;
                 // 取不到账号名时保留原来的（别把已有账号名抹成空），下次进个人页会再拉一次
                 saveGitHub(ghToken, (login == null || login.length() == 0) ? ghLogin : login);
+                log("LOGIN", "登录成功 @" + (login == null ? "?" : login));
                 afterLoginEnds();
                 toast(login == null ? "已登录 GitHub" : "已登录 @" + login);
             }
@@ -5206,13 +5648,22 @@ public class MainActivity extends Activity {
                 try {
                     JSONObject payload = new JSONObject();
                     payload.put("title", "[" + FB_TYPES[fbType] + "] " + firstLine(desc, 20));
-                    payload.put("body", feedbackBody(FB_TYPES[fbType], desc));
+                    String body = feedbackBody(FB_TYPES[fbType], desc);
+                    if (fbAttachLog && logEnabled) {
+                        String tail = readLogTail(8192);
+                        if (tail.length() > 0) {
+                            body += "\n\n---\n\n<details><summary>应用日志（末尾）</summary>\n\n```\n"
+                                    + tail + "\n```\n</details>\n";
+                        }
+                    }
+                    payload.put("body", body);
                     JSONObject o = new JSONObject(httpPost(GH_ISSUES, payload.toString(),
                             "application/json", ghToken));
                     final int num = o.optInt("number", 0);
                     final String msg = o.optString("message", "");
                     runOnUiThread(new Runnable() {
                         public void run() {
+                            if (!alive()) return;
                             fbSubmitBtn.setEnabled(true);
                             if (num > 0) {
                                 fbDesc.setText("");
@@ -6331,7 +6782,7 @@ public class MainActivity extends Activity {
                 final boolean wasFixed = fixed;
                 runOnUiThread(new Runnable() {
                     public void run() {
-                        if (!token.equals(ghToken)) return;
+                        if (!alive() || !token.equals(ghToken)) return;
                         ghLogin = fl;
                         hideAvatarLoading();
                         if (fb != null) {

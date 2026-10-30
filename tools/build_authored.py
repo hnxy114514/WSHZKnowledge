@@ -53,8 +53,14 @@ def to_item(it):
     star = it.get("lvl", None)
     if star is None:
         star = importance(it["t"])
-    return {"t": latexify(it["t"]), "star": star,
-            "sec": [{"h": "", "c": "K", "body": body}]}
+    out = {"t": latexify(it["t"]), "star": star,
+           "sec": [{"h": "", "c": "K", "body": body}]}
+    # 例题：知识点下一层缩进 ex = [{"t": 题干, "body": 解析}]，有就透传
+    ex = it.get("ex", [])
+    if ex:
+        out["ex"] = [{"t": latexify(e.get("t", "")), "body": latexify(e.get("body", ""))}
+                     for e in ex if e.get("t") or e.get("body")]
+    return out
 
 def to_child(ch):
     items = [to_item(i) for i in ch.get("items", [])]
