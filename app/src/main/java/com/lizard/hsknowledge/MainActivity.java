@@ -1650,7 +1650,7 @@ public class MainActivity extends Activity {
         });
         childScreen.addView(childList, lw());
 
-        // 知识点页
+        // 知识点页：标题和搜索框作为列表 header，随列表一起滚动
         listTitle = new TextView(this);
         listTitle.setTextSize(m.subtitleSize);
         listTitle.setTypeface(Typeface.DEFAULT_BOLD);
@@ -1658,7 +1658,8 @@ public class MainActivity extends Activity {
         listTitle.setGravity(Gravity.CENTER);
         listTitle.setPadding(0, 0, 0, dp(4));
         listTitle.setMaxLines(2);
-        listScreen.addView(listTitle, wrap());
+        listTitle.setLayoutParams(new AbsListView.LayoutParams(
+                AbsListView.LayoutParams.MATCH_PARENT, AbsListView.LayoutParams.WRAP_CONTENT));
 
         itemSearchBox = new EditText(this);
         itemSearchBox.setHint("在本节内搜索…");
@@ -1668,10 +1669,8 @@ public class MainActivity extends Activity {
         itemSearchBox.setSingleLine(true);
         itemSearchBox.setBackgroundDrawable(pill(C_PILL));
         itemSearchBox.setPadding(dp(12), dp(8), dp(12), dp(8));
-        LinearLayout.LayoutParams sblp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        sblp.bottomMargin = dp(6);
-        listScreen.addView(itemSearchBox, sblp);
+        itemSearchBox.setLayoutParams(new AbsListView.LayoutParams(
+                AbsListView.LayoutParams.MATCH_PARENT, AbsListView.LayoutParams.WRAP_CONTENT));
         itemSearchBox.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
             public void onTextChanged(CharSequence s, int a, int b, int c) { }
@@ -1682,6 +1681,8 @@ public class MainActivity extends Activity {
         itemList.addHeaderView(makeBackHeader("‹ 返回上一页", new View.OnClickListener() {
             public void onClick(View v) { showScreen(S_CHILD); }
         }));
+        itemList.addHeaderView(listTitle);
+        itemList.addHeaderView(itemSearchBox);
         listScreen.addView(itemList, lw());
         itemList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
@@ -1701,7 +1702,6 @@ public class MainActivity extends Activity {
         detailPath.setTextColor(C_SUB);
         detailPath.setPadding(dp(2), 0, dp(2), dp(1));
         detailPath.setMaxLines(2);
-        detailScreen.addView(detailPath, wrap());
 
         detailTitle = new TextView(this);
         detailTitle.setTextSize(m.titleSize);
@@ -1710,7 +1710,6 @@ public class MainActivity extends Activity {
         detailTitle.setGravity(Gravity.CENTER);
         detailTitle.setPadding(0, dp(2), 0, dp(6));
         detailTitle.setMaxLines(3);
-        detailScreen.addView(detailTitle, wrap());
 
         detailScroll = new ScrollView(this);
         detailScroll.setFillViewport(true);
@@ -1730,7 +1729,7 @@ public class MainActivity extends Activity {
         examplesPath.setTextColor(C_SUB);
         examplesPath.setPadding(dp(2), 0, dp(2), dp(1));
         examplesPath.setMaxLines(2);
-        examplesScreen.addView(examplesPath, wrap());
+        // examplesPath 随内容滚动，在 openExamples 里加进 examplesInner
 
         examplesTitle = new TextView(this);
         examplesTitle.setTextSize(m.titleSize);
@@ -1739,7 +1738,7 @@ public class MainActivity extends Activity {
         examplesTitle.setGravity(Gravity.CENTER);
         examplesTitle.setPadding(0, dp(2), 0, dp(6));
         examplesTitle.setMaxLines(3);
-        examplesScreen.addView(examplesTitle, wrap());
+        // examplesTitle 随内容滚动，在 openExamples 里加进 examplesInner
 
         examplesScroll = new ScrollView(this);
         examplesScroll.setFillViewport(true);
@@ -1772,7 +1771,8 @@ public class MainActivity extends Activity {
         searchTitle.setTextColor(C_PRIMARY);
         searchTitle.setGravity(Gravity.CENTER);
         searchTitle.setPadding(0, 0, 0, dp(3));
-        searchScreen.addView(searchTitle, wrap());
+        searchTitle.setLayoutParams(new AbsListView.LayoutParams(
+                AbsListView.LayoutParams.MATCH_PARENT, AbsListView.LayoutParams.WRAP_CONTENT));
         gSearchBox = new EditText(this);
         gSearchBox.setHint("输入关键词（如 导数、电场、光合作用）…");
         gSearchBox.setTextSize(m.subtitleSize - 1f);
@@ -1803,10 +1803,8 @@ public class MainActivity extends Activity {
         });
         searchBar.addView(clearBtn, clrp);
 
-        LinearLayout.LayoutParams gsblp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        gsblp.bottomMargin = dp(6);
-        searchScreen.addView(searchBar, gsblp);
+        searchBar.setLayoutParams(new AbsListView.LayoutParams(
+                AbsListView.LayoutParams.MATCH_PARENT, AbsListView.LayoutParams.WRAP_CONTENT));
         gSearchBox.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
             public void onTextChanged(CharSequence s, int a, int b, int c) { }
@@ -1816,6 +1814,8 @@ public class MainActivity extends Activity {
         searchList.addHeaderView(makeBackHeader("‹ 返回", new View.OnClickListener() {
             public void onClick(View v) { showScreen(S_SUBJECT); }
         }));
+        searchList.addHeaderView(searchTitle);
+        searchList.addHeaderView(searchBar);
         searchScreen.addView(searchList, lw());
         searchList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
@@ -1832,7 +1832,7 @@ public class MainActivity extends Activity {
         LinearLayout ll = new LinearLayout(this);
         ll.setOrientation(LinearLayout.VERTICAL);
         ll.setBackgroundColor(C_BG);   // 每页自带黑底：右滑预览时两页各自独立，不会互相透出
-        ll.setPadding(m.sidePad, m.topPad, m.sidePad, m.bottomPad);
+        ll.setPadding(m.sidePad, 0, m.sidePad, 0);   // 上下不 pad，黑边由滚动容器内部的透明安全区承担
         return ll;
     }
 
@@ -1842,7 +1842,7 @@ public class MainActivity extends Activity {
         if (m == null || !m.round) return;
         sc.setClipToPadding(false);
         // 只在底部留安全边距保护最后一项；顶部通常已有标题/返回键占位，留了会和内容之间出现长空
-        sc.setPadding(0, 0, 0, m.roundSafe);
+        sc.setPadding(0, m.roundSafe, 0, m.roundSafe);
     }
 
     private ListView makeList() {
@@ -1853,7 +1853,7 @@ public class MainActivity extends Activity {
         // 关键：禁用 ListView 默认 selector。默认 selector 是系统矩形涟漪，点击时会叠加在 item 上，
         // 把 item 自己的圆角涟漪盖成正方形溢出。设置成透明后，只有 item 的 background（圆角涟漪）生效。
         lv.setSelector(new ColorDrawable(Color.TRANSPARENT));
-        lv.setPadding(0, dp(4), 0, dp(4) + m.roundSafe);
+        lv.setPadding(0, m.roundSafe, 0, m.roundSafe);
         lv.setClipToPadding(false);
         // 关掉 ListView 的滚动/动画缓存：快速滑动时缓存位图和实时文字不同步，会出现「按钮和字偏移」
         lv.setScrollingCacheEnabled(false);
@@ -2384,6 +2384,8 @@ public class MainActivity extends Activity {
         detailPath.setText(applyMarkup(path));
         detailInner.removeAllViews();
         detailInner.addView(detailBackBtn, wrapM());
+        detailInner.addView(detailPath, wrap());
+        detailInner.addView(detailTitle, wrap());
         if (img != null && img.length() > 0) addFigure(img);
 
         if (secs == null || secs.isEmpty()) {
@@ -2465,6 +2467,8 @@ public class MainActivity extends Activity {
         examplesPath.setText(applyMarkup(path));
         examplesInner.removeAllViews();
         examplesInner.addView(examplesBackBtn, wrapM());
+        examplesInner.addView(examplesPath, wrap());
+        examplesInner.addView(examplesTitle, wrap());
         int no = 1;
         for (Example e : exs) {
             LinearLayout q = new LinearLayout(this);
