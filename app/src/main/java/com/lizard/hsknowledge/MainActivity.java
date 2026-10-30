@@ -1711,7 +1711,7 @@ public class MainActivity extends Activity {
         detailTitle.setPadding(0, dp(2), 0, dp(6));
         detailTitle.setMaxLines(3);
 
-        detailScroll = new OverScrollScrollView(this);
+        detailScroll = new ScrollView(this);
         detailScroll.setFillViewport(true);
         roundPadScroll(detailScroll);
         detailInner = new LinearLayout(this);
@@ -1740,7 +1740,7 @@ public class MainActivity extends Activity {
         examplesTitle.setMaxLines(3);
         // examplesTitle 随内容滚动，在 openExamples 里加进 examplesInner
 
-        examplesScroll = new OverScrollScrollView(this);
+        examplesScroll = new ScrollView(this);
         examplesScroll.setFillViewport(true);
         roundPadScroll(examplesScroll);
         examplesInner = new LinearLayout(this);
@@ -1753,7 +1753,7 @@ public class MainActivity extends Activity {
         settingsBackBtn = makeBack("‹ 返回", new View.OnClickListener() {
             public void onClick(View v) { showScreen(S_SUBJECT); }
         });
-        settingsScroll = new OverScrollScrollView(this);
+        settingsScroll = new ScrollView(this);
         settingsScroll.setFillViewport(true);
         roundPadScroll(settingsScroll);
         settingsInner = new LinearLayout(this);
@@ -1846,18 +1846,27 @@ public class MainActivity extends Activity {
     }
 
     private ListView makeList() {
-        OverScrollListView lv = new OverScrollListView(this);
+        ListView lv = new ListView(this);
         lv.setDivider(new ColorDrawable(Color.TRANSPARENT));
         lv.setDividerHeight(dp(6));
         lv.setVerticalScrollBarEnabled(false);
-        // 关键：禁用 ListView 默认 selector。默认 selector 是系统矩形涟漪，点击时会叠加在 item 上，
-        // 把 item 自己的圆角涟漪盖成正方形溢出。设置成透明后，只有 item 的 background（圆角涟漪）生效。
+        // 禁用 ListView 默认 selector（系统矩形涟漪会盖掉 item 的圆角涟漪）
         lv.setSelector(new ColorDrawable(Color.TRANSPARENT));
-        lv.setPadding(0, 0, 0, m.roundSafe);
-        lv.setClipToPadding(false);
-        // 不做滚动缩放：setScale 只缩放绘制、布局位置不变，滚动时文字会跟着跳、不跟手，
-        // 用户反馈「上下滑动时 UI 和文字偏移」。保持原始大小、位置，滚动才完美跟随手指。
+        // 空白占位：圆屏在头部/尾部各放一段透明占位，让首尾内容能滑到屏幕中间；
+        // 默认进入时由 showScreen 定位跳过顶部占位（setSelectionFromTop(1,0)）
+        if (m.round) {
+            lv.addHeaderView(makeListSpacer(), null, false);
+            lv.addFooterView(makeListSpacer(), null, false);
+        }
         return lv;
+    }
+
+    /** 列表空白占位项（圆屏）：透明 View，高 roundSafe。 */
+    private View makeListSpacer() {
+        View v = new View(this);
+        v.setLayoutParams(new AbsListView.LayoutParams(
+                AbsListView.LayoutParams.MATCH_PARENT, m.roundSafe));
+        return v;
     }
 
     private TextView makeBack(String label, View.OnClickListener onClick) {
@@ -3602,8 +3611,6 @@ public class MainActivity extends Activity {
 
     // ================= 页面切换（带动画） =================
     private void showScreen(int s) {
-        // 先复位离开页面的过滚偏移，避免偏移残留污染位置保存、下次进入的定位错乱
-        resetOverScroll(screen);
         // 记下离开页面的滚动位置，回来时原样恢复（避免淡入后跳回顶部）
         ListView leaving = listOf(screen);
         if (leaving != null && leaving.getChildCount() > 0) {
@@ -3688,6 +3695,9 @@ public class MainActivity extends Activity {
             try {
                 enter.setSelectionFromTop(savedPos[s], savedTop[s]);
             } catch (Exception ignored) { }
+        } else if (enter != null && m.round && !hasSaved[s]) {
+            // 首次进入：跳过顶部空白占位，让第一个内容贴最顶端
+            enter.setSelectionFromTop(1, 0);
         }
     }
 
@@ -3702,28 +3712,6 @@ public class MainActivity extends Activity {
             case S_TODAY: return todayList;
             default: return null;
         }
-    }
-
-    /** 页面级 ScrollView 与屏幕枚举的对应（用于切换页面前复位过滚）。 */
-    private ScrollView scrollOf(int s) {
-        switch (s) {
-            case S_DETAIL: return detailScroll;
-            case S_EXAMPLES: return examplesScroll;
-            case S_SETTINGS: return settingsScroll;
-            case S_ABOUT: return aboutScroll;
-            case S_CHANGELOG: return changelogScroll;
-            case S_FEEDBACK: return feedbackScroll;
-            case S_PROFILE: return profScroll;
-            default: return null;
-        }
-    }
-
-    /** 复位某个页面的过滚偏移（列表 + 正文滚动容器）。 */
-    private void resetOverScroll(int s) {
-        ListView lv = listOf(s);
-        if (lv instanceof OverScrollListView) ((OverScrollListView) lv).reset();
-        ScrollView sv = scrollOf(s);
-        if (sv instanceof OverScrollScrollView) ((OverScrollScrollView) sv).reset();
     }
 
     @Override
@@ -4028,7 +4016,7 @@ public class MainActivity extends Activity {
 
 
     private void buildAboutScreen() {
-        aboutScroll = new OverScrollScrollView(this);
+        aboutScroll = new ScrollView(this);
         aboutScroll.setVerticalScrollBarEnabled(false);
         roundPadScroll(aboutScroll);
         aboutInner = new LinearLayout(this);
@@ -4873,7 +4861,7 @@ public class MainActivity extends Activity {
     private LinearLayout pvCard;
 
     private void buildDisplayScreen() {
-        ScrollView sv = new OverScrollScrollView(this);
+        ScrollView sv = new ScrollView(this);
         sv.setVerticalScrollBarEnabled(false);
         roundPadScroll(sv);
         displayInner = new LinearLayout(this);
@@ -5189,7 +5177,7 @@ public class MainActivity extends Activity {
 
     // ================= 更新日志 =================
     private void buildChangelogScreen() {
-        changelogScroll = new OverScrollScrollView(this);
+        changelogScroll = new ScrollView(this);
         changelogScroll.setVerticalScrollBarEnabled(false);
         roundPadScroll(changelogScroll);
         changelogInner = new LinearLayout(this);
@@ -5296,7 +5284,7 @@ public class MainActivity extends Activity {
     }
 
     private void buildFeedbackScreen() {
-        feedbackScroll = new OverScrollScrollView(this);
+        feedbackScroll = new ScrollView(this);
         feedbackScroll.setVerticalScrollBarEnabled(false);
         roundPadScroll(feedbackScroll);
         feedbackInner = new LinearLayout(this);
@@ -6692,7 +6680,7 @@ public class MainActivity extends Activity {
     // ================= 个人主页 =================
 
     private void buildProfileScreen() {
-        profScroll = new OverScrollScrollView(this);
+        profScroll = new ScrollView(this);
         profScroll.setVerticalScrollBarEnabled(false);
         roundPadScroll(profScroll);
         profInner = new LinearLayout(this);
