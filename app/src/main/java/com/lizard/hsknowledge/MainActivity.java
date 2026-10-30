@@ -1842,7 +1842,7 @@ public class MainActivity extends Activity {
         if (m == null || !m.round) return;
         sc.setClipToPadding(false);
         // 只在底部留安全边距保护最后一项；顶部通常已有标题/返回键占位，留了会和内容之间出现长空
-        sc.setPadding(0, m.roundSafe, 0, m.roundSafe);
+        sc.setPadding(0, 0, 0, m.roundSafe);
     }
 
     private ListView makeList() {
@@ -1853,7 +1853,7 @@ public class MainActivity extends Activity {
         // 关键：禁用 ListView 默认 selector。默认 selector 是系统矩形涟漪，点击时会叠加在 item 上，
         // 把 item 自己的圆角涟漪盖成正方形溢出。设置成透明后，只有 item 的 background（圆角涟漪）生效。
         lv.setSelector(new ColorDrawable(Color.TRANSPARENT));
-        lv.setPadding(0, m.roundSafe, 0, m.roundSafe);
+        lv.setPadding(0, 0, 0, m.roundSafe);
         lv.setClipToPadding(false);
         // 关掉 ListView 的滚动/动画缓存：快速滑动时缓存位图和实时文字不同步，会出现「按钮和字偏移」
         lv.setScrollingCacheEnabled(false);
