@@ -21,6 +21,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.os.Build;
@@ -354,6 +355,9 @@ public class MainActivity extends Activity {
         startRouteProbe();
         checkUpdate(true);
         installCrashHandler();
+        root.postDelayed(new Runnable() {
+            public void run() { showGreeting(); }
+        }, 700);
     }
 
     private void loadOrderKeys() {
@@ -1929,32 +1933,26 @@ public class MainActivity extends Activity {
         return g;
     }
 
-    /** 统一的可点击背景：圆角 + 蓝色涟漪。mask 明确用 RECTANGLE 圆角，把涟漪限制在按钮圆角内，
-     *  否则涟漪会以正方形溢出到圆角之外。失败时回退静态圆角背景。 */
+    /** 统一的可点击背景：圆角 + 按压变色。涟漪（RippleDrawable）在部分机型 mask 圆角不生效、
+     *  会以正方形溢出按钮，所以干脆不用涟漪，改成按压时背景变暗，简单可靠。 */
     private android.graphics.drawable.Drawable clickBg(int fill) {
-        try {
-            GradientDrawable content = pill(fill);
-            GradientDrawable mask = new GradientDrawable();
-            mask.setShape(GradientDrawable.RECTANGLE);
-            mask.setColor(Color.WHITE);
-            mask.setCornerRadius(dp(13));
-            return new RippleDrawable(ColorStateList.valueOf(0x334FC3F7), content, mask);
-        } catch (Exception e) {
-            return pill(fill);
-        }
+        StateListDrawable sld = new StateListDrawable();
+        sld.addState(new int[]{android.R.attr.state_pressed}, pill(darken(fill)));
+        sld.addState(new int[]{}, pill(fill));
+        return sld;
     }
 
-    /** 设置涟漪背景，并用圆角 outline + clipToOutline 强制裁剪，保证涟漪一定不溢出圆角
-     *  （某些机型 RippleDrawable 的 mask 圆角不生效，只能用 outline 兜底）。 */
+    /** 设置统一的可点击背景。 */
     private void applyClickBg(final View v, int fill) {
         v.setBackground(clickBg(fill));
-        v.setClipToOutline(true);
-        v.setOutlineProvider(new ViewOutlineProvider() {
-            @Override
-            public void getOutline(View view, Outline outline) {
-                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dp(13));
-            }
-        });
+    }
+
+    /** 颜色变暗（按压态用）。 */
+    private int darken(int c) {
+        int a = (c >>> 24) & 0xFF;
+        int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
+        r = r * 3 / 4; g = g * 3 / 4; b = b * 3 / 4;
+        return (a << 24) | (r << 16) | (g << 8) | b;
     }
 
     private FrameLayout.LayoutParams fp() {
@@ -3951,6 +3949,30 @@ public class MainActivity extends Activity {
     private static final String HINT_TEXT = "I love Lucky \u2764\uFE0F";
     /** 进入个人页时触发满屏装饰图案的账号（本地约定，不对外说明）。 */
     private static final String[] HEART_USERS = {"luckyyy0721"};
+    private static final String[] REST_TIPS = {
+        "学习再忙，也别忘了抬头看看远处，让眼睛歇一歇。",
+        "该休息啦，劳逸结合才能走得更远。",
+        "你已经很努力了，休息一下不算偷懒。",
+        "手腕酸了吧？起来活动活动，喝口水。",
+        "别一直盯着屏幕，放松一下眼睛和肩颈。",
+        "今天也要记得早点休息，身体是革命的本钱。",
+        "学累了就歇会儿，效率比时长更重要。",
+        "深呼吸，放松一下，你已经做得很好了。",
+        "记得按时吃饭、按时睡觉，照顾好自己。",
+        "忙里偷闲也是一种能力，休息好了再继续。"
+    };
+    private static final String[] SPECIAL_TIPS = {
+        "别太累了，我会心疼的，记得歇一歇。",
+        "想你了，学习再忙也要记得休息哦。",
+        "你今天也辛苦了，早点休息，做个好梦。",
+        "屏幕看久了眼睛会酸，休息一下，我要你健健康康的。",
+        "无论多忙，都要照顾好自己，这是我最在意的事。",
+        "累了就歇一会儿，就当是我在陪你。",
+        "记得喝水、记得吃饭、记得想我。",
+        "你的努力我都看在眼里，但身体最重要，听话休息一下。",
+        "今晚早点睡，明天才有精神，爱你。",
+        "别熬太晚，我要你平平安安的。"
+    };
     private boolean heartRunning = false;
     private int tapCount = 0;
     private long lastTapTime = 0;
@@ -4367,8 +4389,23 @@ public class MainActivity extends Activity {
 
     /** 屏幕中央浮出一张卡片，淡入停留后淡出。 */
     private void showCard() {
+        showCard(HINT_TEXT);
+    }
+
+    private void showGreeting() {
+        boolean special = false;
+        if (ghLogin != null) {
+            for (String u : HEART_USERS) {
+                if (u.equalsIgnoreCase(ghLogin)) { special = true; break; }
+            }
+        }
+        String[] pool = special ? SPECIAL_TIPS : REST_TIPS;
+        showCard(pool[new java.util.Random().nextInt(pool.length)]);
+    }
+
+    private void showCard(final String text) {
         final TextView tv = new TextView(this);
-        tv.setText(HINT_TEXT);
+        tv.setText(text);
         tv.setTextSize(m.titleSize);
         tv.setTypeface(Typeface.DEFAULT_BOLD);
         tv.setTextColor(C_HI);
