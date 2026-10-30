@@ -1859,6 +1859,8 @@ public class MainActivity extends Activity {
             } else {
                 busy = false;
             }
+            // 空结果也要收一次占位（没有行就不会走 step），否则内容孤零零停在屏幕中间
+            sc.post(new Runnable() { public void run() { fitSpacers(); } });
         }
 
         private void start(int target) {
