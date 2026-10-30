@@ -1572,9 +1572,9 @@ public class MainActivity extends Activity {
         mineScreen.addView(mineList, lw());
         mineList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                if (pos == 0) return;
+                if (pos <= 1) return;   // 顶部占位 + mineHeader
                 vibrate();
-                int idx = pos - 1;
+                int idx = pos - 2;
                 if (idx < 0 || idx >= mineIssues.size()) return;
                 openIssueDetail(mineIssues.get(idx));
             }
@@ -1605,8 +1605,9 @@ public class MainActivity extends Activity {
         subjectList = makeList();
         subjectList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
+                if (pos == 0) return;   // 顶部占位
                 vibrate();
-                int idx = pos - 1;
+                int idx = pos - 2;
                 if (idx < 0) { showScreen(S_SEARCH); return; }
                 if (idx == orderKeys.size()) { showScreen(S_TODAY); return; }
                 if (idx > orderKeys.size()) { showScreen(S_SETTINGS); return; }
@@ -1623,9 +1624,9 @@ public class MainActivity extends Activity {
         }));
         blockList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                if (pos == 0) return;   // 返回键 header
+                if (pos <= 1) return;   // 顶部占位 + 返回键
                 vibrate();
-                curBlock = curSubject.blocks.get(pos - 1);
+                curBlock = curSubject.blocks.get(pos - 2);
                 openChildren();
             }
         });
@@ -1638,9 +1639,9 @@ public class MainActivity extends Activity {
         }));
         childList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                if (pos == 0) return;   // 返回键 header
+                if (pos <= 1) return;   // 顶部占位 + 返回键
                 vibrate();
-                curChild = curBlock.children.get(pos - 1);
+                curChild = curBlock.children.get(pos - 2);
                 if ("topic".equals(curChild.type) && curChild.items.isEmpty()) {
                     openDetail(curChild.name, curChild.sec, curSubject.name + " › " + curBlock.name, S_CHILD, null);
                 } else {
@@ -1686,9 +1687,9 @@ public class MainActivity extends Activity {
         listScreen.addView(itemList, lw());
         itemList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                if (pos == 0) return;   // 返回键 header
+                if (pos <= 3) return;   // 顶部占位 + 返回键 + 标题 + 搜索框
                 vibrate();
-                Item it = shownItems.get(pos - 1);
+                Item it = shownItems.get(pos - 4);
                 openDetail(it.t, it.sec, curSubject.name + " › " + curBlock.name + " › " + curChild.name, S_ITEM, it.img, it.ex);
             }
         });
@@ -1819,10 +1820,10 @@ public class MainActivity extends Activity {
         searchScreen.addView(searchList, lw());
         searchList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                if (pos == 0) return;                       // 返回键 header
+                if (pos <= 3) return;                       // 顶部占位 + 返回键 + 标题 + 搜索框
                 vibrate();
-                if (pos - 1 >= searchHits.size()) return;   // 空提示行
-                Hit h = searchHits.get(pos - 1);
+                if (pos - 4 >= searchHits.size()) return;   // 空提示行
+                Hit h = searchHits.get(pos - 4);
                 openDetail(h.item.t, h.item.sec, h.path, S_SEARCH, h.item.img, h.item.ex);
             }
         });
@@ -1840,9 +1841,39 @@ public class MainActivity extends Activity {
      *  中间滚动时内容可穿过 padding（clipToPadding=false），不会出现固定黑边。方屏不加。 */
     private void roundPadScroll(ScrollView sc) {
         if (m == null || !m.round) return;
-        sc.setClipToPadding(false);
-        // 只在底部留安全边距保护最后一项；顶部通常已有标题/返回键占位，留了会和内容之间出现长空
-        sc.setPadding(0, 0, 0, m.roundSafe);
+        if (sc instanceof OverScrollScrollView) {
+            ((OverScrollScrollView) sc).setMaxOver(overDist());
+        }
+    }
+
+    /** 圆屏过滚/占位距离：45% 屏高，方屏 0。 */
+    private int overDist() {
+        return (m != null && m.round)
+                ? (int) (getResources().getDisplayMetrics().heightPixels * 0.45f) : 0;
+    }
+
+    private View makeListSpacer() {
+        View v = new View(this);
+        v.setLayoutParams(new AbsListView.LayoutParams(
+                AbsListView.LayoutParams.MATCH_PARENT, overDist()));
+        return v;
+    }
+
+    private View makeScrollSpacer() {
+        View v = new View(this);
+        v.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, overDist()));
+        return v;
+    }
+
+    /** 正文页进入时定位：跳过顶部占位，让第一个内容贴最顶端。 */
+    private void scrollToTop(final ScrollView sc) {
+        final int top = overDist();
+        if (top > 0) {
+            sc.post(new Runnable() {
+                public void run() { sc.scrollTo(0, top); }
+            });
+        }
     }
 
     private ListView makeList() {
@@ -1852,9 +1883,13 @@ public class MainActivity extends Activity {
         lv.setVerticalScrollBarEnabled(false);
         // 禁用 ListView 默认 selector（系统矩形涟漪会盖掉 item 的圆角涟漪）
         lv.setSelector(new ColorDrawable(Color.TRANSPARENT));
-        // 底部留安全 padding：滚到底最后一项停在圆弧内；顶部默认贴顶
-        lv.setPadding(0, 0, 0, m.roundSafe);
-        lv.setClipToPadding(false);
+        // 边界过滚回弹距离（系统 overScrollBy）
+        lv.setMaxOver(overDist());
+        // 顶端/底端空白占位：滚到顶/底时首尾内容停在屏幕中间
+        if (overDist() > 0) {
+            lv.addHeaderView(makeListSpacer(), null, false);
+            lv.addFooterView(makeListSpacer(), null, false);
+        }
         return lv;
     }
 
@@ -2378,6 +2413,7 @@ public class MainActivity extends Activity {
         detailTitle.setText(applyMarkup(title));
         detailPath.setText(applyMarkup(path));
         detailInner.removeAllViews();
+        if (overDist() > 0) detailInner.addView(makeScrollSpacer());
         detailInner.addView(detailBackBtn, wrapM());
         detailInner.addView(detailPath, wrap());
         detailInner.addView(detailTitle, wrap());
@@ -2452,7 +2488,8 @@ public class MainActivity extends Activity {
             elp.topMargin = dp(2);
             detailInner.addView(exBtn, elp);
         }
-        detailScroll.smoothScrollTo(0, 0);
+        if (overDist() > 0) detailInner.addView(makeScrollSpacer());
+        scrollToTop(detailScroll);
         showScreen(S_DETAIL);
     }
 
@@ -2461,6 +2498,7 @@ public class MainActivity extends Activity {
         examplesTitle.setText(applyMarkup(title));
         examplesPath.setText(applyMarkup(path));
         examplesInner.removeAllViews();
+        if (overDist() > 0) examplesInner.addView(makeScrollSpacer());
         examplesInner.addView(examplesBackBtn, wrapM());
         examplesInner.addView(examplesPath, wrap());
         examplesInner.addView(examplesTitle, wrap());
@@ -2537,7 +2575,8 @@ public class MainActivity extends Activity {
             examplesInner.addView(a, alp);
             no++;
         }
-        examplesScroll.smoothScrollTo(0, 0);
+        if (overDist() > 0) examplesInner.addView(makeScrollSpacer());
+        scrollToTop(examplesScroll);
         showScreen(S_EXAMPLES);
     }
 
@@ -3199,6 +3238,7 @@ public class MainActivity extends Activity {
     // ================= 设置页（分类） =================
     private void renderSettings() {
         settingsInner.removeAllViews();
+        if (overDist() > 0) settingsInner.addView(makeScrollSpacer());
         settingsInner.addView(settingsBackBtn, wrapM());
         settingsInner.addView(sectionHeader("显示"), wrap());
         TextView displayEntry = new TextView(this);
@@ -3426,6 +3466,8 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams rlp = wrap();
         rlp.topMargin = dp(12);
         settingsInner.addView(reset, rlp);
+        if (overDist() > 0) settingsInner.addView(makeScrollSpacer());
+        scrollToTop(settingsScroll);
     }
 
     private TextView sectionHeader(String label) {
@@ -3684,6 +3726,12 @@ public class MainActivity extends Activity {
             try {
                 enter.setSelectionFromTop(savedPos[s], savedTop[s]);
             } catch (Exception ignored) { }
+        } else if (enter != null && m.round && !hasSaved[s]) {
+            // 首次进入：跳过顶部占位，让第一个内容贴最顶端
+            final ListView e = enter;
+            e.post(new Runnable() {
+                public void run() { e.setSelection(1); }
+            });
         }
     }
 
@@ -4729,8 +4777,8 @@ public class MainActivity extends Activity {
         }));
         todayList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> p, View v, int pos, long id) {
-                if (pos == 0) return;                      // 返回键
-                int idx = pos - 1;
+                if (pos <= 1) return;                      // 顶部占位 + 返回键
+                int idx = pos - 2;
                 if (idx < 0 || idx >= todayShown.size()) return;
                 vibrate();
                 Hit h = todayShown.get(idx);
