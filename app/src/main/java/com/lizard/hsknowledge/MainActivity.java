@@ -3197,20 +3197,6 @@ public class MainActivity extends Activity {
     private void renderSettings() {
         settingsInner.removeAllViews();
         settingsInner.addView(settingsBackBtn, wrapM());
-        TextView profEntry = new TextView(this);
-        profEntry.setText("个人主页");
-        profEntry.setTextSize(m.backSize);
-        profEntry.setTypeface(Typeface.DEFAULT_BOLD);
-        profEntry.setTextColor(C_PRIMARY);
-        profEntry.setGravity(Gravity.CENTER);
-        profEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
-        profEntry.setBackgroundDrawable(pill(C_PILL));
-        applyIcon(profEntry, "ic_person", C_PRIMARY, 15);
-        profEntry.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_PROFILE); }
-        });
-        settingsInner.addView(profEntry, wrap());
-
         settingsInner.addView(sectionHeader("显示"), wrap());
         TextView displayEntry = new TextView(this);
         displayEntry.setText("显示调节");
@@ -3238,13 +3224,6 @@ public class MainActivity extends Activity {
         displayHint.setPadding(dp(4), dp(3), dp(4), dp(2));
         settingsInner.addView(displayHint, wrap());
 
-        settingsInner.addView(toggleRow("右滑返回", swipeBack, new View.OnClickListener() {
-            public void onClick(View v) {
-                swipeBack = !swipeBack;
-                prefs.edit().putBoolean("swipe_back", swipeBack).apply();
-                renderSettings();
-            }
-        }), wrap());
         settingsInner.addView(toggleRow("震动反馈", haptic, new View.OnClickListener() {
             public void onClick(View v) {
                 haptic = !haptic;
@@ -3260,6 +3239,13 @@ public class MainActivity extends Activity {
         hapticHint.setPadding(dp(4), dp(2), dp(4), dp(4));
         settingsInner.addView(hapticHint, wrap());
 
+        settingsInner.addView(toggleRow("右滑返回", swipeBack, new View.OnClickListener() {
+            public void onClick(View v) {
+                swipeBack = !swipeBack;
+                prefs.edit().putBoolean("swipe_back", swipeBack).apply();
+                renderSettings();
+            }
+        }), wrap());
         TextView swipeHint = new TextView(this);
         swipeHint.setText("从屏幕左侧 1/4 内向右拖动：当前页跟手滑出、露出上一页预览，滑到一半以上松手即返回，不够则弹回。查看大图时不生效，需点「‹ 关闭」。");
         swipeHint.setTextSize(m.subtitleSize - 2f);
@@ -3268,7 +3254,7 @@ public class MainActivity extends Activity {
         swipeHint.setPadding(dp(4), dp(2), dp(4), dp(4));
         settingsInner.addView(swipeHint, wrap());
 
-        settingsInner.addView(sectionHeader("数据管理"), wrap());
+        settingsInner.addView(sectionHeader("常用"), wrap());
         TextView upd = new TextView(this);
         upd.setText("检查更新");
         upd.setTextSize(m.backSize);
@@ -3291,6 +3277,74 @@ public class MainActivity extends Activity {
         updHint.setGravity(Gravity.CENTER);
         updHint.setPadding(dp(4), dp(3), dp(4), dp(2));
         settingsInner.addView(updHint, wrap());
+        TextView fbEntry = new TextView(this);
+        fbEntry.setText("反馈与建议");
+        fbEntry.setTextSize(m.backSize);
+        fbEntry.setTextColor(C_PRIMARY);
+        fbEntry.setGravity(Gravity.CENTER);
+        fbEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
+        fbEntry.setBackgroundDrawable(pill(C_PILL));
+        applyIcon(fbEntry, "ic_feedback", C_PRIMARY, 15);
+        fbEntry.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { showScreen(S_FEEDBACK); }
+        });
+        LinearLayout.LayoutParams fbLp = wrap();
+        fbLp.topMargin = dp(6);
+        settingsInner.addView(fbEntry, fbLp);
+        TextView fbHint = new TextView(this);
+        fbHint.setText("反馈会以 Issue 形式提交到项目的 GitHub 仓库，需先在手机浏览器完成一次登录授权。");
+        fbHint.setTextSize(m.subtitleSize - 2f);
+        fbHint.setTextColor(C_SUB);
+        fbHint.setGravity(Gravity.CENTER);
+        fbHint.setPadding(dp(4), dp(3), dp(4), dp(2));
+        settingsInner.addView(fbHint, wrap());
+
+        settingsInner.addView(sectionHeader("其他"), wrap());
+        TextView profEntry = new TextView(this);
+        profEntry.setText("个人主页");
+        profEntry.setTextSize(m.backSize);
+        profEntry.setTypeface(Typeface.DEFAULT_BOLD);
+        profEntry.setTextColor(C_PRIMARY);
+        profEntry.setGravity(Gravity.CENTER);
+        profEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
+        profEntry.setBackgroundDrawable(pill(C_PILL));
+        applyIcon(profEntry, "ic_person", C_PRIMARY, 15);
+        profEntry.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { showScreen(S_PROFILE); }
+        });
+        settingsInner.addView(profEntry, wrap());
+
+        TextView orderHint = new TextView(this);
+        orderHint.setText("主页科目顺序（点 ↑↓ 调整，自动保存）");
+        orderHint.setTextSize(m.subtitleSize - 2f);
+        orderHint.setTextColor(C_SUB);
+        orderHint.setGravity(Gravity.CENTER);
+        orderHint.setPadding(dp(4), dp(2), dp(4), dp(4));
+        settingsInner.addView(orderHint, wrap());
+        for (int idx = 0; idx < orderKeys.size(); idx++) {
+            settingsInner.addView(orderRow(idx), wrap());
+        }
+
+        // 记录日志开关：点击后由 toggleRow 自己震动，这里只处理状态切换
+        settingsInner.addView(toggleRow("记录日志", logEnabled, new View.OnClickListener() {
+            public void onClick(View v) {
+                if (logEnabled) {
+                    stopLogging();
+                    toast("已停止记录日志");
+                    renderSettings();
+                } else {
+                    showLogEnableDialog();
+                }
+            }
+        }), wrap());
+        TextView logHint = new TextView(this);
+        logHint.setText("平时不记录；开启后把运行日志存在本机，提交反馈时可附带，方便排查问题。");
+        logHint.setTextSize(m.subtitleSize - 2f);
+        logHint.setTextColor(C_SUB);
+        logHint.setGravity(Gravity.CENTER);
+        logHint.setPadding(dp(4), dp(3), dp(4), dp(2));
+        settingsInner.addView(logHint, wrap());
+
         TextView routeEntry = new TextView(this);
         routeEntry.setText("重新连接服务器");
         routeEntry.setTextSize(m.backSize);
@@ -3320,59 +3374,6 @@ public class MainActivity extends Activity {
         routeHint.setPadding(dp(4), dp(3), dp(4), dp(2));
         settingsInner.addView(routeHint, wrap());
         refreshRouteHint();
-
-        // 记录日志开关：点击后由 toggleRow 自己震动，这里只处理状态切换
-        settingsInner.addView(toggleRow("记录日志", logEnabled, new View.OnClickListener() {
-            public void onClick(View v) {
-                if (logEnabled) {
-                    stopLogging();
-                    toast("已停止记录日志");
-                    renderSettings();
-                } else {
-                    showLogEnableDialog();
-                }
-            }
-        }), wrap());
-        TextView logHint = new TextView(this);
-        logHint.setText("平时不记录；开启后把运行日志存在本机，提交反馈时可附带，方便排查问题。");
-        logHint.setTextSize(m.subtitleSize - 2f);
-        logHint.setTextColor(C_SUB);
-        logHint.setGravity(Gravity.CENTER);
-        logHint.setPadding(dp(4), dp(3), dp(4), dp(2));
-        settingsInner.addView(logHint, wrap());
-
-        TextView fbEntry = new TextView(this);
-        fbEntry.setText("反馈与建议");
-        fbEntry.setTextSize(m.backSize);
-        fbEntry.setTextColor(C_PRIMARY);
-        fbEntry.setGravity(Gravity.CENTER);
-        fbEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
-        fbEntry.setBackgroundDrawable(pill(C_PILL));
-        applyIcon(fbEntry, "ic_feedback", C_PRIMARY, 15);
-        fbEntry.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_FEEDBACK); }
-        });
-        LinearLayout.LayoutParams fbLp = wrap();
-        fbLp.topMargin = dp(6);
-        settingsInner.addView(fbEntry, fbLp);
-        TextView fbHint = new TextView(this);
-        fbHint.setText("反馈会以 Issue 形式提交到项目的 GitHub 仓库，需先在手机浏览器完成一次登录授权。");
-        fbHint.setTextSize(m.subtitleSize - 2f);
-        fbHint.setTextColor(C_SUB);
-        fbHint.setGravity(Gravity.CENTER);
-        fbHint.setPadding(dp(4), dp(3), dp(4), dp(2));
-        settingsInner.addView(fbHint, wrap());
-
-        TextView orderHint = new TextView(this);
-        orderHint.setText("主页科目顺序（点 ↑↓ 调整，自动保存）");
-        orderHint.setTextSize(m.subtitleSize - 2f);
-        orderHint.setTextColor(C_SUB);
-        orderHint.setGravity(Gravity.CENTER);
-        orderHint.setPadding(dp(4), dp(2), dp(4), dp(4));
-        settingsInner.addView(orderHint, wrap());
-        for (int idx = 0; idx < orderKeys.size(); idx++) {
-            settingsInner.addView(orderRow(idx), wrap());
-        }
 
         settingsInner.addView(sectionHeader("关于"), wrap());
         TextView aboutEntry = new TextView(this);
