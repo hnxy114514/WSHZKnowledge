@@ -700,8 +700,17 @@ public class MainActivity extends Activity {
                                 toast("更新已下载，回到应用后自动安装");
                                 return;
                             }
-                            // 权限在 startUpdate 开头已确认过，这里前台直接弹安装器，别再拦一道
-                            installApk();
+                            // 刚 rename 完 APK，慢的手表存储可能还没「反应过来」，稍等片刻再装，
+                            // 否则安装器可能读到不完整/不存在的文件
+                            root.postDelayed(new Runnable() {
+                                public void run() {
+                                    if (!foreground) {
+                                        pendingInstall = true;
+                                        return;
+                                    }
+                                    installApk();
+                                }
+                            }, 800);
                         }
                     });
                 } catch (final Exception e) {
