@@ -568,7 +568,7 @@ public class MainActivity extends Activity {
         go.setTextColor(C_PRIMARY);
         go.setGravity(Gravity.CENTER);
         go.setPadding(dp(8), dp(10), dp(8), dp(10));
-        go.setBackgroundDrawable(pill(0xFF14384A));
+        go.setBackground(clickBg(0xFF14384A));
         go.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 vibrate();
@@ -694,19 +694,13 @@ public class MainActivity extends Activity {
                     runOnUiThread(new Runnable() {
                         public void run() {
                             progressHide();
-                            pendingInstall = true;
-                            if (Build.VERSION.SDK_INT >= 26
-                                    && !getPackageManager().canRequestPackageInstalls()) {
-                                requestInstallPermission();
-                                toast("开启「允许安装未知应用」后会自动继续安装");
-                                return;
-                            }
                             if (!foreground) {
-                                // 应用不在前台时系统会静默拦截启动安装器，等回来后自动弹
+                                // 应用不在前台时系统会静默拦截启动安装器，等回来再弹
+                                pendingInstall = true;
                                 toast("更新已下载，回到应用后自动安装");
                                 return;
                             }
-                            pendingInstall = false;
+                            // 权限在 startUpdate 开头已确认过，这里前台直接弹安装器，别再拦一道
                             installApk();
                         }
                     });
@@ -1432,7 +1426,7 @@ public class MainActivity extends Activity {
         btn.setTypeface(Typeface.DEFAULT_BOLD);
         btn.setGravity(Gravity.CENTER);
         btn.setPadding(dp(10), dp(11), dp(10), dp(11));
-        btn.setBackgroundDrawable(pill(0xFF14384A));
+        btn.setBackground(clickBg(0xFF14384A));
         btn.setTextColor(C_SUB);
         btn.setEnabled(false);
         box.addView(btn, wrap());
@@ -1784,7 +1778,7 @@ public class MainActivity extends Activity {
         clearBtn.setTypeface(Typeface.DEFAULT_BOLD);
         clearBtn.setTextColor(C_SUB);
         clearBtn.setGravity(Gravity.CENTER);
-        clearBtn.setBackgroundDrawable(pill(C_PILL));
+        clearBtn.setBackground(clickBg(C_PILL));
         LinearLayout.LayoutParams clrp = new LinearLayout.LayoutParams(dp(40), dp(40));
         clrp.leftMargin = dp(6);
         clearBtn.setOnClickListener(new View.OnClickListener() {
@@ -1842,6 +1836,9 @@ public class MainActivity extends Activity {
         lv.setVerticalScrollBarEnabled(false);
         lv.setPadding(0, dp(4) + m.roundSafe, 0, dp(4) + m.roundSafe);
         lv.setClipToPadding(false);
+        // 关掉 ListView 的滚动/动画缓存：快速滑动时缓存位图和实时文字不同步，会出现「按钮和字偏移」
+        lv.setScrollingCacheEnabled(false);
+        lv.setAnimationCacheEnabled(false);
         // 不做滚动缩放：setScale 只缩放绘制、布局位置不变，滚动时文字会跟着跳、不跟手，
         // 用户反馈「上下滑动时 UI 和文字偏移」。保持原始大小、位置，滚动才完美跟随手指。
         return lv;
@@ -1855,7 +1852,7 @@ public class MainActivity extends Activity {
         b.setTextColor(C_PRIMARY);
         b.setGravity(Gravity.CENTER);
         b.setPadding(dp(10), dp(8), dp(10), dp(8));
-        b.setBackgroundDrawable(pill(C_PILL));
+        b.setBackground(clickBg(C_PILL));
         final View.OnClickListener user = onClick;
         b.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
@@ -1898,15 +1895,7 @@ public class MainActivity extends Activity {
                 TextView tv = (convertView instanceof TextView) ? (TextView) convertView : null;
                 if (tv == null) {
                     tv = new TextView(MainActivity.this);
-                    GradientDrawable content = pill(C_PILL);
-                    GradientDrawable mask = new GradientDrawable();
-                    mask.setColor(Color.WHITE);
-                    mask.setCornerRadius(dp(13));
-                    try {
-                        tv.setBackground(new RippleDrawable(ColorStateList.valueOf(0x334FC3F7), content, mask));
-                    } catch (Exception ignored) {
-                        tv.setBackgroundDrawable(content);
-                    }
+                    tv.setBackground(clickBg(C_PILL));
                 }
                 tv.setText(applyMarkup(getItem(position)));
                 tv.setTextSize(lsSp());
@@ -1927,6 +1916,21 @@ public class MainActivity extends Activity {
         g.setColor(fill);
         g.setCornerRadius(dp(13));
         return g;
+    }
+
+    /** 统一的可点击背景：圆角 + 蓝色涟漪。mask 明确用 RECTANGLE 圆角，把涟漪限制在按钮圆角内，
+     *  否则涟漪会以正方形溢出到圆角之外。失败时回退静态圆角背景。 */
+    private android.graphics.drawable.Drawable clickBg(int fill) {
+        try {
+            GradientDrawable content = pill(fill);
+            GradientDrawable mask = new GradientDrawable();
+            mask.setShape(GradientDrawable.RECTANGLE);
+            mask.setColor(Color.WHITE);
+            mask.setCornerRadius(dp(13));
+            return new RippleDrawable(ColorStateList.valueOf(0x334FC3F7), content, mask);
+        } catch (Exception e) {
+            return pill(fill);
+        }
     }
 
     private FrameLayout.LayoutParams fp() {
@@ -2005,15 +2009,7 @@ public class MainActivity extends Activity {
                     row = new LinearLayout(MainActivity.this);
                     row.setOrientation(LinearLayout.HORIZONTAL);
                     row.setGravity(Gravity.CENTER_VERTICAL);
-                    GradientDrawable content = pill(C_PILL);
-                    GradientDrawable mask = new GradientDrawable();
-                    mask.setColor(Color.WHITE);
-                    mask.setCornerRadius(dp(13));
-                    try {
-                        row.setBackground(new RippleDrawable(ColorStateList.valueOf(0x334FC3F7), content, mask));
-                    } catch (Exception ignored) {
-                        row.setBackgroundDrawable(content);
-                    }
+                    row.setBackground(clickBg(C_PILL));
                     row.setPadding(dp(10), dp(9), dp(10), dp(9));
 
                     TextView tv = new TextView(MainActivity.this);
@@ -2090,15 +2086,7 @@ public class MainActivity extends Activity {
                     box.setOrientation(LinearLayout.VERTICAL);
                     box.setGravity(Gravity.CENTER);
                     box.setPadding(dp(10), dp(8), dp(10), dp(8));
-                    GradientDrawable content = pill(C_PILL);
-                    GradientDrawable mask = new GradientDrawable();
-                    mask.setColor(Color.WHITE);
-                    mask.setCornerRadius(dp(13));
-                    try {
-                        box.setBackground(new RippleDrawable(ColorStateList.valueOf(0x334FC3F7), content, mask));
-                    } catch (Exception ignored) {
-                        box.setBackgroundDrawable(content);
-                    }
+                    box.setBackground(clickBg(C_PILL));
                     title = new TextView(MainActivity.this);
                     title.setTextSize(lsSp());
                     title.setTextColor(0xFFF0F0F0);
@@ -3196,7 +3184,7 @@ public class MainActivity extends Activity {
         displayEntry.setTextColor(C_PRIMARY);
         displayEntry.setGravity(Gravity.CENTER);
         displayEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
-        displayEntry.setBackgroundDrawable(pill(C_PILL));
+        displayEntry.setBackground(clickBg(C_PILL));
         applyIcon(displayEntry, "ic_settings", C_PRIMARY, 15);
         displayEntry.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
@@ -3252,7 +3240,7 @@ public class MainActivity extends Activity {
         upd.setTextColor(C_PRIMARY);
         upd.setGravity(Gravity.CENTER);
         upd.setPadding(dp(10), dp(10), dp(10), dp(10));
-        upd.setBackgroundDrawable(pill(C_PILL));
+        upd.setBackground(clickBg(C_PILL));
         applyIcon(upd, "ic_update", C_PRIMARY, 15);
         upd.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
@@ -3274,7 +3262,7 @@ public class MainActivity extends Activity {
         fbEntry.setTextColor(C_PRIMARY);
         fbEntry.setGravity(Gravity.CENTER);
         fbEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
-        fbEntry.setBackgroundDrawable(pill(C_PILL));
+        fbEntry.setBackground(clickBg(C_PILL));
         applyIcon(fbEntry, "ic_feedback", C_PRIMARY, 15);
         fbEntry.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { showScreen(S_FEEDBACK); }
@@ -3298,7 +3286,7 @@ public class MainActivity extends Activity {
         profEntry.setTextColor(C_PRIMARY);
         profEntry.setGravity(Gravity.CENTER);
         profEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
-        profEntry.setBackgroundDrawable(pill(C_PILL));
+        profEntry.setBackground(clickBg(C_PILL));
         applyIcon(profEntry, "ic_person", C_PRIMARY, 15);
         profEntry.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { showScreen(S_PROFILE); }
@@ -3342,7 +3330,7 @@ public class MainActivity extends Activity {
         routeEntry.setTextColor(C_PRIMARY);
         routeEntry.setGravity(Gravity.CENTER);
         routeEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
-        routeEntry.setBackgroundDrawable(pill(C_PILL));
+        routeEntry.setBackground(clickBg(C_PILL));
         applyIcon(routeEntry, "ic_route", C_PRIMARY, 15);
         routeEntry.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
@@ -3374,7 +3362,7 @@ public class MainActivity extends Activity {
         aboutEntry.setTextColor(C_PRIMARY);
         aboutEntry.setGravity(Gravity.CENTER);
         aboutEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
-        aboutEntry.setBackgroundDrawable(pill(C_PILL));
+        aboutEntry.setBackground(clickBg(C_PILL));
         applyIcon(aboutEntry, "ic_info", C_PRIMARY, 15);
         aboutEntry.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
@@ -3397,7 +3385,7 @@ public class MainActivity extends Activity {
         reset.setTextColor(0xFFFFB74D);
         reset.setGravity(Gravity.CENTER);
         reset.setPadding(dp(10), dp(10), dp(10), dp(10));
-        reset.setBackgroundDrawable(pill(C_PILL));
+        reset.setBackground(clickBg(C_PILL));
         reset.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 fontSizeSp = m.round ? 13f : 14f;
@@ -4003,7 +3991,7 @@ public class MainActivity extends Activity {
         logEntry.setTextColor(C_PRIMARY);
         logEntry.setGravity(Gravity.CENTER);
         logEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
-        logEntry.setBackgroundDrawable(pill(C_PILL));
+        logEntry.setBackground(clickBg(C_PILL));
         applyIcon(logEntry, "ic_history", C_PRIMARY, 15);
         logEntry.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
@@ -4667,7 +4655,7 @@ public class MainActivity extends Activity {
         todayFallbackBtn.setTextColor(C_SUB);
         todayFallbackBtn.setGravity(Gravity.CENTER);
         todayFallbackBtn.setPadding(dp(8), dp(6), dp(8), dp(6));
-        todayFallbackBtn.setBackgroundDrawable(pill(C_PILL));
+        todayFallbackBtn.setBackground(clickBg(C_PILL));
         todayFallbackBtn.setVisibility(View.GONE);
         todayScreen.addView(todayFallbackBtn, wrap());
 
@@ -5072,7 +5060,7 @@ public class MainActivity extends Activity {
         done.setGravity(Gravity.CENTER);
         done.setTextColor(C_PRIMARY);
         done.setPadding(dp(10), dp(11), dp(10), dp(11));
-        done.setBackgroundDrawable(pill(0xFF14384A));
+        done.setBackground(clickBg(0xFF14384A));
         done.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 vibrate();
@@ -5998,15 +5986,7 @@ public class MainActivity extends Activity {
                     box.setOrientation(LinearLayout.VERTICAL);
                     box.setGravity(Gravity.CENTER);
                     box.setPadding(dp(10), dp(8), dp(10), dp(8));
-                    GradientDrawable content = pill(C_PILL);
-                    GradientDrawable mask = new GradientDrawable();
-                    mask.setColor(Color.WHITE);
-                    mask.setCornerRadius(dp(13));
-                    try {
-                        box.setBackground(new RippleDrawable(ColorStateList.valueOf(0x334FC3F7), content, mask));
-                    } catch (Exception ignored) {
-                        box.setBackgroundDrawable(content);
-                    }
+                    box.setBackground(clickBg(C_PILL));
                     title = new TextView(MainActivity.this);
                     title.setTextSize(lsSp() - 1f);
                     title.setTextColor(0xFFF0F0F0);
