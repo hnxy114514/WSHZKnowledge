@@ -13,6 +13,7 @@ import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
+import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.BitmapShader;
 import android.graphics.Path;
@@ -45,6 +46,7 @@ import android.view.GestureDetector;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
+import android.view.ViewOutlineProvider;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
@@ -1904,7 +1906,7 @@ public class MainActivity extends Activity {
                 TextView tv = (convertView instanceof TextView) ? (TextView) convertView : null;
                 if (tv == null) {
                     tv = new TextView(MainActivity.this);
-                    tv.setBackground(clickBg(C_PILL));
+                    applyClickBg(tv, C_PILL);
                 }
                 tv.setText(applyMarkup(getItem(position)));
                 tv.setTextSize(lsSp());
@@ -1940,6 +1942,19 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             return pill(fill);
         }
+    }
+
+    /** 设置涟漪背景，并用圆角 outline + clipToOutline 强制裁剪，保证涟漪一定不溢出圆角
+     *  （某些机型 RippleDrawable 的 mask 圆角不生效，只能用 outline 兜底）。 */
+    private void applyClickBg(final View v, int fill) {
+        v.setBackground(clickBg(fill));
+        v.setClipToOutline(true);
+        v.setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, Outline outline) {
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dp(13));
+            }
+        });
     }
 
     private FrameLayout.LayoutParams fp() {
@@ -2018,7 +2033,7 @@ public class MainActivity extends Activity {
                     row = new LinearLayout(MainActivity.this);
                     row.setOrientation(LinearLayout.HORIZONTAL);
                     row.setGravity(Gravity.CENTER_VERTICAL);
-                    row.setBackground(clickBg(C_PILL));
+                    applyClickBg(row, C_PILL);
                     row.setPadding(dp(10), dp(9), dp(10), dp(9));
 
                     TextView tv = new TextView(MainActivity.this);
@@ -2095,7 +2110,7 @@ public class MainActivity extends Activity {
                     box.setOrientation(LinearLayout.VERTICAL);
                     box.setGravity(Gravity.CENTER);
                     box.setPadding(dp(10), dp(8), dp(10), dp(8));
-                    box.setBackground(clickBg(C_PILL));
+                    applyClickBg(box, C_PILL);
                     title = new TextView(MainActivity.this);
                     title.setTextSize(lsSp());
                     title.setTextColor(0xFFF0F0F0);
@@ -5995,7 +6010,7 @@ public class MainActivity extends Activity {
                     box.setOrientation(LinearLayout.VERTICAL);
                     box.setGravity(Gravity.CENTER);
                     box.setPadding(dp(10), dp(8), dp(10), dp(8));
-                    box.setBackground(clickBg(C_PILL));
+                    applyClickBg(box, C_PILL);
                     title = new TextView(MainActivity.this);
                     title.setTextSize(lsSp() - 1f);
                     title.setTextColor(0xFFF0F0F0);
