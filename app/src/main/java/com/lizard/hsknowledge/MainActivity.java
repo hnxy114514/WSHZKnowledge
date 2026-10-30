@@ -291,12 +291,8 @@ public class MainActivity extends Activity {
             int h = getResources().getDisplayMetrics().heightPixels;
             round = isRound;
             if (round) {
-                sidePad = dp(12);
+                sidePad = dp(12); topPad = dp(14); bottomPad = dp(12);
                 roundSafe = (int) Math.round(Math.min(w, h) * 0.146f);
-                // 圆屏上下圆弧会裁掉贴边内容：上下都多留 roundSafe 安全边距，
-                // 让滚到顶/底时第一项/最后一项停在圆弧以内的安全位置，不被挡住
-                topPad = dp(14) + roundSafe;
-                bottomPad = dp(12) + roundSafe;
             } else {
                 sidePad = dp(14); topPad = dp(14); bottomPad = dp(14);
                 roundSafe = 0;
@@ -1709,6 +1705,7 @@ public class MainActivity extends Activity {
 
         detailScroll = new ScrollView(this);
         detailScroll.setFillViewport(true);
+        roundPadScroll(detailScroll);
         detailInner = new LinearLayout(this);
         detailInner.setOrientation(LinearLayout.VERTICAL);
         detailScroll.addView(detailInner, new ViewGroup.LayoutParams(
@@ -1737,6 +1734,7 @@ public class MainActivity extends Activity {
 
         examplesScroll = new ScrollView(this);
         examplesScroll.setFillViewport(true);
+        roundPadScroll(examplesScroll);
         examplesInner = new LinearLayout(this);
         examplesInner.setOrientation(LinearLayout.VERTICAL);
         examplesScroll.addView(examplesInner, new ViewGroup.LayoutParams(
@@ -1749,6 +1747,7 @@ public class MainActivity extends Activity {
         });
         settingsScroll = new ScrollView(this);
         settingsScroll.setFillViewport(true);
+        roundPadScroll(settingsScroll);
         settingsInner = new LinearLayout(this);
         settingsInner.setOrientation(LinearLayout.VERTICAL);
         settingsScroll.addView(settingsInner, new ViewGroup.LayoutParams(
@@ -1828,12 +1827,20 @@ public class MainActivity extends Activity {
         return ll;
     }
 
+    /** 圆屏给滚动容器加内部安全 padding（上下各 roundSafe）：内容滚到顶/底时停在圆弧安全区，
+     *  中间滚动时内容可穿过 padding（clipToPadding=false），不会出现固定黑边。方屏不加。 */
+    private void roundPadScroll(ScrollView sc) {
+        if (m == null || !m.round) return;
+        sc.setClipToPadding(false);
+        sc.setPadding(0, m.roundSafe, 0, m.roundSafe);
+    }
+
     private ListView makeList() {
         ListView lv = new ListView(this);
         lv.setDivider(new ColorDrawable(Color.TRANSPARENT));
         lv.setDividerHeight(dp(6));
         lv.setVerticalScrollBarEnabled(false);
-        lv.setPadding(0, dp(4), 0, dp(4));
+        lv.setPadding(0, dp(4) + m.roundSafe, 0, dp(4) + m.roundSafe);
         lv.setClipToPadding(false);
         // 不做滚动缩放：setScale 只缩放绘制、布局位置不变，滚动时文字会跟着跳、不跟手，
         // 用户反馈「上下滑动时 UI 和文字偏移」。保持原始大小、位置，滚动才完美跟随手指。
@@ -3961,6 +3968,7 @@ public class MainActivity extends Activity {
     private void buildAboutScreen() {
         aboutScroll = new ScrollView(this);
         aboutScroll.setVerticalScrollBarEnabled(false);
+        roundPadScroll(aboutScroll);
         aboutInner = new LinearLayout(this);
         aboutInner.setOrientation(LinearLayout.VERTICAL);
         aboutScroll.addView(aboutInner);
@@ -4789,6 +4797,7 @@ public class MainActivity extends Activity {
     private void buildDisplayScreen() {
         ScrollView sv = new ScrollView(this);
         sv.setVerticalScrollBarEnabled(false);
+        roundPadScroll(sv);
         displayInner = new LinearLayout(this);
         displayInner.setOrientation(LinearLayout.VERTICAL);
         sv.addView(displayInner);
@@ -5104,6 +5113,7 @@ public class MainActivity extends Activity {
     private void buildChangelogScreen() {
         changelogScroll = new ScrollView(this);
         changelogScroll.setVerticalScrollBarEnabled(false);
+        roundPadScroll(changelogScroll);
         changelogInner = new LinearLayout(this);
         changelogInner.setOrientation(LinearLayout.VERTICAL);
         changelogScroll.addView(changelogInner);
@@ -5210,6 +5220,7 @@ public class MainActivity extends Activity {
     private void buildFeedbackScreen() {
         feedbackScroll = new ScrollView(this);
         feedbackScroll.setVerticalScrollBarEnabled(false);
+        roundPadScroll(feedbackScroll);
         feedbackInner = new LinearLayout(this);
         feedbackInner.setOrientation(LinearLayout.VERTICAL);
         feedbackScroll.addView(feedbackInner);
@@ -6613,6 +6624,7 @@ public class MainActivity extends Activity {
     private void buildProfileScreen() {
         profScroll = new ScrollView(this);
         profScroll.setVerticalScrollBarEnabled(false);
+        roundPadScroll(profScroll);
         profInner = new LinearLayout(this);
         profInner.setOrientation(LinearLayout.VERTICAL);
         profScroll.addView(profInner);
