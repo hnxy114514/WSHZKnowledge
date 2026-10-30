@@ -3602,6 +3602,8 @@ public class MainActivity extends Activity {
 
     // ================= 页面切换（带动画） =================
     private void showScreen(int s) {
+        // 先复位离开页面的过滚偏移，避免偏移残留污染位置保存、下次进入的定位错乱
+        resetOverScroll(screen);
         // 记下离开页面的滚动位置，回来时原样恢复（避免淡入后跳回顶部）
         ListView leaving = listOf(screen);
         if (leaving != null && leaving.getChildCount() > 0) {
@@ -3700,6 +3702,28 @@ public class MainActivity extends Activity {
             case S_TODAY: return todayList;
             default: return null;
         }
+    }
+
+    /** 页面级 ScrollView 与屏幕枚举的对应（用于切换页面前复位过滚）。 */
+    private ScrollView scrollOf(int s) {
+        switch (s) {
+            case S_DETAIL: return detailScroll;
+            case S_EXAMPLES: return examplesScroll;
+            case S_SETTINGS: return settingsScroll;
+            case S_ABOUT: return aboutScroll;
+            case S_CHANGELOG: return changelogScroll;
+            case S_FEEDBACK: return feedbackScroll;
+            case S_PROFILE: return profScroll;
+            default: return null;
+        }
+    }
+
+    /** 复位某个页面的过滚偏移（列表 + 正文滚动容器）。 */
+    private void resetOverScroll(int s) {
+        ListView lv = listOf(s);
+        if (lv instanceof OverScrollListView) ((OverScrollListView) lv).reset();
+        ScrollView sv = scrollOf(s);
+        if (sv instanceof OverScrollScrollView) ((OverScrollScrollView) sv).reset();
     }
 
     @Override
@@ -5101,7 +5125,7 @@ public class MainActivity extends Activity {
                     public void onChanged(float v) {
                         uiScale = v;
                         applyPreview();
-                        applyLiveScale(v);   // 拖动过程中界面就跟着变
+                        applyLiveScale(v);   // 拖动过程中只放大预览卡片，界面本体松手后重建
                     }
                 }, new OnFloatRelease() {
                     public void onReleased(float v) {
