@@ -1711,7 +1711,7 @@ public class MainActivity extends Activity {
         detailTitle.setPadding(0, dp(2), 0, dp(6));
         detailTitle.setMaxLines(3);
 
-        detailScroll = new ScrollView(this);
+        detailScroll = new OverScrollScrollView(this);
         detailScroll.setFillViewport(true);
         roundPadScroll(detailScroll);
         detailInner = new LinearLayout(this);
@@ -1740,7 +1740,7 @@ public class MainActivity extends Activity {
         examplesTitle.setMaxLines(3);
         // examplesTitle 随内容滚动，在 openExamples 里加进 examplesInner
 
-        examplesScroll = new ScrollView(this);
+        examplesScroll = new OverScrollScrollView(this);
         examplesScroll.setFillViewport(true);
         roundPadScroll(examplesScroll);
         examplesInner = new LinearLayout(this);
@@ -1753,7 +1753,7 @@ public class MainActivity extends Activity {
         settingsBackBtn = makeBack("‹ 返回", new View.OnClickListener() {
             public void onClick(View v) { showScreen(S_SUBJECT); }
         });
-        settingsScroll = new ScrollView(this);
+        settingsScroll = new OverScrollScrollView(this);
         settingsScroll.setFillViewport(true);
         roundPadScroll(settingsScroll);
         settingsInner = new LinearLayout(this);
@@ -1846,7 +1846,7 @@ public class MainActivity extends Activity {
     }
 
     private ListView makeList() {
-        ListView lv = new ListView(this);
+        OverScrollListView lv = new OverScrollListView(this);
         lv.setDivider(new ColorDrawable(Color.TRANSPARENT));
         lv.setDividerHeight(dp(6));
         lv.setVerticalScrollBarEnabled(false);
@@ -1855,9 +1855,6 @@ public class MainActivity extends Activity {
         lv.setSelector(new ColorDrawable(Color.TRANSPARENT));
         lv.setPadding(0, 0, 0, m.roundSafe);
         lv.setClipToPadding(false);
-        // 关掉 ListView 的滚动/动画缓存：快速滑动时缓存位图和实时文字不同步，会出现「按钮和字偏移」
-        lv.setScrollingCacheEnabled(false);
-        lv.setAnimationCacheEnabled(false);
         // 不做滚动缩放：setScale 只缩放绘制、布局位置不变，滚动时文字会跟着跳、不跟手，
         // 用户反馈「上下滑动时 UI 和文字偏移」。保持原始大小、位置，滚动才完美跟随手指。
         return lv;
@@ -4007,7 +4004,7 @@ public class MainActivity extends Activity {
 
 
     private void buildAboutScreen() {
-        aboutScroll = new ScrollView(this);
+        aboutScroll = new OverScrollScrollView(this);
         aboutScroll.setVerticalScrollBarEnabled(false);
         roundPadScroll(aboutScroll);
         aboutInner = new LinearLayout(this);
@@ -4852,7 +4849,7 @@ public class MainActivity extends Activity {
     private LinearLayout pvCard;
 
     private void buildDisplayScreen() {
-        ScrollView sv = new ScrollView(this);
+        ScrollView sv = new OverScrollScrollView(this);
         sv.setVerticalScrollBarEnabled(false);
         roundPadScroll(sv);
         displayInner = new LinearLayout(this);
@@ -5168,7 +5165,7 @@ public class MainActivity extends Activity {
 
     // ================= 更新日志 =================
     private void buildChangelogScreen() {
-        changelogScroll = new ScrollView(this);
+        changelogScroll = new OverScrollScrollView(this);
         changelogScroll.setVerticalScrollBarEnabled(false);
         roundPadScroll(changelogScroll);
         changelogInner = new LinearLayout(this);
@@ -5275,7 +5272,7 @@ public class MainActivity extends Activity {
     }
 
     private void buildFeedbackScreen() {
-        feedbackScroll = new ScrollView(this);
+        feedbackScroll = new OverScrollScrollView(this);
         feedbackScroll.setVerticalScrollBarEnabled(false);
         roundPadScroll(feedbackScroll);
         feedbackInner = new LinearLayout(this);
@@ -6671,7 +6668,7 @@ public class MainActivity extends Activity {
     // ================= 个人主页 =================
 
     private void buildProfileScreen() {
-        profScroll = new ScrollView(this);
+        profScroll = new OverScrollScrollView(this);
         profScroll.setVerticalScrollBarEnabled(false);
         roundPadScroll(profScroll);
         profInner = new LinearLayout(this);
