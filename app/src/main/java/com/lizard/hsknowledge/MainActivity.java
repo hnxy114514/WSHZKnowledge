@@ -291,8 +291,12 @@ public class MainActivity extends Activity {
             int h = getResources().getDisplayMetrics().heightPixels;
             round = isRound;
             if (round) {
-                sidePad = dp(12); topPad = dp(14); bottomPad = dp(12);
+                sidePad = dp(12);
                 roundSafe = (int) Math.round(Math.min(w, h) * 0.146f);
+                // 圆屏上下圆弧会裁掉贴边内容：上下都多留 roundSafe 安全边距，
+                // 让滚到顶/底时第一项/最后一项停在圆弧以内的安全位置，不被挡住
+                topPad = dp(14) + roundSafe;
+                bottomPad = dp(12) + roundSafe;
             } else {
                 sidePad = dp(14); topPad = dp(14); bottomPad = dp(14);
                 roundSafe = 0;
