@@ -193,6 +193,8 @@ public class MainActivity extends Activity {
     private boolean pendingDownload = false;
     private boolean pendingInstall = false;
     private volatile boolean downloadCancel = false;
+    /** 当前正在下载的连接：取消时立即 disconnect，让阻塞的读取马上抛异常退出。 */
+    private HttpURLConnection activeCn = null;
     private boolean foreground = false;
     // 日志记录：默认关闭，需在设置里手动开启（开启要 3 秒倒计时确认）
     private boolean logEnabled = false;
@@ -552,7 +554,7 @@ public class MainActivity extends Activity {
         body.setLineSpacing(dp(2), 1.16f);
         body.setPadding(dp(2), 0, dp(2), dp(1));
         sc.addView(body);
-        int maxH = Math.min(dp(104), (int) (getResources().getDisplayMetrics().heightPixels * 0.30f));
+        int maxH = Math.min(dp(190), (int) (getResources().getDisplayMetrics().heightPixels * 0.45f));
         box.addView(sc, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, maxH));
 
         // 滚动时整块重绘，卡片区域每帧都完整刷新，避免留下上一帧的文字。
@@ -642,7 +644,7 @@ public class MainActivity extends Activity {
             if (l.length() == 0) continue;
             if (sb.length() > 0) sb.append('\n');
             sb.append(l);
-            if (sb.length() > 460) { sb.append("\n…"); break; }
+            if (sb.length() > 900) { sb.append("\n…"); break; }
         }
         return sb.toString();
     }
@@ -1117,6 +1119,7 @@ public class MainActivity extends Activity {
             FileOutputStream fos = null;
             try {
                 cn = (HttpURLConnection) new URL(u).openConnection();
+                activeCn = cn;
                 cn.setConnectTimeout(8000);
                 cn.setReadTimeout(20000);
                 cn.setInstanceFollowRedirects(true);
@@ -1155,7 +1158,8 @@ public class MainActivity extends Activity {
                 if (tmp.exists() && !tmp.delete()) { }
             } finally {
                 if (fos != null) { try { fos.close(); } catch (Exception ignored) { } }
-                if (cn != null) cn.disconnect();
+                if (cn != null) { try { cn.disconnect(); } catch (Exception ignored) { } }
+                if (activeCn == cn) activeCn = null;
             }
         }
         throw new Exception(lastErr == null ? "所有下载源都失败" : lastErr);
@@ -1242,7 +1246,10 @@ public class MainActivity extends Activity {
         cancelBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 downloadCancel = true;
-                toast("正在取消更新…");
+                // 立即断开当前下载连接，让阻塞的读取马上抛异常退出，别再等超时
+                if (activeCn != null) { try { activeCn.disconnect(); } catch (Exception ignored) { } }
+                progressHide();
+                toast("已取消更新");
             }
         });
         LinearLayout.LayoutParams cancelLp = wrap();
