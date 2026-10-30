@@ -272,6 +272,7 @@ public class MainActivity extends Activity {
     private boolean swipeTracking = false;
     private boolean swipeActive = false;     // 已进入拖动返回
     private boolean swipeBusy = false;       // 出场动画进行中
+    private boolean sliderTouching = false;  // 正在拖动滑块（字号/缩放），此时不触发右滑返回
     private boolean swipeFromInput = false;  // 起手点在输入框内
     private View swipeView;                  // 正在被拖动的当前页
     private View swipePrev;                  // 下面露出的上一级页面（预览）
@@ -3766,7 +3767,7 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
-        if (swipeBack && fullscreenView == null) {
+        if (swipeBack && fullscreenView == null && !sliderTouching) {
             int action = ev.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN) {
                 swipeX = ev.getX();
@@ -4928,8 +4929,9 @@ public class MainActivity extends Activity {
                 val.setText(shownValue(v, unit));
                 onChange.onChanged(v);
             }
-            public void onStartTrackingTouch(SeekBar bar) { }
+            public void onStartTrackingTouch(SeekBar bar) { sliderTouching = true; }
             public void onStopTrackingTouch(SeekBar bar) {
+                sliderTouching = false;
                 vibrate();
                 if (onRelease != null) onRelease.onReleased(cur);
             }
@@ -5336,6 +5338,7 @@ public class MainActivity extends Activity {
             }
         });
         LinearLayout.LayoutParams atLp = wrap();
+        atLp.topMargin = dp(8);
         atLp.bottomMargin = dp(6);
         feedbackInner.addView(attachBtn, atLp);
 
