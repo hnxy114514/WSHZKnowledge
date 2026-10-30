@@ -334,12 +334,12 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
   圆弧以内的安全位置；顶部默认贴最顶端。方屏不受影响。
   - **顶部标题/搜索框随内容滚动**：知识点列表页、搜索页的标题和搜索框作为列表 `addHeaderView`；
     详情页、例题页的标题/路径放进滚动区 `inner` 第一项，随内容一起滚。
-  - **列表过滚（系统 overScrollBy）**：`OverScrollListView` 只重写 `overScrollBy` 把过滚距离放大到
-    45% 屏高，其余全交给系统——滚到顶/底后继续拖，内容跟手拖出、松手系统阻尼回弹；点击、位置、
-    滚动全走系统逻辑，无自定义状态。底部留 `roundSafe` padding + `setClipToPadding(false)`，让最后一项
-    停在圆弧内；顶部默认贴顶。
-  - **正文滚动**：`OverScrollScrollView` 同理（overScrollBy 45%），底部留 `roundSafe` padding
-    （`roundPadScroll`）；顶部默认贴顶。方屏 `maxOverScrollY=0`，行为与普通容器一致。
+  - **列表过滚（自定义 onTouchEvent + Scroller 回弹）**：`OverScrollListView` 滚到顶/底后继续拖，
+    内容跟手拖出最多 45% 屏高，松手由 OverScroller 平滑回弹到 0（松手必回正、不留残留）。
+    **不用系统 overScrollBy / EdgeEffect**（Wear OS 上完全拖不动、或瞬时回弹）。底部留 `roundSafe`
+    padding + `setClipToPadding(false)` 让最后一项停在圆弧内；顶部默认贴顶。
+  - **正文过滚**：`OverScrollScrollView` 同款实现（onTouchEvent + scrollTo + Scroller 回弹），
+    底部留 `roundSafe` padding（`roundPadScroll`）。方屏 maxOver=0，行为与普通容器一致。
   - **不能在外层 `newScreen` 上加这个 padding**：外层 padding 固定、内容进不去，会永久留黑边（踩过坑）。
 - 每页的「‹ 返回」是随内容滚动的第一项，不固定占用顶部空间；系统返回键/手势始终可用。
 - **右滑返回**：设置 → 显示 → 「右滑返回」可开关（默认开）。起手点须在屏幕左侧 1/4 内，向右拖动时当前页跟手右移、下方露出上一级页面的实时预览（视差 32%）；松手超过 46dp 即滑出并切页，不足则两页一起回弹。主页不触发；在输入框内起手需从最左 18dp 内且滑 80dp 以上（避免拖动光标误触）。
