@@ -1839,10 +1839,11 @@ public class MainActivity extends Activity {
             });
         }
 
-        /** 顶部占位之后、底部占位之前的固定头部（返回键、标题、搜索框），随内容一起滚动。 */
+        /** 顶部占位之后、底部占位之前的固定头部（返回键、标题、搜索框），随内容一起滚动。
+         *  和行一样留 6dp 底边距，否则返回键、搜索框会跟下面一行贴在一起。 */
         void addHead(View v) {
             heads.add(v);
-            box.addView(v, box.indexOfChild(botSp), wrap());
+            box.addView(v, box.indexOfChild(botSp), wrapM());
         }
 
         /** 换一批数据：清空已有行，从头分页渲染。gen 换了旧的续载帧会自己退出，不会串到新数据上。 */
