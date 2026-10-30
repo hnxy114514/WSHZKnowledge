@@ -1933,26 +1933,25 @@ public class MainActivity extends Activity {
         return g;
     }
 
-    /** 统一的可点击背景：圆角 + 按压变色。涟漪（RippleDrawable）在部分机型 mask 圆角不生效、
-     *  会以正方形溢出按钮，所以干脆不用涟漪，改成按压时背景变暗，简单可靠。 */
+    /** 统一的可点击背景：圆角 + 蓝色涟漪。 */
     private android.graphics.drawable.Drawable clickBg(int fill) {
-        StateListDrawable sld = new StateListDrawable();
-        sld.addState(new int[]{android.R.attr.state_pressed}, pill(darken(fill)));
-        sld.addState(new int[]{}, pill(fill));
-        return sld;
+        try {
+            GradientDrawable content = pill(fill);
+            GradientDrawable mask = new GradientDrawable();
+            mask.setShape(GradientDrawable.RECTANGLE);
+            mask.setColor(Color.WHITE);
+            mask.setCornerRadius(dp(13));
+            return new RippleDrawable(ColorStateList.valueOf(0x334FC3F7), content, mask);
+        } catch (Exception e) {
+            return pill(fill);
+        }
     }
 
-    /** 设置统一的可点击背景。 */
+    /** 设置涟漪背景，并用 clipToOutline 让 background（圆角 content）的默认 outline 裁剪涟漪，
+     *  保证涟漪不溢出圆角。不自定义 outlineProvider（自定义的 roundRect 在 layout 前宽高为 0 会失效）。 */
     private void applyClickBg(final View v, int fill) {
         v.setBackground(clickBg(fill));
-    }
-
-    /** 颜色变暗（按压态用）。 */
-    private int darken(int c) {
-        int a = (c >>> 24) & 0xFF;
-        int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
-        r = r * 3 / 4; g = g * 3 / 4; b = b * 3 / 4;
-        return (a << 24) | (r << 16) | (g << 8) | b;
+        v.setClipToOutline(true);
     }
 
     private FrameLayout.LayoutParams fp() {
@@ -4406,15 +4405,16 @@ public class MainActivity extends Activity {
     private void showCard(final String text) {
         final TextView tv = new TextView(this);
         tv.setText(text);
-        tv.setTextSize(m.titleSize);
+        tv.setTextSize(m.subtitleSize - 0.5f);
         tv.setTypeface(Typeface.DEFAULT_BOLD);
         tv.setTextColor(C_HI);
         tv.setGravity(Gravity.CENTER);
-        tv.setPadding(dp(20), dp(14), dp(20), dp(14));
+        tv.setPadding(dp(12), dp(8), dp(12), dp(8));
+        tv.setMaxWidth((int) (getResources().getDisplayMetrics().widthPixels * 0.82f));
         tv.setBackgroundDrawable(pill(0xFF151515));
         tv.setAlpha(0f);
-        tv.setScaleX(0.82f);
-        tv.setScaleY(0.82f);
+        tv.setScaleX(0.85f);
+        tv.setScaleY(0.85f);
 
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
