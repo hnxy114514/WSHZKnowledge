@@ -1841,7 +1841,8 @@ public class MainActivity extends Activity {
     private void roundPadScroll(ScrollView sc) {
         if (m == null || !m.round) return;
         sc.setClipToPadding(false);
-        sc.setPadding(0, m.roundSafe, 0, m.roundSafe);
+        // 只在底部留安全边距保护最后一项；顶部通常已有标题/返回键占位，留了会和内容之间出现长空
+        sc.setPadding(0, 0, 0, m.roundSafe);
     }
 
     private ListView makeList() {
