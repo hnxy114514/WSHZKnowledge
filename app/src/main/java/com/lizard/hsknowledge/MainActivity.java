@@ -1842,6 +1842,9 @@ public class MainActivity extends Activity {
         private boolean busy;
         private int gen, stepGen;
         int savedY = -1;
+        /** 待定位的位置：行是分帧加的，内容高度一变就要再定一次，直到用户自己滑。 */
+        private int pendingY = -1;
+        private boolean selfScroll;
         /** 续载时先让外部把下一批数据补进来（数据全集不是一次就有的列表用，如「今日新增」）。 */
         Runnable fill;
 
@@ -1859,6 +1862,7 @@ public class MainActivity extends Activity {
             box.addView(botSp);
             sc.setScrollListener(new OverScrollScrollView.OnScrollListener() {
                 public void onScroll(int y, int h, int contentH) {
+                    if (!selfScroll) pendingY = -1;   // 用户自己滑了，就不再替他定位
                     if (nearEnd()) more();
                 }
             });
@@ -1925,6 +1929,7 @@ public class MainActivity extends Activity {
                     sc.post(new Runnable() {
                         public void run() {
                             fitSpacers();
+                            locate();                 // 内容变高了，补一次定位
                             if (nearEnd()) more();   // 一批加完时人还停在底部，接着补
                         }
                     });
@@ -1962,14 +1967,28 @@ public class MainActivity extends Activity {
         /** 进入页面：跳过顶部占位，让第一个内容贴最顶端。 */
         void enter() {
             savedY = -1;
-            scrollToY(sc, overDist());
+            pendingY = overDist();
+            locate();
         }
 
         /** 返回到本页：回到离开时的位置；没记过就按首次进入处理。 */
         void restore() {
             if (savedY < 0) { enter(); return; }
-            final int y = savedY;
-            scrollToY(sc, y);
+            pendingY = savedY;
+            locate();
+        }
+
+        /** 定到 pendingY。行一批批加，内容高度一直在变，所以每批渲染完都会再调一次。 */
+        private void locate() {
+            if (pendingY < 0) return;
+            final int y = pendingY;
+            sc.post(new Runnable() {
+                public void run() {
+                    selfScroll = true;
+                    sc.scrollTo(0, y);
+                    selfScroll = false;
+                }
+            });
         }
     }
 
@@ -2109,16 +2128,26 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 vibrate();
                 if (kind == 2) {
-                    showScreen(S_SUBJECT);
+                    goBack(S_SUBJECT);
                     return;
                 }
                 if (kind == 0) {
                     for (Subject su : subjects) {
-                        if (su.name.equals(name)) { curSubject = su; openBlocks(); return; }
+                        if (su.name.equals(name)) {
+                            curSubject = su;
+                            restoreNext[S_BLOCK] = true;   // 往上跳：回到这一层上次的位置
+                            openBlocks();
+                            return;
+                        }
                     }
                 } else if (curSubject != null) {
                     for (Block b : curSubject.blocks) {
-                        if (b.name.equals(name)) { curBlock = b; openChildren(); return; }
+                        if (b.name.equals(name)) {
+                            curBlock = b;
+                            restoreNext[S_CHILD] = true;
+                            openChildren();
+                            return;
+                        }
                     }
                 }
             }
