@@ -56,7 +56,6 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.view.ViewGroup;
-import android.view.ViewParent;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -1643,7 +1642,8 @@ public class MainActivity extends Activity {
             public void onClick(View v) { goBack(detailBack); }
         });
         detailPath = new TextView(this);
-        detailPath.setTextSize(m.subtitleSize - 2f);
+        detailPath.setTextSize(m.subtitleSize);          // 与知识点页的面包屑一个规格
+        detailPath.setTypeface(Typeface.DEFAULT_BOLD);
         detailPath.setTextColor(C_SUB);
         detailPath.setPadding(dp(2), 0, dp(2), dp(1));
         detailPath.setMaxLines(2);
@@ -1670,7 +1670,8 @@ public class MainActivity extends Activity {
             public void onClick(View v) { goBack(S_DETAIL); }
         });
         examplesPath = new TextView(this);
-        examplesPath.setTextSize(m.subtitleSize - 2f);
+        examplesPath.setTextSize(m.subtitleSize);        // 与知识点页的面包屑一个规格
+        examplesPath.setTypeface(Typeface.DEFAULT_BOLD);
         examplesPath.setTextColor(C_SUB);
         examplesPath.setPadding(dp(2), 0, dp(2), dp(1));
         examplesPath.setMaxLines(2);
@@ -1801,12 +1802,22 @@ public class MainActivity extends Activity {
 
     /** 正文页进入时定位：跳过顶部占位，让第一个内容贴最顶端。 */
     private void scrollToTop(final ScrollView sc) {
-        final int top = overDist();
-        if (top > 0) {
-            sc.post(new Runnable() {
-                public void run() { sc.scrollTo(0, top); }
-            });
-        }
+        scrollToY(sc, overDist());
+    }
+
+    /** 滚到指定位置。内容分帧渲染时可能还没铺够高，scrollTo 会被钳制到半路，
+     *  所以没到位就下一帧再定一次（最多 5 次）；期间用户自己滑过（位置已超过目标）就不再动。 */
+    private void scrollToY(final ScrollView sc, final int y) {
+        final int[] tries = new int[]{0};
+        final Runnable r = new Runnable() {
+            public void run() {
+                sc.scrollTo(0, y);
+                View child = sc.getChildAt(0);
+                int range = (child == null ? 0 : child.getHeight()) - sc.getHeight();
+                if (tries[0]++ < 5 && y > 0 && sc.getScrollY() < y && range >= y) sc.post(this);
+            }
+        };
+        sc.post(r);
     }
 
     /** 行数据源：只告诉列表「一共几行、第几行长什么样」，行由列表按需造，不一次全建。 */
@@ -1948,27 +1959,17 @@ public class MainActivity extends Activity {
             return box.getHeight() - (sc.getScrollY() + h) < h + dp(40);
         }
 
-        /** 进入页面：跳过顶部占位，让第一个内容贴最顶端。
-         *  行是分帧加的，第一帧可能还没铺够高度，这里没到位就下一帧再定一次（用户已滑动就不再动）。 */
+        /** 进入页面：跳过顶部占位，让第一个内容贴最顶端。 */
         void enter() {
             savedY = -1;
-            final int top = overDist();
-            final int[] tries = new int[]{0};
-            final Runnable r = new Runnable() {
-                public void run() {
-                    sc.scrollTo(0, top);
-                    if (tries[0]++ < 4 && sc.getScrollY() == 0 && top > 0
-                            && box.getHeight() - sc.getHeight() >= top) sc.post(this);
-                }
-            };
-            sc.post(r);
+            scrollToY(sc, overDist());
         }
 
         /** 返回到本页：回到离开时的位置；没记过就按首次进入处理。 */
         void restore() {
             if (savedY < 0) { enter(); return; }
             final int y = savedY;
-            sc.post(new Runnable() { public void run() { sc.scrollTo(0, y); } });
+            scrollToY(sc, y);
         }
     }
 
@@ -2140,26 +2141,17 @@ public class MainActivity extends Activity {
                         x0 = ev.getX();
                         y0 = ev.getY();
                         moved = false;
-                        // 先别让滚动容器拦截，否则手指一抬就被当成滚动、UP 到不了这里
-                        ViewParent p = v.getParent();
-                        if (p != null) p.requestDisallowInterceptTouchEvent(true);
-                        break;
+                        // 必须消费掉按下：不然这个 TextView 不会成为事件目标，抬手事件根本不会再发到这里
+                        return true;
                     case MotionEvent.ACTION_MOVE:
-                        if (!moved && (Math.abs(ev.getX() - x0) > dp(8) || Math.abs(ev.getY() - y0) > dp(8))) {
-                            moved = true;
-                            ViewParent pp = v.getParent();
-                            if (pp != null) pp.requestDisallowInterceptTouchEvent(false);   // 真在滑就把事件还给滚动
-                        }
-                        break;
+                        if (Math.abs(ev.getX() - x0) > dp(12) || Math.abs(ev.getY() - y0) > dp(12)) moved = true;
+                        return true;
                     case MotionEvent.ACTION_UP:
                         if (!moved) {
                             ClickableSpan[] sp = spanAt(tv, (int) ev.getX(), (int) ev.getY());
-                            if (sp.length > 0) {
-                                sp[0].onClick(tv);
-                                return true;
-                            }
+                            if (sp.length > 0) sp[0].onClick(tv);
                         }
-                        break;
+                        return true;
                 }
                 return false;
             }
