@@ -56,6 +56,7 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -1909,8 +1910,13 @@ public class MainActivity extends Activity {
                     sc.post(this);
                 } else {
                     busy = false;
-                    fitSpacers();
-                    if (nearEnd()) more();   // 一批加完时人还停在底部，接着补
+                    // 刚加完行，box 还没重新布局，这时量高度会把底部占位算得过大——等一帧再量
+                    sc.post(new Runnable() {
+                        public void run() {
+                            fitSpacers();
+                            if (nearEnd()) more();   // 一批加完时人还停在底部，接着补
+                        }
+                    });
                 }
             }
         };
@@ -2064,6 +2070,10 @@ public class MainActivity extends Activity {
     private void setPath(TextView tv, String sub, String block, String child) {
         SpannableStringBuilder sb = new SpannableStringBuilder();
         int start = 0;
+        sb.append(HOME_SEG);
+        sb.setSpan(pathSpan(HOME_SEG, 2), start, sb.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        sb.append(" › ");
+        start = sb.length();
         sb.append(sub);
         sb.setSpan(pathSpan(sub, 0), start, sb.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
         sb.append(" › ");
@@ -2089,11 +2099,18 @@ public class MainActivity extends Activity {
         setPath(tv, seg[0], seg[1], child.toString());
     }
 
-    /** kind：0 = 科目，1 = 章。 */
+    /** 面包屑最前面那一段，点了直接回主页（省得一页一页往外退）。 */
+    private static final String HOME_SEG = "首页";
+
+    /** kind：0 = 科目，1 = 章，2 = 首页。 */
     private ClickableSpan pathSpan(final String name, final int kind) {
         return new ClickableSpan() {
             public void onClick(View v) {
                 vibrate();
+                if (kind == 2) {
+                    showScreen(S_SUBJECT);
+                    return;
+                }
                 if (kind == 0) {
                     for (Subject su : subjects) {
                         if (su.name.equals(name)) { curSubject = su; openBlocks(); return; }
@@ -2123,9 +2140,16 @@ public class MainActivity extends Activity {
                         x0 = ev.getX();
                         y0 = ev.getY();
                         moved = false;
+                        // 先别让滚动容器拦截，否则手指一抬就被当成滚动、UP 到不了这里
+                        ViewParent p = v.getParent();
+                        if (p != null) p.requestDisallowInterceptTouchEvent(true);
                         break;
                     case MotionEvent.ACTION_MOVE:
-                        if (Math.abs(ev.getX() - x0) > dp(8) || Math.abs(ev.getY() - y0) > dp(8)) moved = true;
+                        if (!moved && (Math.abs(ev.getX() - x0) > dp(8) || Math.abs(ev.getY() - y0) > dp(8))) {
+                            moved = true;
+                            ViewParent pp = v.getParent();
+                            if (pp != null) pp.requestDisallowInterceptTouchEvent(false);   // 真在滑就把事件还给滚动
+                        }
                         break;
                     case MotionEvent.ACTION_UP:
                         if (!moved) {
@@ -2200,6 +2224,15 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 vibrate();
                 if (user != null) user.onClick(v);
+            }
+        });
+        b.setOnLongClickListener(new View.OnLongClickListener() {
+            public boolean onLongClick(View v) {
+                if (screen == S_SUBJECT) return false;
+                vibrate();
+                showScreen(S_SUBJECT);
+                toast("已回到首页");
+                return true;
             }
         });
         return b;
