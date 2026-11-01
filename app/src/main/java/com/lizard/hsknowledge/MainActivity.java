@@ -32,10 +32,14 @@ import android.os.Vibrator;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.Editable;
+import android.text.Layout;
 import android.text.Spannable;
+import android.text.Spanned;
 import android.text.SpannableStringBuilder;
+import android.text.TextPaint;
 import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.text.style.ClickableSpan;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.ReplacementSpan;
 import android.text.style.RelativeSizeSpan;
@@ -208,6 +212,7 @@ public class MainActivity extends Activity {
 
     // 显示调节（字号 / 界面缩放，带实时预览）
     private LinearLayout displayScreen, displayInner;
+    private ScrollView displayScroll;
 
     // 今日新增（分页加载）
     private LinearLayout todayScreen;
@@ -1785,6 +1790,14 @@ public class MainActivity extends Activity {
         return v;
     }
 
+    /** 正文页（关于 / 更新日志 / 反馈 / 个人主页 / 显示调节）也和列表一样加上下占位，
+     *  否则这些页没有上下留白，首尾内容划不到屏幕中间。 */
+    private void padInner(LinearLayout inner) {
+        if (overDist() <= 0) return;
+        inner.addView(makeScrollSpacer(), 0);
+        inner.addView(makeScrollSpacer());
+    }
+
     /** 正文页进入时定位：跳过顶部占位，让第一个内容贴最顶端。 */
     private void scrollToTop(final ScrollView sc) {
         final int top = overDist();
@@ -1902,18 +1915,19 @@ public class MainActivity extends Activity {
             }
         };
 
-        /** 内容不足一屏时把上下占位收掉：这时候本来就滚不动，留着只会让顶部空一大块。
-         *  占位变化同步补偿 scrollY，续载把内容撑过一屏时画面不会突然往下跳。 */
+        /** 占位恒为 overDist()，另外把底部占位补足到「可滚动范围至少两个占位」：
+         *  内容不满一屏时 ScrollView 本来就滚不动，不补的话顶部占位等于白加，
+         *  首尾内容就划不到屏幕中间（用户反馈「很多列表还是没有上下空白」）。
+         *  补足后可滚动范围是 [0, ≥2×占位]：0 是顶部空白、占位处是内容贴顶（默认进入位置），
+         *  再往上拖配合系统过滚，第一条内容就能停在屏幕中间。 */
         private void fitSpacers() {
             int h = sc.getHeight();
             if (h <= 0) return;
-            int content = box.getHeight() - topSp.getHeight() - botSp.getHeight();
-            int pad = (content >= h) ? overDist() : 0;
-            int oldPad = topSp.getHeight();
-            if (pad == oldPad) return;
-            setSpacer(topSp, pad);
-            setSpacer(botSp, pad);
-            sc.scrollBy(0, pad - oldPad);
+            int pad = overDist();
+            int real = box.getHeight() - topSp.getHeight() - botSp.getHeight();
+            int bot = pad + Math.max(0, h - real - pad);
+            if (topSp.getHeight() != pad) setSpacer(topSp, pad);
+            if (botSp.getHeight() != bot) setSpacer(botSp, bot);
         }
 
         private void setSpacer(View v, int h) {
@@ -2044,6 +2058,98 @@ public class MainActivity extends Activity {
         box.addView(p, wrap());
         if (act != null) box.setOnClickListener(rowClick(act));
         return box;
+    }
+
+    /** 面包屑路径：科目、章两段可点，点了跳到那一层；最后一段是当前所在层，灰字不可点。 */
+    private void setPath(TextView tv, String sub, String block, String child) {
+        SpannableStringBuilder sb = new SpannableStringBuilder();
+        int start = 0;
+        sb.append(sub);
+        sb.setSpan(pathSpan(sub, 0), start, sb.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        sb.append(" › ");
+        start = sb.length();
+        sb.append(block);
+        sb.setSpan(pathSpan(block, 1), start, sb.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        sb.append(" › ");
+        start = sb.length();
+        sb.append(child);
+        sb.setSpan(new ForegroundColorSpan(C_SUB), start, sb.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        tv.setText(sb);
+        tv.setHighlightColor(Color.TRANSPARENT);
+        attachSpanTap(tv);
+    }
+
+    /** 从「科目 › 章 › 节」整体字符串里取前两段做面包屑，其余都算当前层级。 */
+    private void setPath(TextView tv, String full) {
+        if (full == null) return;
+        String[] seg = full.split(" · ")[0].split(" › ");   // 「今日新增」的路径末尾带编号，先切掉
+        if (seg.length < 3) { tv.setText(applyMarkup(full)); return; }
+        StringBuilder child = new StringBuilder(seg[2]);
+        for (int i = 3; i < seg.length; i++) child.append(" › ").append(seg[i]);
+        setPath(tv, seg[0], seg[1], child.toString());
+    }
+
+    /** kind：0 = 科目，1 = 章。 */
+    private ClickableSpan pathSpan(final String name, final int kind) {
+        return new ClickableSpan() {
+            public void onClick(View v) {
+                vibrate();
+                if (kind == 0) {
+                    for (Subject su : subjects) {
+                        if (su.name.equals(name)) { curSubject = su; openBlocks(); return; }
+                    }
+                } else if (curSubject != null) {
+                    for (Block b : curSubject.blocks) {
+                        if (b.name.equals(name)) { curBlock = b; openChildren(); return; }
+                    }
+                }
+            }
+            public void updateDrawState(TextPaint ds) {
+                ds.setUnderlineText(false);      // 不要链接下划线，手表上太挤
+                ds.setColor(C_PRIMARY);
+            }
+        };
+    }
+
+    /** 让 ClickableSpan 可点又不抢滚动：按下到抬起几乎没位移才算点击，其余一律放行给滚动容器。
+     *  不用 LinkMovementMethod——它在 DOWN 命中文字时就消费事件，手指在标题上起手会滑不动。 */
+    private void attachSpanTap(final TextView tv) {
+        tv.setOnTouchListener(new View.OnTouchListener() {
+            private float x0, y0;
+            private boolean moved;
+            public boolean onTouch(View v, MotionEvent ev) {
+                switch (ev.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        x0 = ev.getX();
+                        y0 = ev.getY();
+                        moved = false;
+                        break;
+                    case MotionEvent.ACTION_MOVE:
+                        if (Math.abs(ev.getX() - x0) > dp(8) || Math.abs(ev.getY() - y0) > dp(8)) moved = true;
+                        break;
+                    case MotionEvent.ACTION_UP:
+                        if (!moved) {
+                            ClickableSpan[] sp = spanAt(tv, (int) ev.getX(), (int) ev.getY());
+                            if (sp.length > 0) {
+                                sp[0].onClick(tv);
+                                return true;
+                            }
+                        }
+                        break;
+                }
+                return false;
+            }
+        });
+    }
+
+    private ClickableSpan[] spanAt(TextView tv, int x, int y) {
+        CharSequence t = tv.getText();
+        Layout l = tv.getLayout();
+        if (l == null || !(t instanceof Spanned)) return new ClickableSpan[0];
+        int line = l.getLineForVertical(y - tv.getTotalPaddingTop() + tv.getScrollY());
+        int off = l.getOffsetForHorizontal(line, x - tv.getTotalPaddingLeft());
+        if (off < 0 || off > t.length()) return new ClickableSpan[0];
+        return ((Spanned) t).getSpans(off, off, ClickableSpan.class);
     }
 
     /** 两行行：主行 + 状态小字（我的反馈记录）。 */
@@ -2214,7 +2320,7 @@ public class MainActivity extends Activity {
 
     private void openItems() {
         itemSearchBox.setText("");
-        listTitle.setText(applyMarkup(curSubject.name + " › " + curBlock.name + " › " + curChild.name));
+        setPath(listTitle, curSubject.name, curBlock.name, curChild.name);
         shownItems.clear();
         shownItems.addAll(curChild.items);
         renderItems();
@@ -2532,7 +2638,7 @@ public class MainActivity extends Activity {
         curExamples = (ex == null) ? new ArrayList<Example>() : ex;
         lastPath = (path == null) ? "" : path;
         detailTitle.setText(applyMarkup(title));
-        detailPath.setText(applyMarkup(path));
+        setPath(detailPath, path);
         detailInner.removeAllViews();
         if (overDist() > 0) detailInner.addView(makeScrollSpacer());
         detailInner.addView(detailBackBtn, wrapM());
@@ -2617,7 +2723,7 @@ public class MainActivity extends Activity {
     /** 例题页：展示某知识点的例题（题干 + 选项 + 答案与解析）。 */
     private void openExamples(String title, List<Example> exs, String path) {
         examplesTitle.setText(applyMarkup(title));
-        examplesPath.setText(applyMarkup(path));
+        setPath(examplesPath, path);
         examplesInner.removeAllViews();
         if (overDist() > 0) examplesInner.addView(makeScrollSpacer());
         examplesInner.addView(examplesBackBtn, wrapM());
@@ -3831,8 +3937,10 @@ public class MainActivity extends Activity {
             if (mineDirty) { mineDirty = false; loadMyIssues(); }
         } else if (s == S_FEEDBACK) {
             updateFeedbackUi();
+            scrollToTop(feedbackScroll);
         } else if (s == S_PROFILE) {
             updateProfileUi();
+            scrollToTop(profScroll);
             if (ghToken != null) loadProfileFromGitHub();
             maybePlayHearts();
         } else if (s == S_DISPLAY) {
@@ -3844,9 +3952,11 @@ public class MainActivity extends Activity {
             if (todayAll.isEmpty() || !td.equals(todayBuiltFor)) buildTodayData(false);
         } else if (s == S_ABOUT) {
             refreshAboutInfo();
+            scrollToTop(aboutScroll);
             if (!thanksLoaded) loadThanks();
         } else if (s == S_CHANGELOG) {
             if (!changelogFilled) fillChangelog();
+            scrollToTop(changelogScroll);
         }
 
         // 只有「返回上一级」才回到离开时的位置；正向点进页面一律回到默认位置（跳过顶部占位贴顶）。
@@ -4283,6 +4393,7 @@ public class MainActivity extends Activity {
         thanksBox = new LinearLayout(this);
         thanksBox.setOrientation(LinearLayout.VERTICAL);
         aboutInner.addView(thanksBox, wrap());
+        padInner(aboutInner);
     }
 
     /** 仓库里的静态备份名单（raw，几乎所有镜像都代，成功率最高）。 */
@@ -5024,13 +5135,13 @@ public class MainActivity extends Activity {
     private LinearLayout pvCard;
 
     private void buildDisplayScreen() {
-        ScrollView sv = new OverScrollScrollView(this);
-        sv.setVerticalScrollBarEnabled(false);
-        roundPadScroll(sv);
+        displayScroll = new OverScrollScrollView(this);
+        displayScroll.setVerticalScrollBarEnabled(false);
+        roundPadScroll(displayScroll);
         displayInner = new LinearLayout(this);
         displayInner.setOrientation(LinearLayout.VERTICAL);
-        sv.addView(displayInner);
-        displayScreen.addView(sv, lw());
+        displayScroll.addView(displayInner);
+        displayScreen.addView(displayScroll, lw());
     }
 
     private float curTitleSize() {
@@ -5336,6 +5447,8 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams resetLp = wrap();
         resetLp.topMargin = dp(4);
         displayInner.addView(reset, resetLp);
+        padInner(displayInner);
+        scrollToTop(displayScroll);
     }
 
     // ================= 更新日志 =================
@@ -5370,6 +5483,7 @@ public class MainActivity extends Activity {
         changelogList = new LinearLayout(this);
         changelogList.setOrientation(LinearLayout.VERTICAL);
         changelogInner.addView(changelogList, wrap());
+        padInner(changelogInner);
     }
 
     /** 读取 assets/changelog.json，按版本倒序渲染；当前版本高亮。 */
@@ -5650,6 +5764,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams allLp = wrap();
         allLp.topMargin = dp(6);
         feedbackInner.addView(fbAllBtn, allLp);
+        padInner(feedbackInner);
     }
 
     private void updateFeedbackUi() {
@@ -6933,6 +7048,7 @@ public class MainActivity extends Activity {
         hint.setGravity(Gravity.CENTER);
         hint.setPadding(dp(4), dp(8), dp(4), dp(4));
         profInner.addView(hint, wrap());
+        padInner(profInner);
     }
 
     /** 拉取昵称与头像（头像落盘缓存，之后离线也能显示）。 */
