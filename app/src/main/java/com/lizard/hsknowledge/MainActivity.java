@@ -84,9 +84,12 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 腕上知识汇总：九科知识点 + 数学公式排版 + 重点高亮 + APK 自动更新。
@@ -138,7 +141,8 @@ public class MainActivity extends Activity {
 
     // ---------- 导航 ----------
     private static final int S_SUBJECT = 0, S_BLOCK = 1, S_CHILD = 2, S_ITEM = 3, S_DETAIL = 4, S_SETTINGS = 5,
-            S_SEARCH = 6, S_FEEDBACK = 7, S_MYFEEDBACK = 8, S_PROFILE = 9, S_CHANGELOG = 10, S_ABOUT = 11, S_DISPLAY = 12, S_TODAY = 13, S_EXAMPLES = 14;
+            S_SEARCH = 6, S_FEEDBACK = 7, S_MYFEEDBACK = 8, S_PROFILE = 9, S_CHANGELOG = 10, S_ABOUT = 11, S_DISPLAY = 12, S_TODAY = 13, S_EXAMPLES = 14,
+            S_FAV = 15, S_HIST = 16;
     private int screen = S_SUBJECT;
     private Subject curSubject;
     private Block curBlock;
@@ -205,7 +209,7 @@ public class MainActivity extends Activity {
     private String lastPath = "";
     private boolean subjectDirty = true;
     private String lastQuery = null;
-    private final boolean[] restoreNext = new boolean[15];   // 下一刻进入该页时回到离开时的位置（只有「返回上一级」才置）
+    private final boolean[] restoreNext = new boolean[17];   // 下一刻进入该页时回到离开时的位置（只有「返回上一级」才置）
 
     // 关于 / 感谢名单
     private LinearLayout aboutScreen, aboutInner, thanksBox, thanksLoading;
@@ -213,6 +217,17 @@ public class MainActivity extends Activity {
     // 显示调节（字号 / 界面缩放，带实时预览）
     private LinearLayout displayScreen, displayInner;
     private ScrollView displayScroll;
+
+    // 收藏与历史记录（都按知识点编号记在本地，编号是稳定标识）
+    private LinearLayout favScreen, histScreen;
+    private SvList favList, histList;
+    private TextView favTitle, histTitle;
+    private final Set<String> favIds = new LinkedHashSet<String>();
+    private final List<String> histIds = new ArrayList<String>();
+    private final Map<String, Hit> hitById = new HashMap<String, Hit>();
+    private static final int HIST_MAX = 50;
+    /** 当前详情页这条知识点的编号（无编号的专题不能收藏、不进历史）。 */
+    private String curDetailId = "";
 
     // 今日新增（分页加载）
     private LinearLayout todayScreen;
@@ -334,6 +349,7 @@ public class MainActivity extends Activity {
         haptic = prefs.getBoolean("haptic", true);
         loadGitHub();
         loadData();
+        loadMarks();
         loadOrderKeys();
         buildUi();
         boolean tuned = prefs.getBoolean("display_tuned", false);
@@ -354,6 +370,60 @@ public class MainActivity extends Activity {
         root.postDelayed(new Runnable() {
             public void run() { showGreeting(); }
         }, 700);
+    }
+
+    /** 收藏星：收藏了是琥珀金，没收藏是灰的。 */
+    private void paintStar(TextView star) {
+        boolean on = favIds.contains(stableKey(curDetailId));
+        star.setTextColor(on ? C_HI : C_SUB);
+        star.setContentDescription(on ? "取消收藏" : "收藏这条知识点");
+    }
+
+    /** 去掉编号里会变的日期段，得到稳定标识。
+     *  编号格式「科目码-修改日期-章序号[-条序号]」，日期段随内容增厚而变，序号段永不重排，
+     *  所以收藏和历史只认「科目码-章序号-条序号」——条目改过内容也不会丢。 */
+    private static String stableKey(String id) {
+        if (id == null) return "";
+        String[] p = id.split("-");
+        if (p.length >= 3) {
+            StringBuilder sb = new StringBuilder(p[0]);
+            for (int i = 2; i < p.length; i++) sb.append("-").append(p[i]);
+            return sb.toString();
+        }
+        return id;
+    }
+
+    /** 读本地的收藏与历史（存的是稳定编号）。 */
+    private void loadMarks() {
+        favIds.clear();
+        histIds.clear();
+        String f = prefs.getString("fav_ids", "");
+        if (f.length() > 0) for (String id : f.split(",")) if (id.length() > 0) favIds.add(id);
+        String h = prefs.getString("hist_ids", "");
+        if (h.length() > 0) for (String id : h.split(",")) if (id.length() > 0) histIds.add(id);
+    }
+
+    private void saveFav() {
+        prefs.edit().putString("fav_ids", TextUtils.join(",", favIds)).apply();
+    }
+
+    private void saveHist() {
+        prefs.edit().putString("hist_ids", TextUtils.join(",", histIds)).apply();
+    }
+
+    /** 进历史：同编号先去掉再放最前，超过 50 条丢掉最旧的。 */
+    private void pushHistory(String id) {
+        String key = stableKey(id);
+        if (key.length() == 0) return;
+        histIds.remove(key);
+        histIds.add(0, key);
+        while (histIds.size() > HIST_MAX) histIds.remove(histIds.size() - 1);
+        saveHist();
+    }
+
+    /** 按稳定编号取条目；查不到就是这条知识点已经被删了或改没了。 */
+    private Hit hitOf(String id) {
+        return hitById.get(stableKey(id));
     }
 
     private void loadOrderKeys() {
@@ -434,6 +504,10 @@ public class MainActivity extends Activity {
                             h.path = s.name + " › " + b.name + " › " + c.name;
                             h.item = it;
                             allHits.add(h);
+                            if (it.id != null && it.id.length() > 0) {
+                                hitById.put(stableKey(it.id), h);
+                                hitById.put(it.id, h);
+                            }
                         }
                     } else if (!c.sec.isEmpty()) {
                         Hit h = new Hit();
@@ -1588,6 +1662,27 @@ public class MainActivity extends Activity {
         buildTodayScreen();
         root.addView(todayScreen, fp());
 
+        // 收藏 / 最近浏览：都是 SvList，圆屏占位与过滚跟其他列表一致
+        favScreen = newScreen();
+        favList = new SvList();
+        favList.addHead(makeBackHeader("‹ 返回", new View.OnClickListener() {
+            public void onClick(View v) { goBack(S_SUBJECT); }
+        }));
+        favTitle = pageTitle("我的收藏");
+        favList.addHead(favTitle);
+        favScreen.addView(favList.sc, lw());
+        root.addView(favScreen, fp());
+
+        histScreen = newScreen();
+        histList = new SvList();
+        histList.addHead(makeBackHeader("‹ 返回", new View.OnClickListener() {
+            public void onClick(View v) { goBack(S_SUBJECT); }
+        }));
+        histTitle = pageTitle("最近浏览");
+        histList.addHead(histTitle);
+        histScreen.addView(histList.sc, lw());
+        root.addView(histScreen, fp());
+
         // 主页
         subjectList = new SvList();
         subjectScreen.addView(subjectList.sc, lw());
@@ -2119,6 +2214,76 @@ public class MainActivity extends Activity {
         setPath(tv, seg[0], seg[1], child.toString());
     }
 
+    /** 页面标题（收藏、最近浏览这类列表页顶上那行）。 */
+    private TextView pageTitle(String text) {
+        TextView t = new TextView(this);
+        t.setText(text);
+        t.setTextSize(m.subtitleSize + 2f);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setTextColor(C_PRIMARY);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(0, 0, 0, dp(3));
+        return t;
+    }
+
+    /** 收藏页：按科目分组列出收藏的知识点（存的是稳定编号，条目改过内容也不会丢）。 */
+    private void renderFav() {
+        final Map<String, List<Hit>> groups = new LinkedHashMap<String, List<Hit>>();
+        int found = 0;
+        for (String id : favIds) {
+            Hit h = hitOf(id);
+            if (h == null) continue;      // 这条已经不在库里了
+            found++;
+            String subj = h.path.split(" › ")[0];
+            List<Hit> g = groups.get(subj);
+            if (g == null) {
+                g = new ArrayList<Hit>();
+                groups.put(subj, g);
+            }
+            g.add(h);
+        }
+        final List<Object> rows = new ArrayList<Object>();
+        for (Map.Entry<String, List<Hit>> e : groups.entrySet()) {
+            rows.add(e.getKey());
+            rows.addAll(e.getValue());
+        }
+        favTitle.setText(found == 0 ? "还没有收藏" : "我的收藏 · " + found + " 条");
+        favList.bind(new RowSource() {
+            public int size() { return rows.size(); }
+            public View make(final int i) {
+                Object o = rows.get(i);
+                if (o instanceof String) return sectionHeader((String) o);
+                final Hit h = (Hit) o;
+                return hitRow(h.item.t, shortPath(h.path), new Runnable() {
+                    public void run() {
+                        openDetail(h.item.t, h.item.sec, h.path, S_FAV, h.item.img, h.item.ex, h.item.id);
+                    }
+                });
+            }
+        });
+    }
+
+    /** 最近浏览：按时间倒序，最多 50 条。 */
+    private void renderHist() {
+        final List<Hit> rows = new ArrayList<Hit>();
+        for (String id : histIds) {
+            Hit h = hitOf(id);
+            if (h != null) rows.add(h);
+        }
+        histTitle.setText(rows.isEmpty() ? "还没有浏览记录" : "最近浏览 · " + rows.size() + " 条");
+        histList.bind(new RowSource() {
+            public int size() { return rows.size(); }
+            public View make(final int i) {
+                final Hit h = rows.get(i);
+                return hitRow(h.item.t, shortPath(h.path), new Runnable() {
+                    public void run() {
+                        openDetail(h.item.t, h.item.sec, h.path, S_HIST, h.item.img, h.item.ex, h.item.id);
+                    }
+                });
+            }
+        });
+    }
+
     /** 面包屑最前面那一段，点了直接回主页（省得一页一页往外退）。 */
     private static final String HOME_SEG = "首页";
 
@@ -2361,7 +2526,8 @@ public class MainActivity extends Activity {
                                 curChild = chs.get(i);
                                 if ("topic".equals(curChild.type) && curChild.items.isEmpty()) {
                                     openDetail(curChild.name, curChild.sec,
-                                            curSubject.name + " › " + curBlock.name, S_CHILD, null);
+                                            curSubject.name + " › " + curBlock.name, S_CHILD, null,
+                                            null, null);
                                 } else {
                                     openItems();
                                 }
@@ -2406,7 +2572,7 @@ public class MainActivity extends Activity {
                     public void run() {
                         openDetail(it.t, it.sec,
                                 curSubject.name + " › " + curBlock.name + " › " + curChild.name,
-                                S_ITEM, it.img, it.ex);
+                                S_ITEM, it.img, it.ex, it.id);
                     }
                 });
             }
@@ -2442,7 +2608,7 @@ public class MainActivity extends Activity {
                 final Hit h = searchHits.get(i);
                 return hitRow(h.item.t, shortPath(h.path), new Runnable() {
                     public void run() {
-                        openDetail(h.item.t, h.item.sec, h.path, S_SEARCH, h.item.img, h.item.ex);
+                        openDetail(h.item.t, h.item.sec, h.path, S_SEARCH, h.item.img, h.item.ex, h.item.id);
                     }
                 });
             }
@@ -2680,24 +2846,61 @@ public class MainActivity extends Activity {
 
     // ================= 详情 =================
     private void openDetail(String title, List<Section> secs, String path, int back) {
-        openDetail(title, secs, path, back, null, null);
+        openDetail(title, secs, path, back, null, null, null);
     }
 
     private void openDetail(String title, List<Section> secs, String path, int back, String img) {
-        openDetail(title, secs, path, back, img, null);
+        openDetail(title, secs, path, back, img, null, null);
     }
 
-    private void openDetail(String title, List<Section> secs, String path, int back, String img, List<Example> ex) {
+    private void openDetail(String title, List<Section> secs, String path, int back, String img,
+                            List<Example> ex, String id) {
         detailBack = back;
         curExamples = (ex == null) ? new ArrayList<Example>() : ex;
         lastPath = (path == null) ? "" : path;
+        curDetailId = (id == null) ? "" : id;
+        if (curDetailId.length() > 0) pushHistory(curDetailId);
         detailTitle.setText(applyMarkup(title));
         setPath(detailPath, path);
         detailInner.removeAllViews();
         if (overDist() > 0) detailInner.addView(makeScrollSpacer());
         detailInner.addView(detailBackBtn, wrapM());
         detailInner.addView(detailPath, wrap());
-        detailInner.addView(detailTitle, wrap());
+        // 标题与收藏星并排：星在标题右边，按一下收藏 / 取消，编号记在本地
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setOrientation(LinearLayout.HORIZONTAL);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        if (detailTitle.getParent() instanceof ViewGroup) {
+            ((ViewGroup) detailTitle.getParent()).removeView(detailTitle);
+        }
+        titleRow.addView(detailTitle, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        if (curDetailId.length() > 0) {
+            final TextView star = new TextView(this);
+            star.setText("★");
+            star.setTextSize(m.titleSize);
+            star.setTypeface(Typeface.DEFAULT_BOLD);
+            star.setGravity(Gravity.CENTER);
+            star.setPadding(dp(8), dp(2), dp(4), dp(2));
+            paintStar(star);
+            star.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    vibrate();
+                    String key = stableKey(curDetailId);
+                    if (favIds.remove(key)) {
+                        toast("已取消收藏");
+                    } else {
+                        favIds.add(key);
+                        toast("已收藏，可在主页「我的收藏」里找到");
+                    }
+                    saveFav();
+                    paintStar(star);
+                }
+            });
+            titleRow.addView(star, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        }
+        detailInner.addView(titleRow, wrap());
         if (img != null && img.length() > 0) addFigure(img);
 
         if (secs == null || secs.isEmpty()) {
@@ -3928,7 +4131,7 @@ public class MainActivity extends Activity {
         screen = s;
         View[] screens = {subjectScreen, blockScreen, childScreen, listScreen, detailScreen, settingsScreen,
                 searchScreen, feedbackScreen, mineScreen, profileScreen, changelogScreen, aboutScreen,
-                displayScreen, todayScreen, examplesScreen};
+                displayScreen, todayScreen, examplesScreen, favScreen, histScreen};
         View target = screens[s];
         boolean shown = target.getVisibility() == View.VISIBLE && target.getAlpha() > 0.95f
                 && Math.abs(target.getTranslationX()) < dp(4);
@@ -3953,10 +4156,16 @@ public class MainActivity extends Activity {
             if (subjectDirty) {
                 final List<String> keys = new ArrayList<String>(orderKeys);
                 subjectList.bind(new RowSource() {
-                    public int size() { return keys.size() + 3; }
+                    public int size() { return keys.size() + 5; }
                     public View make(final int i) {
                         Runnable toSearch = new Runnable() {
                             public void run() { showScreen(S_SEARCH); }
+                        };
+                        Runnable toFav = new Runnable() {
+                            public void run() { showScreen(S_FAV); }
+                        };
+                        Runnable toHist = new Runnable() {
+                            public void run() { showScreen(S_HIST); }
                         };
                         Runnable toToday = new Runnable() {
                             public void run() { showScreen(S_TODAY); }
@@ -3965,9 +4174,11 @@ public class MainActivity extends Activity {
                             public void run() { showScreen(S_SETTINGS); }
                         };
                         if (i == 0) return textRow("搜索（全部知识点）", C_PRIMARY, toSearch);
-                        if (i == keys.size() + 1) return textRow("新增知识点（今日）", C_PRIMARY, toToday);
-                        if (i == keys.size() + 2) return textRow("设置", C_PRIMARY, toSettings);
-                        final String k = keys.get(i - 1);
+                        if (i == 1) return textRow("我的收藏", C_PRIMARY, toFav);
+                        if (i == keys.size() + 2) return textRow("最近浏览", C_PRIMARY, toHist);
+                        if (i == keys.size() + 3) return textRow("新增知识点（今日）", C_PRIMARY, toToday);
+                        if (i == keys.size() + 4) return textRow("设置", C_PRIMARY, toSettings);
+                        final String k = keys.get(i - 2);
                         Subject su = subjectMap.get(k);
                         return textRow(su == null ? k : su.name, C_PRIMARY, new Runnable() {
                             public void run() {
@@ -4011,6 +4222,10 @@ public class MainActivity extends Activity {
         } else if (s == S_CHANGELOG) {
             if (!changelogFilled) fillChangelog();
             scrollToTop(changelogScroll);
+        } else if (s == S_FAV) {
+            renderFav();
+        } else if (s == S_HIST) {
+            renderHist();
         }
 
         // 只有「返回上一级」才回到离开时的位置；正向点进页面一律回到默认位置（跳过顶部占位贴顶）。
@@ -4034,6 +4249,8 @@ public class MainActivity extends Activity {
             case S_SEARCH: return searchList;
             case S_MYFEEDBACK: return mineList;
             case S_TODAY: return todayList;
+            case S_FAV: return favList;
+            case S_HIST: return histList;
             default: return null;
         }
     }
@@ -4088,6 +4305,8 @@ public class MainActivity extends Activity {
         if (screen == S_ABOUT) return S_SETTINGS;
         if (screen == S_DISPLAY) return tuningFirstRun ? -1 : S_SETTINGS;
         if (screen == S_TODAY) return S_SUBJECT;
+        if (screen == S_FAV) return S_SUBJECT;
+        if (screen == S_HIST) return S_SUBJECT;
         return -1;
     }
 
@@ -4105,6 +4324,8 @@ public class MainActivity extends Activity {
             case S_ABOUT: return aboutScreen;
             case S_DISPLAY: return displayScreen;
             case S_TODAY: return todayScreen;
+            case S_FAV: return favScreen;
+            case S_HIST: return histScreen;
             default: return null;
         }
     }
@@ -4205,6 +4426,8 @@ public class MainActivity extends Activity {
             case S_ABOUT: return aboutScreen;
             case S_DISPLAY: return displayScreen;
             case S_TODAY: return todayScreen;
+            case S_FAV: return favScreen;
+            case S_HIST: return histScreen;
             default: return subjectScreen;
         }
     }
@@ -5148,7 +5371,7 @@ public class MainActivity extends Activity {
                 final Hit h = todayShown.get(i);
                 return hitRow(h.item.t, shortPath(h.path), new Runnable() {
                     public void run() {
-                        openDetail(h.item.t, h.item.sec, h.path, S_TODAY, h.item.img, h.item.ex);
+                        openDetail(h.item.t, h.item.sec, h.path, S_TODAY, h.item.img, h.item.ex, h.item.id);
                     }
                 });
             }
@@ -6438,7 +6661,7 @@ public class MainActivity extends Activity {
                         }
                         secs.add(s2);
                         openDetail("#" + number + " " + title, secs, status + " · " + shortTime(
-                                issue.optString("created_at", "")), S_MYFEEDBACK, null);
+                                issue.optString("created_at", "")), S_MYFEEDBACK, null, null, null);
                         curIssue = issue;
                         addIssueActions(issue);
                     }
