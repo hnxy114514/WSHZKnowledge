@@ -423,7 +423,10 @@ public class MainActivity extends Activity {
 
     /** 按稳定编号取条目；查不到就是这条知识点已经被删了或改没了。 */
     private Hit hitOf(String id) {
-        return hitById.get(stableKey(id));
+        if (id == null || id.length() == 0) return null;
+        Hit h = hitById.get(id);                 // 收藏/历史里存的就是稳定编号，先直接查
+        if (h == null) h = hitById.get(stableKey(id));   // 万一存的是完整编号（日期段变过），再折算一次
+        return h;
     }
 
     private void loadOrderKeys() {
@@ -3852,7 +3855,10 @@ public class MainActivity extends Activity {
             settingsInner.addView(orderRow(idx), wrap());
         }
 
-        // 记录日志开关：点击后由 toggleRow 自己震动，这里只处理状态切换
+        // 记录日志开关：点击后由 toggleRow 自己震动，这里只处理状态切换。
+        // 上面是排序行（一行挨一行没有外边距），这里要自己留出间隔，否则两块会贴在一起
+        LinearLayout.LayoutParams logLp = wrap();
+        logLp.topMargin = dp(8);
         settingsInner.addView(toggleRow("记录日志", logEnabled, new View.OnClickListener() {
             public void onClick(View v) {
                 if (logEnabled) {
@@ -3863,7 +3869,7 @@ public class MainActivity extends Activity {
                     showLogEnableDialog();
                 }
             }
-        }), wrap());
+        }), logLp);
         TextView logHint = new TextView(this);
         logHint.setText("平时不记录；开启后把运行日志存在本机，提交反馈时可附带，方便排查问题。");
         logHint.setTextSize(m.subtitleSize - 2f);
