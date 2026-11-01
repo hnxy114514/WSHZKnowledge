@@ -226,6 +226,9 @@ public class MainActivity extends Activity {
     private final List<String> histIds = new ArrayList<String>();
     private final Map<String, Hit> hitById = new HashMap<String, Hit>();
     private static final int HIST_MAX = 50;
+    /** 是否正在下载更新包：同一时间只允许一条下载线。 */
+    private boolean updating = false;
+
     /** 当前详情页这条知识点的编号（无编号的专题不能收藏、不进历史）。 */
     private String curDetailId = "";
 
@@ -371,6 +374,9 @@ public class MainActivity extends Activity {
             public void run() { showGreeting(); }
         }, 700);
     }
+
+    /** 收藏星这一列的宽度（标题左边也留同宽，保证标题相对整行居中）。 */
+    private int STAR_W() { return dp(34); }
 
     /** 收藏星：收藏了是琥珀金，没收藏是灰的。 */
     private void paintStar(TextView star) {
@@ -554,6 +560,11 @@ public class MainActivity extends Activity {
 
     /** 检查 GitHub Release 最新版：有新版先展示更新说明，确认后再下载覆盖安装。 */
     private void checkUpdate(final boolean silent) {
+        // 已经在下载、或者更新弹窗正开着，就不再开第二轮：两条线同时下同一个包必然失败
+        if (updating || (updateDialog != null && updateDialog.isShowing())) {
+            if (!silent) toast(updating ? "正在下载更新，稍等一下" : "更新提示已经弹出来了");
+            return;
+        }
         downloadCancel = false;
         if (!silent) progressShow("正在检查更新…", "连接更新服务器", -1);
         new Thread(new Runnable() {
@@ -589,6 +600,8 @@ public class MainActivity extends Activity {
         final String ver = tagWithV(tag);
         // 选过「稍后」的版本，开机自动检查时不再打扰；手动检查仍然提示
         if (silent && ver.equals(prefs.getString("skip_version", ""))) return;
+        if (updating) return;                                            // 正在下载就别再弹
+        if (updateDialog != null && updateDialog.isShowing()) return;    // 已经弹着一个，不叠第二个
         dismissUpdateDialog();
 
         LinearLayout box = new LinearLayout(this);
@@ -731,6 +744,7 @@ public class MainActivity extends Activity {
 
     /** 用户确认更新后：权限不足先去申请，回来接着下载；然后下载并唤起安装器。 */
     private void startUpdate(final String url, final String tag) {
+        if (updating) { toast("已经在下载了"); return; }
         if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
             pendingUrl = url;
             pendingTag = tag;
@@ -738,6 +752,7 @@ public class MainActivity extends Activity {
             requestInstallPermission();
             return;
         }
+        updating = true;
         new Thread(new Runnable() {
             public void run() {
                 try {
@@ -800,6 +815,8 @@ public class MainActivity extends Activity {
                     } else {
                         toast("下载失败：" + e.getMessage());
                     }
+                } finally {
+                    updating = false;   // 下载这条线走完了，才允许下一次更新
                 }
             }
         }).start();
@@ -2876,6 +2893,11 @@ public class MainActivity extends Activity {
         if (detailTitle.getParent() instanceof ViewGroup) {
             ((ViewGroup) detailTitle.getParent()).removeView(detailTitle);
         }
+        if (curDetailId.length() > 0) {
+            // 左边垫一个和收藏星同宽的透明占位，标题才不会被右边的星顶偏
+            View pad = new View(this);
+            titleRow.addView(pad, new LinearLayout.LayoutParams(STAR_W(), dp(1)));
+        }
         titleRow.addView(detailTitle, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         if (curDetailId.length() > 0) {
@@ -2900,8 +2922,8 @@ public class MainActivity extends Activity {
                     paintStar(star);
                 }
             });
-            titleRow.addView(star, new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            titleRow.addView(star, new LinearLayout.LayoutParams(STAR_W(),
+                    LinearLayout.LayoutParams.WRAP_CONTENT));
         }
         detailInner.addView(titleRow, wrap());
         if (img != null && img.length() > 0) addFigure(img);
