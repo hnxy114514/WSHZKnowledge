@@ -982,20 +982,31 @@ SUBJ_CODE = {"chinese": "CH", "math": "MA", "english": "EN", "physics": "PH",
 
 
 def assign_ids(ordered):
-    """给每个章、每个知识点分配可读编号，并持久化到 tools/ids.json。
+    """给章、块（子块）、知识点分配层次化编号，持久化到 tools/ids.json。
 
-    规则：<科目码>-<加入日期 YYMMDD>-<章序号>[-<章内序号>]
-    例：MA-261028-03（数学第 3 章）、MA-261028-03-012（该章第 12 条）
-    已分配过的编号永不变；新出现的章/知识点用构建当天的日期。
+    规则（一一对应）：
+      章：      <科目码>-<章序号>                          例 BI-01
+      块（子块）：<科目码>-<章序号>-<块序号>               例 BI-01-01
+      知识点：  <科目码>-<章序号>-<块序号>-<条序号>-<日期>  例 BI-01-01-001-261102
+    日期段只在知识点、且放在编号最后（供「今日新增」按日期筛）；章与块不含日期。
+    已分配过的编号永不变；新出现的章/块/知识点用构建当天日期（仅知识点带日期）。
     """
     path = os.path.join(TOOLS, "ids.json")
     try:
         with open(path, encoding="utf-8") as f:
             ids = json.load(f)
     except Exception:
-        ids = {"v": 1, "blocks": {}, "items": {}}
+        ids = {}
+    # 编号体系重构（v1->v2：引入子块编号、日期段移到知识点末段）：版本不符即整库重排
+    EXPECT_V = 2
+    if ids.get("v") != EXPECT_V:
+        ids = {}
+    ids.setdefault("v", EXPECT_V)
+    ids.setdefault("blocks", {})
+    ids.setdefault("sections", {})
+    ids.setdefault("items", {})
     today = _dt.date.today().strftime("%y%m%d")
-    added_b = added_i = 0
+    added_b = added_s = added_i = 0
     for s in ordered:
         code = SUBJ_CODE.get(s["s"], "XX")
         for b in s["blocks"]:
@@ -1003,34 +1014,46 @@ def assign_ids(ordered):
             rec = ids["blocks"].get(bk)
             if rec is None:
                 no = sum(1 for k in ids["blocks"] if k.startswith(s["s"] + "|")) + 1
-                rec = {"id": "%s-%s-%02d" % (code, today, no), "d": today}
+                rec = {"id": "%s-%02d" % (code, no)}
                 ids["blocks"][bk] = rec
                 added_b += 1
-            b["id"] = rec["id"]
-            ch = rec["id"].rsplit("-", 1)[-1]
-            cnt = sum(1 for k in ids["items"] if k.startswith(bk + "|"))
+            b["id"] = rec["id"]                                  # 章编号 BI-01
+            ch = rec["id"].rsplit("-", 1)[-1]                    # 章序号 01
+            cnt_sec = sum(1 for k in ids["sections"] if k.startswith(bk + "|"))
             for c in b["children"]:
+                sk = bk + "|" + c["name"]
+                rsec = ids["sections"].get(sk)
+                if rsec is None:
+                    cnt_sec += 1
+                    rsec = {"id": "%s-%s-%02d" % (code, ch, cnt_sec)}   # 块编号 BI-01-01
+                    ids["sections"][sk] = rsec
+                    added_s += 1
+                c["id"] = rsec["id"]                              # 写进数据
+                secno = rsec["id"].rsplit("-", 1)[-1]             # 块序号 01
+                cnt_it = sum(1 for k in ids["items"] if k.startswith(sk + "|"))
                 for it in c.get("items", []):
-                    ik = bk + "|" + it["t"]
+                    ik = sk + "|" + it["t"]
                     r2 = ids["items"].get(ik)
                     if r2 is None:
-                        cnt += 1
-                        r2 = {"id": "%s-%s-%s-%03d" % (code, today, ch, cnt), "d": today}
+                        cnt_it += 1
+                        r2 = {"id": "%s-%s-%s-%03d-%s" % (code, ch, secno, cnt_it, today),
+                              "d": today}
                         ids["items"][ik] = r2
                         added_i += 1
                     it["id"] = r2["id"]
                     it["d"] = r2["d"]
     with open(path, "w", encoding="utf-8") as f:
         json.dump(ids, f, ensure_ascii=False, indent=0)
-    print("编号分配：新增章 %d，新增知识点 %d（日期 %s）" % (added_b, added_i, today))
-    return added_b, added_i
+    print("编号分配：新增章 %d，新增块 %d，新增知识点 %d（日期 %s）"
+          % (added_b, added_s, added_i, today))
+    return added_b, added_s, added_i
 
 img_total = apply_images(ordered)
 dedupe_n, dedupe_reports, dedupe_warns = dedupe_items(ordered)
 ov_n = apply_overrides(ordered)
 frac_n = apply_frac(ordered)
 hl_total, hl_miss = apply_highlights(ordered)
-id_b, id_i = assign_ids(ordered)
+id_b, id_sec, id_i = assign_ids(ordered)
 
 # 分科输出：每个科目一个 json 文件 + order.json 索引（数据库分文件，UI 只读）
 data_dir = os.path.join(TOOLS, "..", "app", "src", "main", "assets", "data")
