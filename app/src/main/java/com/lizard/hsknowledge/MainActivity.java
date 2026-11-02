@@ -756,6 +756,24 @@ public class MainActivity extends Activity {
             int sw = getResources().getDisplayMetrics().widthPixels;
             w.setLayout((int) (sw * (m.round ? 0.74f : 0.86f)), WindowManager.LayoutParams.WRAP_CONTENT);
         } catch (Exception ignored) { }
+
+        // 正文区高度贴合实际字数：内容短就刚好放下（不滚动、下面也不空一大块），
+        // 内容长才封顶到 maxH 再滚动。等弹窗真正布局完在量 body 的真实高度（此时宽度是真实的）。
+        box.getViewTreeObserver().addOnGlobalLayoutListener(
+                new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
+                    public void onGlobalLayout() {
+                        int want = body.getMeasuredHeight() + dp(6);   // 多 6dp，避免行距/标点的误差裁掉末行
+                        int h = Math.min(want, maxH);
+                        if (sc.getLayoutParams() != null && sc.getLayoutParams().height != h) {
+                            sc.getLayoutParams().height = h;
+                            sc.requestLayout();
+                        }
+                        // 只量一次：正文高度不会变了，量完就撤监听，免得改高度触发重布局又回调
+                        try {
+                            box.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                        } catch (Exception ignored) { }
+                    }
+                });
     }
 
     private void dismissUpdateDialog() {
@@ -779,7 +797,6 @@ public class MainActivity extends Activity {
             if (l.length() == 0) continue;
             if (sb.length() > 0) sb.append('\n');
             sb.append(l);
-            if (sb.length() > 900) { sb.append("\n…"); break; }
         }
         return sb.toString();
     }
