@@ -130,7 +130,7 @@ public class MainActivity extends Activity {
     static class Example { String t, body; }
     static class Item { String t; int star; String img; String id, d; List<Section> sec = new ArrayList<Section>(); List<Example> ex = new ArrayList<Example>(); }
     static class Child { String type; String name; List<Item> items = new ArrayList<Item>(); List<Section> sec = new ArrayList<Section>(); }
-    static class Block { String name, id; List<Child> children = new ArrayList<Child>(); }
+    static class Block { String name, id; Subject subj; List<Child> children = new ArrayList<Child>(); }
     static class Subject { String key, name; List<Block> blocks = new ArrayList<Block>(); }
     static class Hit { String path; Item item; }
 
@@ -223,8 +223,10 @@ public class MainActivity extends Activity {
     private SvList favList, histList;
     private TextView favTitle, histTitle;
     private final Set<String> favIds = new LinkedHashSet<String>();
+    private final Set<String> favChIds = new LinkedHashSet<String>();   // 整章收藏：存章的稳定编号（科目码-章序号）
     private final List<String> histIds = new ArrayList<String>();
     private final Map<String, Hit> hitById = new HashMap<String, Hit>();
+    private final Map<String, Block> blockByKey = new HashMap<String, Block>();
     private static final int HIST_MAX = 50;
     /** 是否正在下载更新包：同一时间只允许一条下载线。 */
     private boolean updating = false;
@@ -385,6 +387,13 @@ public class MainActivity extends Activity {
         star.setContentDescription(on ? "取消收藏" : "收藏这条知识点");
     }
 
+    /** 整章收藏星：按章的稳定编号判断高亮。 */
+    private void paintChStar(TextView star, String key) {
+        boolean on = favChIds.contains(key);
+        star.setTextColor(on ? C_HI : C_SUB);
+        star.setContentDescription(on ? "取消收藏本章" : "收藏本章");
+    }
+
     /** 去掉编号里会变的日期段，得到稳定标识。
      *  编号格式「科目码-修改日期-章序号[-条序号]」，日期段随内容增厚而变，序号段永不重排，
      *  所以收藏和历史只认「科目码-章序号-条序号」——条目改过内容也不会丢。 */
@@ -403,10 +412,13 @@ public class MainActivity extends Activity {
     private void loadMarks() {
         favIds.clear();
         histIds.clear();
+        favChIds.clear();
         String f = prefs.getString("fav_ids", "");
         if (f.length() > 0) for (String id : f.split(",")) if (id.length() > 0) favIds.add(id);
         String h = prefs.getString("hist_ids", "");
         if (h.length() > 0) for (String id : h.split(",")) if (id.length() > 0) histIds.add(id);
+        String fc = prefs.getString("fav_ch_ids", "");
+        if (fc.length() > 0) for (String id : fc.split(",")) if (id.length() > 0) favChIds.add(id);
     }
 
     private void saveFav() {
@@ -415,6 +427,10 @@ public class MainActivity extends Activity {
 
     private void saveHist() {
         prefs.edit().putString("hist_ids", TextUtils.join(",", histIds)).apply();
+    }
+
+    private void saveFavCh() {
+        prefs.edit().putString("fav_ch_ids", TextUtils.join(",", favChIds)).apply();
     }
 
     /** 进历史：同编号先去掉再放最前，超过 50 条丢掉最旧的。 */
@@ -498,6 +514,8 @@ public class MainActivity extends Activity {
                     }
                 }
                 s.blocks.add(b);
+                b.subj = s;
+                blockByKey.put(stableKey(b.id), b);
             }
         }
         return s;
@@ -535,6 +553,7 @@ public class MainActivity extends Activity {
 
     private void loadData() {
         try {
+            blockByKey.clear();
             JSONObject orderObj = readJsonAsset("data/order.json");
             JSONArray orderArr = orderObj.getJSONArray("order");
             for (int i = 0; i < orderArr.length(); i++) {
@@ -2170,6 +2189,105 @@ public class MainActivity extends Activity {
         return row;
     }
 
+    /** 章列表行：章名占主位，右侧一颗收藏星；点章名进章，点星切换整章收藏。 */
+    private View blockRow(final Block b) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        applyClickBg(row, C_PILL);
+        row.setPadding(dp(10), dp(9), dp(10), dp(9));
+
+        TextView name = new TextView(this);
+        name.setTextSize(lsSp());
+        name.setTextColor(0xFFF5F5F5);
+        name.setTypeface(Typeface.DEFAULT_BOLD);
+        name.setGravity(Gravity.CENTER);
+        name.setMaxLines(6);
+        name.setEllipsize(null);
+        name.setLineSpacing(dp(1), 1.08f);
+        name.setText(applyMarkup(b.name));
+        row.addView(name, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        final String key = stableKey(b.id);
+        final TextView star = new TextView(this);
+        star.setText("★");
+        star.setTextSize(m.subtitleSize);
+        star.setTypeface(Typeface.DEFAULT_BOLD);
+        star.setGravity(Gravity.CENTER);
+        star.setPadding(dp(8), dp(2), dp(4), dp(2));
+        paintChStar(star, key);
+        star.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                if (favChIds.remove(key)) toast("已取消收藏本章");
+                else { favChIds.add(key); toast("已收藏本章，可在主页「我的收藏」里找到"); }
+                saveFavCh();
+                paintChStar(star, key);
+            }
+        });
+        row.addView(star, new LinearLayout.LayoutParams(STAR_W(),
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        row.setOnClickListener(rowClick(new Runnable() {
+            public void run() {
+                curBlock = b;
+                openChildren();
+            }
+        }));
+        return row;
+    }
+
+    /** 收藏页里的「整章」条目：星 + 章名 + 知识点数；点一下直接进这一章。 */
+    private View chapterRow(final Block b) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER);
+        box.setPadding(dp(10), dp(8), dp(10), dp(8));
+        applyClickBg(box, C_PILL);
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView star = new TextView(this);
+        star.setText("★");
+        star.setTextSize(m.subtitleSize);
+        star.setTypeface(Typeface.DEFAULT_BOLD);
+        star.setTextColor(C_HI);
+        star.setPadding(dp(2), dp(0), dp(6), dp(0));
+        top.addView(star, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        TextView nm = new TextView(this);
+        nm.setTextSize(lsSp());
+        nm.setTextColor(0xFFF0F0F0);
+        nm.setTypeface(Typeface.DEFAULT_BOLD);
+        nm.setGravity(Gravity.CENTER);
+        nm.setMaxLines(2);
+        nm.setText(applyMarkup(b.name));
+        top.addView(nm, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        box.addView(top, wrap());
+
+        int cnt = 0;
+        for (Child c : b.children) cnt += c.items.size();
+        TextView p = new TextView(this);
+        p.setTextSize(m.subtitleSize - 2f);
+        p.setTextColor(C_SUB);
+        p.setGravity(Gravity.CENTER);
+        p.setMaxLines(1);
+        p.setText("整章 · " + cnt + " 个知识点 ›");
+        box.addView(p, wrap());
+
+        box.setOnClickListener(rowClick(new Runnable() {
+            public void run() {
+                if (b.subj != null) curSubject = b.subj;
+                curBlock = b;
+                openChildren();
+            }
+        }));
+        return box;
+    }
+
     /** 搜索 / 今日新增的结果行：标题占主位，路径小字排在下面。 */
     private View hitRow(String title, String path, Runnable act) {
         LinearLayout box = new LinearLayout(this);
@@ -2248,31 +2366,44 @@ public class MainActivity extends Activity {
 
     /** 收藏页：按科目分组列出收藏的知识点（存的是稳定编号，条目改过内容也不会丢）。 */
     private void renderFav() {
-        final Map<String, List<Hit>> groups = new LinkedHashMap<String, List<Hit>>();
+        final Map<String, List<Object>> groups = new LinkedHashMap<String, List<Object>>();
         int found = 0;
         for (String id : favIds) {
             Hit h = hitOf(id);
             if (h == null) continue;      // 这条已经不在库里了
             found++;
             String subj = h.path.split(" › ")[0];
-            List<Hit> g = groups.get(subj);
+            List<Object> g = groups.get(subj);
             if (g == null) {
-                g = new ArrayList<Hit>();
+                g = new ArrayList<Object>();
                 groups.put(subj, g);
             }
             g.add(h);
         }
+        for (String key : favChIds) {
+            Block b = blockByKey.get(key);
+            if (b == null) continue;      // 这一章已经不在库里了
+            found++;
+            String subj = (b.subj != null) ? b.subj.name : "";
+            List<Object> g = groups.get(subj);
+            if (g == null) {
+                g = new ArrayList<Object>();
+                groups.put(subj, g);
+            }
+            g.add(b);
+        }
         final List<Object> rows = new ArrayList<Object>();
-        for (Map.Entry<String, List<Hit>> e : groups.entrySet()) {
+        for (Map.Entry<String, List<Object>> e : groups.entrySet()) {
             rows.add(e.getKey());
             rows.addAll(e.getValue());
         }
-        favTitle.setText(found == 0 ? "还没有收藏" : "我的收藏 · " + found + " 条");
+        favTitle.setText(found == 0 ? "还没有收藏" : "我的收藏 · " + found + " 项");
         favList.bind(new RowSource() {
             public int size() { return rows.size(); }
             public View make(final int i) {
                 Object o = rows.get(i);
                 if (o instanceof String) return sectionHeader((String) o);
+                if (o instanceof Block) return chapterRow((Block) o);
                 final Hit h = (Hit) o;
                 return hitRow(h.item.t, shortPath(h.path), new Runnable() {
                     public void run() {
@@ -2521,12 +2652,7 @@ public class MainActivity extends Activity {
         blockList.bind(new RowSource() {
             public int size() { return blocks.size(); }
             public View make(final int i) {
-                return textRow(blocks.get(i).name, 0xFFF5F5F5, new Runnable() {
-                    public void run() {
-                        curBlock = blocks.get(i);
-                        openChildren();
-                    }
-                });
+                return blockRow(blocks.get(i));
             }
         });
         showScreen(S_BLOCK);
