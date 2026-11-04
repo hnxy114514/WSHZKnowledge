@@ -25,7 +25,9 @@ WSHZKnowledge/
 │   │   ├── chinese.py / math.py / english.py /
 │   │   ├── physics.py / chem.py / bio.py /
 │   │   └── politics.py / history.py / geography.py
-│   ├── build_authored.py               构建数据：subjects → assets/data（含去重、公式分数化、定稿覆盖）
+│   ├── build_authored.py               构建数据：递归 TREE → assets/data/nodes（含去重、分数化、定稿、编号 v3）
+│   ├── migrate_tree.py                 一次性迁移脚本（旧三层 → 递归 TREE），构建时不调用
+│   ├── subjects_legacy/                旧三层源文件留底（不入库，确认新格式稳定后可删）
 │   ├── img_map.py                      配图绑定表：科目 + 节 + 知识点 → 图片文件名
 │   ├── img_gen/                       配图生成（每张图一个脚本 + 共享 common.py）
 │   │   ├── common.py                   公式排版库（LaTeX 解析 + 分式/根号绘制）+ 颜色/coords/save
@@ -33,7 +35,7 @@ WSHZKnowledge/
 │   │   └── gen_all.py                  一键重新生成全部在用配图
 │   ├── make_icon.py                    生成应用图标（表盘 + Emoji 书本，输出 5 个 dpi）
 │   ├── gen_thanks.py                   生成感谢名单的静态备份 cloud/thanks.json（发版时自动跑）
-│   ├── ids.json                        章 / 知识点编号台账（构建时读写，必须随仓库保留）
+│   ├── ids.json                        节点编号台账 v3（构建时读写，必须随仓库保留）
 │   └── emoji_src/open_book.png          图标用的书本 Emoji 源图（Fluent Emoji, MIT）
 │
 ├── cloud/
@@ -42,7 +44,7 @@ WSHZKnowledge/
 ├── local/                             本地私密文件（凭据、keystore、备忘），已被 .gitignore 排除
 ├── scripts/build.sh                   无 Gradle 构建脚本（aapt2 + javac + d8 + apksigner）
 ├── scripts/release.py                 一键发布：构建 + 创建 Release + 上传 APK + 写 cloud/version.json + 刷新 cloud/thanks.json
-├── 编号规则.md                         章 / 知识点编号的格式说明（编号里带科目码与最后修改日期）
+├── 编号规则.md                         递归节点编号规则（日期段在最前 + 日期继承流程）
 ├── .gitignore                          排除签名密钥、产物、缓存、归档
 └── README.md                           本文件
 ```
@@ -58,13 +60,13 @@ WSHZKnowledge/
 ## 数据流（一条链路）
 
 ```
-tools/subjects/*.py  （九科知识点源，人工维护）
-        │  build_authored.py
+tools/subjects/*.py  （九科递归节点树，人工维护，只写内容不写编号）
+        │  build_authored.py（唯一格式；源文件里不写 id / 日期 / star）
         ▼
-app/src/main/assets/data/*.json  （九科 JSON，构建时生成）
+app/src/main/assets/data/*.json  （每科一份 nodes 递归树，构建时生成）
         │  打包进 APK
         ▼
-App 启动时读取 assets/data，MainActivity 排版引擎渲染
+App 启动时 parseSubject 递归解析，MainActivity 用「导航栈 + 通用列表页」渲染
 ```
 
 改完 `subjects/*.py` 或 `build_authored.py`，跑 `python build/check_data.py` 做一次体检：
@@ -94,19 +96,19 @@ tools/subjects/*.py 正文里的 **片段**
 App 渲染为琥珀金加粗（applyMarkup 处理 **）
 ```
 
-例题链（知识点的下一层缩进，可选）：
+例题链（挂在叶子节点上，可选，不算下级层级）：
 
 ```
-tools/subjects/*.py 里知识点条目可带 "ex" 字段（放在 body 同级）：
+tools/subjects/*.py 的叶子节点可带 "ex" 字段（放在 body 同级）：
   "ex": [{"t": 题干（选择题把 A/B/C/D 选项用 \n 接在题干后面）,
           "body": 答案与解析}]
-        │  build_authored.py 的 to_item 原样透传（逐个过 latexify）
+        │  build_authored.py 的 to_node 原样透传（逐个过 latexify）
         ▼
-assets/data/*.json 里该条带 "ex" 数组
-        │  App parseItem 解析进 Item.ex
+assets/data/*.json 的叶子带 "ex" 数组
+        │  App parseNode 解析进 Node.ex
         ▼
-知识点列表标题旁带黄色「（例）」标记（只有含例题的条目才显示）；
-知识点详情页底部有「例题 · N 道」按钮，点进例题页逐题展示题干卡片 + 答案与解析卡片。
+叶子列表行标题旁带「（例）」标记；
+详情页底部有「例题 · N 道」按钮，点进例题页逐题展示题干卡片 + 答案与解析卡片。
 ```
 
 例题内容四条硬规矩：
@@ -118,13 +120,14 @@ assets/data/*.json 里该条带 "ex" 数组
 编号链（构建时生成并持久化）：
 
 ```
-tools/subjects/*.py  →  build_authored.py 的 assign_ids()  →  tools/ids.json（编号台账）
-                                                            →  写进 assets/data 的「章 / 知识点」
+tools/subjects/*.py  →  build_authored.py 的 assign_ids()  →  tools/ids.json（编号台账 v3）
+                                                            →  写进 assets/data 的每个节点 id
 ```
 
-规则见仓库根目录的《编号规则.md》。要点：`科目码-修改日期-章序号[-章内序号]`——日期段是该条
-**最后一次被修改的日期**，内容增厚后要把日期段改成修改当天、序号段不动。
-序号一经分配永不重排，`tools/ids.json` 必须随仓库保留（删了会全部按新日期重编）。
+规则见《编号规则.md》。要点：分组 `<科目码>-<各级序号>`；叶子 `<日期>-<父分组编号>-<本级序号>`，
+**日期段在最前**。编号只做稳定标识，UI 判断层级只看 `children`、绝不靠编号段数。
+序号一经分配永不重排，`tools/ids.json` 必须随仓库保留。
+大版本重排时 `assign_ids()` 会从旧 `items` 继承原日期，否则「今日新增」会列出全部条目。
 
 感谢名单链（唯一需要联网的内容）：
 
@@ -143,7 +146,25 @@ GitHub issues（带「已修复 / 已处理」标签）
 
 ### 1. 修改知识点内容
 
-只改 `tools/subjects/*.py`（每个文件是 `TREE = {章: {节: [知识点]}}` 的嵌套结构，按缩进即层级）。改完重新构建。
+只改 `tools/subjects/*.py`，每个文件是 `NAME` + `TREE = [ Node ... ]` 的**递归节点树**：
+
+```python
+TREE = [
+    {"name": "第一板块 现代文阅读", "children": [
+        {"name": "1.1 论述类文本阅读", "children": [
+            {"name": "论证思路与结构分析", "body": "…"},
+        ]},
+    ]},
+]
+```
+
+- 有 `children` = 分组节点，否则 = 叶子知识点；**层级随便套几层**，UI 自动识别，不用改代码。
+- 源文件只写内容：`id` / `d` / `star` / 日期都由 `build_authored.py` 生成，**不要手写编号**。
+- 想加一整块新内容：往 `TREE` 里加一个分组节点即可；想再分一层，给它套一层 `children`。
+- 改完跑 `python tools/build_authored.py` 重新生成 `assets/data/*.json`，再构建 APK。
+
+> 旧的三层源文件在 `tools/subjects_legacy/`（本地留底、不入库），`tools/migrate_tree.py` 是
+> 一次性迁移脚本，**构建流程不会调用它**。确认新格式稳定后可删掉整个 legacy 目录。
 
 ### 2. 修改 / 新增配图
 
@@ -358,16 +379,22 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
 - **全屏看图时右滑不生效**，只能点左上角「‹ 关闭」（图内支持双指缩放、单指拖动、双击定点缩放）。
 - 个人主页：设置 → 「其他」里，未登录显示「登录 GitHub」，登录后显示圆形头像 + @昵称 + 真实名字；头像会缓存到本地，离线也能显示。
 - 全局搜索：结果项第一行是知识点标题、第二行是「科目 › 章」小字；右侧 ✕ 清空关键词；从详情返回会保留关键词与结果。
-- **我的收藏**：三层，都记在本地、按科目分组列在「我的收藏」里。
-  - **收藏知识点**：详情页标题右边有颗星，按一下收藏（灰星变金星），再点一下取消。
-  - **整章收藏**：学科下的「章」列表每行右边也有一颗星，按一下收藏整章；
-    「我的收藏」里整章会单独成项（标 ★、显示章内知识点数），点一下直接进这一章。
-  - **整块收藏**：章下面的「块（子块）」列表每行右边也有一颗星，按一下收藏整块；
-    「我的收藏」里整块会单独成项（标 ★、显示块内知识点数），点一下直接进这一块。
-- **最近浏览**：打开过的知识点自动记进主页「最近浏览」，最新的排最上面，最多 50 条。
-  - 两者都存**稳定编号**（知识点编号去掉末段日期段，只留「科目码-章序号-块序号-条序号」）：
-    编号末段的日期是最后修改日期，内容增厚后会变；只存层级序号段，条目改过内容也不会丢。
-    查不到对应条目的编号（已删除）就自动跳过。
+- **通用节点列表页（UI 动态层级）**：主页点科目进 `S_NODE`，靠节点的 `children` 自动判断
+  下面还有几级——有下级就压栈继续列，是叶子就开详情页。层级深度完全由数据决定，
+  3 级 / 4 级 / 5 级并存都不用改代码；原来的 `S_BLOCK → S_CHILD → S_ITEM` 三个固定屏已合并。
+  - 导航栈 `navStack` 记录从科目根走到当前分组的路径，返回时逐层弹栈，栈空回主页。
+    面包屑按栈动态拼（几级就几段），每段可点跳回对应层；列表页节内搜索支持按后代内容匹配分组。
+  - 从收藏 / 搜索 / 历史 / 今日跳进节点时，`openNodeFrom()` 会先补齐祖先链，
+    保证详情页面包屑与返回都有得退；`nodeEntryBack` 记住来源页，退出时回到那一页而不是主页。
+- **我的收藏**：统一**一套** `favIds`（分组节点与叶子知识点都能收藏），页面改成两级：
+  - 第一级只列「有收藏的科目」（带各科目收藏数），点科目才进 `S_FAV_SUB`；
+  - 第二级把该科目的收藏内容**倒序平铺**，每行下面一行小字标出它在哪一层（短路径）。
+  - 所有中间分组节点的列表行右侧**都带收藏星**，详情页叶子标题右侧也带星；
+    左侧同宽透明占位保证标题居中。`toggleFav()` 统一读写，不再分章/块/知识点三套 prefs。
+- **最近浏览**：打开过的叶子自动记进主页「最近浏览」，最新的排最上面，**最多 50 条**
+  （`HIST_MAX`，超出自动清掉最旧的），页面顶部有一行文字把这条例明出来。
+  - 收藏与历史都存**稳定编号**（跳过编号里的 6 位日期段），日期变了也不丢；
+    查不到的编号（条目已删）自动跳过。
 - **新增知识点（今日）**：主页「设置」上方，**严格按设备当天日期**匹配知识点编号里的日期段
   （日期段=最后修改日期，所以当天新加和当天改过的条目都会出现在这里）
   （`yyMMdd`，见《编号规则.md》），只显示当天那一批，标题「今日新增 · N 条」。

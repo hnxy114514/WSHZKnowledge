@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-"""把 tools/subjects/<科目>.py 的知识点树合成为 App 用的分科数据（assets/data/*.json）。
-源文件按科目分文件，层级就是缩进：章 → 节 → 知识点。"""
+"""把 tools/subjects/<科目>.py 的递归节点树合成为 App 用的分科数据（assets/data/*.json）。
+源文件只写内容：分组节点 = name + children，叶子 = name + body；层级可以任意深。
+编号 / 日期 / 星级由本脚本按层级路径自动生成，源文件不写。"""
 import json, os, importlib.util, sys, re, difflib
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
-DATA_VERSION = 15
+DATA_VERSION = 16
 sys.path.insert(0, TOOLS)
 
 # ---------- LaTeX 标准化（数据层，UI 只负责渲染，二者解耦） ----------
@@ -48,45 +49,64 @@ def importance(t):
         return 1
     return 2
 
-def to_item(it):
-    body = latexify(it.get("body", ""))
-    star = it.get("lvl", None)
+def is_leaf(n):
+    """有 children 就是分组节点，否则是叶子知识点。只有这一条判断规则。"""
+    return "children" not in n
+
+
+def to_node(n):
+    """源文件节点 → 构建期节点。分组保留 children；叶子补上 star / sec / ex。
+    注意：构建期内部仍用 t / sec 这套字段喂给下面那些旧处理函数（去重、定稿、分数化等），
+    输出前再由 to_output_node 转成 App 用的干净格式。"""
+    if not is_leaf(n):
+        return {"name": latexify(n["name"]),
+                "children": [to_node(x) for x in n["children"]]}
+    star = n.get("lvl", None)
     if star is None:
-        star = importance(it["t"])
-    out = {"t": latexify(it["t"]), "star": star,
-           "sec": [{"h": "", "c": "K", "body": body}]}
-    # 例题：知识点下一层缩进 ex = [{"t": 题干, "body": 解析}]，有就透传
-    ex = it.get("ex", [])
+        star = importance(n["name"])
+    out = {"t": latexify(n["name"]), "star": star,
+           "sec": [{"h": "", "c": "K", "body": latexify(n.get("body", ""))}]}
+    ex = n.get("ex", [])
     if ex:
         out["ex"] = [{"t": latexify(e.get("t", "")), "body": latexify(e.get("body", ""))}
                      for e in ex if e.get("t") or e.get("body")]
+    if n.get("img"):
+        out["img"] = n["img"]
     return out
 
-def to_child(ch):
-    items = [to_item(i) for i in ch.get("items", [])]
-    return {"type": ch.get("type", "module"),
-            "name": latexify(ch.get("name", "")), "items": items}
 
-def to_block(b):
-    return {"name": latexify(b["name"]), "children": [to_child(c) for c in b.get("children", [])]}
+def walk_nodes(nodes, path=None):
+    """递归遍历同一套节点：yield (节点, 所在 children 列表, 路径名列表, 深度)。
+    path 是从科目根到当前节点父级的分组名序列（不含科目名）。"""
+    if path is None:
+        path = []
+    for n in nodes:
+        if is_leaf(n):
+            yield n, nodes, path, len(path)
+        else:
+            yield from walk_nodes(n["children"], path + [n["name"]])
+
+
+def walk_all(nodes, path=None):
+    """连分组节点一起遍历（用于编号、输出）。yield (节点, 路径名列表, 深度)。"""
+    if path is None:
+        path = []
+    for n in nodes:
+        yield n, path, len(path)
+        if not is_leaf(n):
+            yield from walk_all(n["children"], path + [n["name"]])
+
 
 def to_subject(key, data):
-    return {"s": key, "name": data["name"], "blocks": [to_block(b) for b in data["blocks"]]}
+    return {"s": key, "name": data["name"], "nodes": [to_node(x) for x in data["nodes"]]}
 
 
 def load_subject(key):
-    """读取 tools/subjects/<科目>.py，缩进树即 章 → 节 → 知识点。"""
+    """读取 tools/subjects/<科目>.py 的递归 TREE（新格式，唯一格式）。"""
     mod = load_module("subjects/" + key + ".py")
     name = getattr(mod, "NAME", key)
-    tree = getattr(mod, "TREE", {})
-    blocks = []
-    for bname, secs in tree.items():
-        children = []
-        for sname, items in secs.items():
-            children.append({"type": "module", "name": sname,
-                             "items": [dict(x) for x in items]})
-        blocks.append({"name": bname, "children": children})
-    return {"name": name, "blocks": blocks}
+    tree = getattr(mod, "TREE", [])
+    return {"name": name, "nodes": tree}
 
 
 subjects = []
@@ -538,13 +558,11 @@ def apply_overrides(ordered):
         if subj is None:
             continue
         hit = False
-        for b in subj["blocks"]:
-            for c in b["children"]:
-                for it in c.get("items", []):
-                    if it["t"] == title:
-                        it["sec"][0]["body"] = body
-                        hit = True
-                        n += 1
+        for node, _container, _path, _depth in walk_nodes(subj["nodes"]):
+            if node["t"] == title:
+                node["sec"][0]["body"] = body
+                hit = True
+                n += 1
         if not hit:
             print("! 定稿未匹配:", key, title)
     return n
@@ -572,40 +590,37 @@ def dedupe_items(ordered):
     index = {x["s"]: x for x in ordered}
 
     def find_item(subj, title):
-        for b in subj["blocks"]:
-            for c in b["children"]:
-                for it in c.get("items", []):
-                    if it["t"] == title:
-                        return c, it
-        return None, None
+        for node, container, path, _depth in walk_nodes(subj["nodes"]):
+            if node["t"] == title:
+                return container, path, node
+        return None, None, None
 
     # ① 人工确认的重复对
     for key, keep_t, drop_t in MANUAL_PAIRS:
         subj = index.get(key)
         if subj is None:
             continue
-        ck, ik = find_item(subj, keep_t)
-        cd, idd = find_item(subj, drop_t)
+        ck, pk, ik = find_item(subj, keep_t)
+        cd, pd, idd = find_item(subj, drop_t)
         if ik is None or idd is None or ik is idd:
             continue
         _merge_items(ik, idd)
-        cd["items"] = [x for x in cd["items"] if x is not idd]
+        cd.remove(idd)
         removed += 1
-        reports.append((subj["name"], ck["name"], keep_t, cd["name"], drop_t))
+        reports.append((subj["name"], pk[-1] if pk else "", keep_t,
+                        pd[-1] if pd else "", drop_t))
 
     # ② 规则判定的重复（同标题/包含/正文高度相似）
     for subj in ordered:
         slots = []
-        for b in subj["blocks"]:
-            for c in b["children"]:
-                for it in c.get("items", []):
-                    slots.append([b, c, it, False])
+        for node, container, path, _depth in walk_nodes(subj["nodes"]):
+            slots.append([container, path, node, False])
         for i in range(len(slots)):
-            b1, c1, it1, dead1 = slots[i]
+            c1, p1, it1, dead1 = slots[i]
             if dead1:
                 continue
             for j in range(i + 1, len(slots)):
-                b2, c2, it2, dead2 = slots[j]
+                c2, p2, it2, dead2 = slots[j]
                 if dead2:
                     continue
                 nt1, nt2 = _norm_title(it1["t"]), _norm_title(it2["t"])
@@ -617,7 +632,8 @@ def dedupe_items(ordered):
                 sim = _sim(body1, body2)
                 if title_same:
                     if not same_sec and sim < 0.72:
-                        warns.append((subj["name"], c1["name"], it1["t"], c2["name"], it2["t"]))
+                        warns.append((subj["name"], p1[-1] if p1 else "", it1["t"],
+                                      p2[-1] if p2 else "", it2["t"]))
                         continue
                     should = True
                 elif contain and sim >= 0.62:
@@ -636,10 +652,11 @@ def dedupe_items(ordered):
                 _merge_items(it1, it2)
                 slots[j][3] = True
                 removed += 1
-                reports.append((subj["name"], c1["name"], it1["t"], c2["name"], it2["t"]))
-        for b, c, it, dead in slots:
+                reports.append((subj["name"], p1[-1] if p1 else "", it1["t"],
+                                p2[-1] if p2 else "", it2["t"]))
+        for container, _path, it, dead in slots:
             if dead:
-                c["items"] = [x for x in c["items"] if x is not it]
+                container.remove(it)
     return removed, reports, warns
 
 
@@ -909,15 +926,10 @@ def apply_frac(ordered):
     for subj in ordered:
         if subj["s"] == "english":
             continue            # 英语的斜杠是语法并列/日期/词缀，不转分式
-        for b in subj["blocks"]:
-            for ch in b["children"]:
-                for it in ch.get("items", []):
-                    for sec in it.get("sec", []):
-                        sec["body"] = tidy_frac(sqrtify(fracify(_cn_frac(sec["body"]))))
-                        n += 1
-                for sec in ch.get("sec", []):
-                    sec["body"] = tidy_frac(sqrtify(fracify(_cn_frac(sec["body"]))))
-                    n += 1
+        for node, _container, _path, _depth in walk_nodes(subj["nodes"]):
+            for sec in node.get("sec", []):
+                sec["body"] = tidy_frac(sqrtify(fracify(_cn_frac(sec["body"]))))
+                n += 1
     return n
 
 
@@ -925,10 +937,8 @@ def apply_highlights(ordered):
     """重点高亮已直接写在正文里（**...**），这里只统计数量，渲染交给 UI。"""
     n = 0
     for subj in ordered:
-        for b in subj["blocks"]:
-            for c in b["children"]:
-                for it in c.get("items", []):
-                    n += it["sec"][0]["body"].count("**") // 2
+        for node, _container, _path, _depth in walk_nodes(subj["nodes"]):
+            n += node["sec"][0]["body"].count("**") // 2
     return n, 0
 
 
@@ -943,27 +953,15 @@ def apply_images(ordered):
             print("! 配图科目不存在:", key)
             continue
         target = None
-        for b in subj["blocks"]:
-            for ch in b["children"]:
-                if ckw in ch["name"]:
-                    for it in ch["items"]:
-                        if "img" not in it and ikw in it["t"]:
-                            target = it
-                            break
-                if target:
-                    break
-            if target:
+        # 先按「所在分组名含关键词 + 叶子标题含关键词」找
+        for node, _container, path, _depth in walk_nodes(subj["nodes"]):
+            if "img" not in node and ikw in node["t"] and any(ckw in p for p in path):
+                target = node
                 break
         if target is None:  # 回退：全科按标题关键词找
-            for b in subj["blocks"]:
-                for ch in b["children"]:
-                    for it in ch["items"]:
-                        if "img" not in it and ikw in it["t"]:
-                            target = it
-                            break
-                    if target:
-                        break
-                if target:
+            for node, _container, _path, _depth in walk_nodes(subj["nodes"]):
+                if "img" not in node and ikw in node["t"]:
+                    target = node
                     break
         if target is None:
             print("! 配图未匹配:", key, ckw, "/", ikw, "->", img)
@@ -974,7 +972,7 @@ def apply_images(ordered):
 
 
 
-# ---------- 编号：章与知识点（编号里带科目码与加入日期） ----------
+# ---------- 编号：按层级路径生成，日期段放在最前 ----------
 import datetime as _dt
 
 SUBJ_CODE = {"chinese": "CH", "math": "MA", "english": "EN", "physics": "PH",
@@ -982,14 +980,14 @@ SUBJ_CODE = {"chinese": "CH", "math": "MA", "english": "EN", "physics": "PH",
 
 
 def assign_ids(ordered):
-    """给章、块（子块）、知识点分配层次化编号，持久化到 tools/ids.json。
+    """按层级路径给每个节点分配编号，持久化到 tools/ids.json。
 
-    规则（一一对应）：
-      章：      <科目码>-<章序号>                          例 BI-01
-      块（子块）：<科目码>-<章序号>-<块序号>               例 BI-01-01
-      知识点：  <科目码>-<章序号>-<块序号>-<条序号>-<日期>  例 BI-01-01-001-261102
-    日期段只在知识点、且放在编号最后（供「今日新增」按日期筛）；章与块不含日期。
-    已分配过的编号永不变；新出现的章/块/知识点用构建当天日期（仅知识点带日期）。
+    编号只做稳定标识，UI 判断层级只看 children，绝不靠编号段数。
+    规则（一一对应，层级越深段数越多）：
+      分组节点：<科目码>-<本级序号>[-<本级序号>...]        例 CH-01、CH-01-03
+      叶子：    <日期>-<父分组编号>-<本级序号>              例 261104-CH-01-03-005
+    日期段固定在最前且是唯一的 6 位数字段，稳定键只要跳过它即可，
+    不会被误判成层级序号。已分配过的编号永不变；新出现的节点用构建当天日期（仅叶子带）。
     """
     path = os.path.join(TOOLS, "ids.json")
     try:
@@ -997,63 +995,78 @@ def assign_ids(ordered):
             ids = json.load(f)
     except Exception:
         ids = {}
-    # 编号体系重构（v1->v2：引入子块编号、日期段移到知识点末段）：版本不符即整库重排
-    EXPECT_V = 2
+    # 编号体系 v3：递归节点 + 日期段提到最前；版本不符即整库重排。
+    # 重排时从 v2 的 items 里按「科目|章|节|标题」继承原日期，
+    # 否则所有知识点都会被标成今天，「今日新增」会一次列出全部条目。
+    EXPECT_V = 3
+    old_dates = {}
+    if ids.get("v") == 2:
+        for k, v in ids.get("items", {}).items():
+            if v.get("d"):
+                old_dates[k] = v["d"]
     if ids.get("v") != EXPECT_V:
         ids = {}
     ids.setdefault("v", EXPECT_V)
-    ids.setdefault("blocks", {})
-    ids.setdefault("sections", {})
-    ids.setdefault("items", {})
+    ids.setdefault("nodes", {})
     today = _dt.date.today().strftime("%y%m%d")
-    added_b = added_s = added_i = 0
+    added_g = added_i = 0
+
+    def rec(nodes, subj_key, code, parent_id, name_path):
+        nonlocal added_g, added_i
+        for idx, n in enumerate(nodes, 1):
+            key = subj_key + "|" + "|".join(name_path + [n["name"] if not is_leaf(n) else n["t"]])
+            rec0 = ids["nodes"].get(key)
+            if rec0 is None:
+                if is_leaf(n):
+                    d = old_dates.get(key, today)      # 沿用旧日期，新条目才用今天
+                    rec0 = {"id": "%s-%s-%03d" % (d, parent_id, idx), "d": d}
+                    added_i += 1
+                else:
+                    rec0 = {"id": "%s-%02d" % (parent_id, idx)}
+                    added_g += 1
+                ids["nodes"][key] = rec0
+            n["id"] = rec0["id"]
+            if is_leaf(n):
+                n["d"] = rec0["d"]
+            else:
+                rec(n["children"], subj_key, code, rec0["id"],
+                    name_path + [n["name"]])
+
     for s in ordered:
         code = SUBJ_CODE.get(s["s"], "XX")
-        for b in s["blocks"]:
-            bk = s["s"] + "|" + b["name"]
-            rec = ids["blocks"].get(bk)
-            if rec is None:
-                no = sum(1 for k in ids["blocks"] if k.startswith(s["s"] + "|")) + 1
-                rec = {"id": "%s-%02d" % (code, no)}
-                ids["blocks"][bk] = rec
-                added_b += 1
-            b["id"] = rec["id"]                                  # 章编号 BI-01
-            ch = rec["id"].rsplit("-", 1)[-1]                    # 章序号 01
-            cnt_sec = sum(1 for k in ids["sections"] if k.startswith(bk + "|"))
-            for c in b["children"]:
-                sk = bk + "|" + c["name"]
-                rsec = ids["sections"].get(sk)
-                if rsec is None:
-                    cnt_sec += 1
-                    rsec = {"id": "%s-%s-%02d" % (code, ch, cnt_sec)}   # 块编号 BI-01-01
-                    ids["sections"][sk] = rsec
-                    added_s += 1
-                c["id"] = rsec["id"]                              # 写进数据
-                secno = rsec["id"].rsplit("-", 1)[-1]             # 块序号 01
-                cnt_it = sum(1 for k in ids["items"] if k.startswith(sk + "|"))
-                for it in c.get("items", []):
-                    ik = sk + "|" + it["t"]
-                    r2 = ids["items"].get(ik)
-                    if r2 is None:
-                        cnt_it += 1
-                        r2 = {"id": "%s-%s-%s-%03d-%s" % (code, ch, secno, cnt_it, today),
-                              "d": today}
-                        ids["items"][ik] = r2
-                        added_i += 1
-                    it["id"] = r2["id"]
-                    it["d"] = r2["d"]
+        rec(s["nodes"], s["s"], code, code, [])
     with open(path, "w", encoding="utf-8") as f:
         json.dump(ids, f, ensure_ascii=False, indent=0)
-    print("编号分配：新增章 %d，新增块 %d，新增知识点 %d（日期 %s）"
-          % (added_b, added_s, added_i, today))
-    return added_b, added_s, added_i
+    print("编号分配：新增分组 %d，新增叶子 %d（日期 %s）" % (added_g, added_i, today))
+    return added_g, added_i
+
+
+def to_output_node(n):
+    """构建期节点 → App 读取的干净格式：分组 = name+children，叶子 = name+body。
+    正文统一成单个字符串（不再包 sec 数组），例题 ex 保留。"""
+    if not is_leaf(n):
+        return {"id": n.get("id", ""), "name": n["name"],
+                "children": [to_output_node(x) for x in n["children"]]}
+    out = {"id": n.get("id", ""), "d": n.get("d", ""),
+           "name": n["t"], "body": n["sec"][0]["body"], "star": n["star"]}
+    if n.get("ex"):
+        out["ex"] = n["ex"]
+    if n.get("img"):
+        out["img"] = n["img"]
+    return out
+
+
+def to_output_subject(s):
+    return {"s": s["s"], "name": s["name"],
+            "nodes": [to_output_node(x) for x in s["nodes"]]}
+
 
 img_total = apply_images(ordered)
 dedupe_n, dedupe_reports, dedupe_warns = dedupe_items(ordered)
 ov_n = apply_overrides(ordered)
 frac_n = apply_frac(ordered)
 hl_total, hl_miss = apply_highlights(ordered)
-id_b, id_sec, id_i = assign_ids(ordered)
+id_g, id_i = assign_ids(ordered)
 
 # 分科输出：每个科目一个 json 文件 + order.json 索引（数据库分文件，UI 只读）
 data_dir = os.path.join(TOOLS, "..", "app", "src", "main", "assets", "data")
@@ -1063,7 +1076,8 @@ if not os.path.isdir(data_dir):
 for s in ordered:
     fp = os.path.join(data_dir, s["s"] + ".json")
     with open(fp, "w", encoding="utf-8") as f:
-        json.dump({"v": DATA_VERSION, "subject": s}, f, ensure_ascii=False, indent=1)
+        json.dump({"v": DATA_VERSION, "subject": to_output_subject(s)},
+                  f, ensure_ascii=False, indent=1)
 order_fp = os.path.join(data_dir, "order.json")
 with open(order_fp, "w", encoding="utf-8") as f:
     json.dump({"v": DATA_VERSION, "order": [{"s": s["s"], "name": s["name"]} for s in ordered]},
@@ -1074,11 +1088,11 @@ old_fp = os.path.abspath(old_fp)
 if os.path.exists(old_fp):
     os.remove(old_fp)
 
-n_block = sum(len(s["blocks"]) for s in ordered)
-n_item = sum(len(c["items"]) for s in ordered for b in s["blocks"] for c in b["children"])
+n_group = sum(1 for s in ordered for _n, _p, _d in walk_all(s["nodes"]) if not is_leaf(_n))
+n_item = sum(1 for s in ordered for _n, _p, _d in walk_all(s["nodes"]) if is_leaf(_n))
 print("已生成分科数据 assets/data/（每科一文件 + order.json）")
 print("科目:", [s["name"] for s in ordered])
-print("大块数:", n_block, " 考点数:", n_item, " 其中补充包新增:", extra_total)
+print("分组数:", n_group, " 叶子数:", n_item)
 print("配图绑定:", img_total, " 分数化节数:", frac_n, " 人工标重点:", hl_total, "未匹配:", hl_miss)
 print("重复合并:", dedupe_n, "条  人工定稿:", ov_n, "条")
 for r in dedupe_reports:
