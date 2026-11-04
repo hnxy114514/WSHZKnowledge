@@ -129,10 +129,10 @@
         "star": 2
        },
        {
-        "id": "261102-EN-02-01-004",
-        "d": "261102",
+        "id": "261105-EN-02-01-004",
+        "d": "261105",
         "name": "完成时态的用法",
-        "body": "现在完成时表示过去发生的动作对现在造成影响或持续到现在。\n结构为 \\frac{have}{has} done，常与 since、for、already、yet 连用。\n过去完成时表示「过去的过去」，结构为 had done。\n**现在完成时强调影响或结果，一般过去时只强调动作发生在过去**。\n延续性动词才能与一段时间连用，如 have had 而非 have bought。",
+        "body": "现在完成时：**have/has + 过去分词**，两条用法——**动作已完成但对现在有影响**（I have lost my key，所以进不去门）、**动作持续到现在**（I have lived here for 5 years）。\n标志词：already、yet、ever、never、since、for、so far、recently。\n**瞬间动词不能与一段时间连用**：用 have had 而不是 have bought，用 have been in 而不是 have come。\n过去完成时：**had + 过去分词**，表示「过去的过去」，常与 by、before、when 从句搭配。\n**现在完成时不能与明确的过去时间连用**（× I have seen him yesterday），这是最高频的错。",
         "star": 2
        },
        {
@@ -157,10 +157,10 @@
         "star": 2
        },
        {
-        "id": "261102-EN-02-01-008",
-        "d": "261102",
+        "id": "261105-EN-02-01-008",
+        "d": "261105",
         "name": "过去完成时",
-        "body": "过去完成时表示在过去某一时刻之前已经完成的动作。\n结构为 had + 过去分词。\n常与 by、before、when 等时间状语连用。\n**表示「过去的过去」，强调动作的先后顺序**。\n在宾语从句中，主句用过去时，从句可用过去完成时。",
+        "body": "构成：**had + 过去分词**，表示「在过去某一时刻之前已经完成」。\n必须有**一个过去的时间参照点**：By the time we arrived, the film had begun（参照点是 arrived）。\n三类典型场景：**by + 过去时间**、**before/after 引导的先后**、**宾语从句中主句是过去时、从句动作更早**（He said he had finished）。\n**没有过去参照点就不能用过去完成时**，这是最常见的误用。\n与一般过去时的区别：**多个过去动作按时间顺序叙述时用一般过去时**，只有需要强调「更早」时才用过去完成时。",
         "star": 2
        },
        {
@@ -185,24 +185,24 @@
         "star": 2
        },
        {
-        "id": "261102-EN-02-01-012",
-        "d": "261102",
+        "id": "261105-EN-02-01-012",
+        "d": "261105",
         "name": "一般过去时的用法",
-        "body": "一般过去时表示过去发生的动作或状态。\n结构为动词过去式。\n常与 yesterday、last year、ago 连用。\n**表示过去经常发生的动作用 used to**。\n一般过去时强调动作发生在过去。",
+        "body": "构成：**动词过去式**（be 用 was/were），否定与疑问用 did + 动词原形。\n四条核心用法：**过去某时的动作或状态**（I saw him yesterday）、**过去一段时间的习惯**（He smoked ten years ago）、**一连串过去的动作**（He stood up, opened the door and left）、**委婉语气**（I wondered if you could help）。\n时间标志：yesterday、last week、in 1998、two days ago、when 引导的从句。\n**与现在完成时的分界：一般过去时只说「发生在过去」，不交代与现在的关系；现在完成时必须体现「对现在的影响」或「持续到现在」**。\n**used to do 表示过去常常而现已不再**；be used to doing 是「习惯于」，别混。",
         "star": 2
        },
        {
-        "id": "261102-EN-02-01-013",
-        "d": "261102",
+        "id": "261105-EN-02-01-013",
+        "d": "261105",
         "name": "将来进行时",
-        "body": "**将来进行时表示将来某时刻正在进行的动作**。\n结构为 will be + 现在分词。\n如 I will be studying at 8 tomorrow。\n也表示按计划将要发生的动作。\n将来进行时强调将来的进行状态。",
+        "body": "结构：**will be + 现在分词**。\n两条用法：**将来某时刻正在进行的动作**（At 8 tomorrow I will be studying）、**按计划安排将发生**（We will be meeting at the airport）。\n**与一般将来时的区别：将来进行时强调「正在」的画面感，语气也更委婉**（Will you be using the car? 比 Will you use the car? 客气）。\n**临时决定用 will do，不用 will be doing**。\n常见标志：**at this time tomorrow、at 8 next Monday、all day tomorrow**。\n**时间状语从句中仍用一般现在时表将来**（When you arrive, I will be waiting）。",
         "star": 2
        },
        {
-        "id": "261102-EN-02-01-014",
-        "d": "261102",
+        "id": "261105-EN-02-01-014",
+        "d": "261105",
         "name": "过去将来时",
-        "body": "**过去将来时表示从过去看将要发生的动作**。\n结构为 would + 动词原形。\n常用于宾语从句中。\n如 He said he would come。\n过去将来时与一般将来时对应。",
+        "body": "结构：**would + 动词原形**（也可用 was/were going to）。\n用法：**站在过去某个时间点看将来**（He said he would come）。\n三类场景：**宾语从句（said/told/thought + would do）**、**间接引语**、**过去条件句的主句**（If I had time, I would go）。\n对应关系：**will→would，is going to→was going to，shall→should**。\n**判断标志：主句是过去时，从句说的是「在那之后」的事，就用过去将来时**。\n**would 还可表过去习惯**（He would sit for hours），要看语境区分。",
         "star": 2
        },
        {
@@ -254,10 +254,10 @@
         "star": 2
        },
        {
-        "id": "261102-EN-02-02-003",
-        "d": "261102",
+        "id": "261105-EN-02-02-003",
+        "d": "261105",
         "name": "分词",
-        "body": "**现在分词 doing 表主动或进行；过去分词 done 表被动或完成**。\n作定语时单个分词前置，分词短语后置。\n作状语时其逻辑主语应与句子主语一致。\n某些动词的现在分词表示事物特征（interesting），过去分词表示人的感受（interested）。\n作宾补时 see sb doing（正在进行）与 see sb do（全过程）不同。",
+        "body": "**现在分词 doing 表主动或进行；过去分词 done 表被动或完成**。\n- **作定语**：单个分词前置（a sleeping baby），分词短语后置（the boy standing there）。\n- **作状语**：**逻辑主语必须与句子主语一致**（× Walking home, the rain started）。\n- **作宾补**：**see sb doing（正在进行）vs see sb do（全过程）**；have sth done（让别人做）。\n- **表感受与特征**：**interesting（事物特征）vs interested（人的感受）**，同类还有 exciting/excited、tiring/tired。\n**判断用 doing 还是 done：看逻辑主语与该动词是主动还是被动关系**。",
         "star": 2
        },
        {
@@ -282,10 +282,10 @@
         "star": 2
        },
        {
-        "id": "261102-EN-02-02-007",
-        "d": "261102",
+        "id": "261105-EN-02-02-007",
+        "d": "261105",
         "name": "非谓语动词作宾语",
-        "body": "有些动词后接不定式，有些后接动名词。\nwant、hope、decide、plan 后接不定式。\nenjoy、finish、mind、avoid 后接动名词。\n**remember、forget、stop 后接不定式和动名词意义不同**。\n介词后接动名词，如 be interested in doing。",
+        "body": "只接不定式：**want、hope、decide、plan、expect、refuse、manage、promise、agree、offer**。\n只接动名词：**enjoy、finish、mind、avoid、suggest、practise、admit、consider、look forward to**。\n两者都可但意义不同：**remember/forget to do（还没做）vs doing（做过了）**；**stop to do（停下来去做）vs stop doing（停止做）**；**try to do（努力做）vs try doing（试着做）**；**regret to do（遗憾要告知）vs regret doing（后悔做过）**。\n介词后一律用动名词：be interested in doing、succeed in doing、prevent sb from doing。\n**allow/advise/permit + doing，但 + sb to do**（allow doing / allow sb to do），这是高频考点。",
         "star": 2
        },
        {
@@ -296,10 +296,10 @@
         "star": 2
        },
        {
-        "id": "261102-EN-02-02-009",
-        "d": "261102",
+        "id": "261105-EN-02-02-009",
+        "d": "261105",
         "name": "非谓语动词作主语",
-        "body": "不定式和动名词可作主语。\n不定式作主语表具体动作。\n**动名词作主语表一般习惯**。\n常用 it 作形式主语。\n如 To learn English is important。",
+        "body": "不定式作主语：**表具体、一次性、将来的动作**——To master a language takes years。\n动名词作主语：**表一般性、习惯性、已存在的动作**——Reading broadens the mind。\n**非谓语作主语，谓语一律用单数**（Two hours is enough）。\n常用 it 作形式主语：**It is + adj. + to do**（It is important to learn English）；动名词多用 **It is no use doing**。\n固定句型：**There is no + doing**（There is no telling what will happen）。\n前后对称：**To see is to believe**（to do 对 to do），Seeing is believing（doing 对 doing），**一边用不定式一边用动名词算错**。",
         "star": 2
        },
        {
@@ -344,25 +344,25 @@
       "name": "2.3 从句",
       "children": [
        {
-        "id": "261102-EN-02-03-001",
-        "d": "261102",
+        "id": "261105-EN-02-03-001",
+        "d": "261105",
         "name": "定语从句",
-        "body": "限制性定语从句修饰先行词，不可缺少。\n非限制性定语从句用逗号隔开，不能修饰整个句子时也需注意。\n关系代词：who、whom、whose、which、that。\n关系副词：when、where、why，相当于介词+which。\n**介词后关系代词只能用 whom 或 which**。",
+        "body": "限制性定语从句：**紧跟先行词、无逗号、不可省略**，删掉句子意思不完整。\n非限制性定语从句：**用逗号隔开、可删、不能用 that**，只作补充说明。\n关系代词：**who（人，主格）、whom（人，宾格）、whose（所属）、which（物）、that（人或物，限定时用）**。\n关系副词：**when=in/on which、where=in/at which、why=for which**。\n**介词后只能用 whom 或 which**，不能用 that/who。\n**只能用 that 的场合：先行词被 all/only/the first/最高级修饰，或先行词既有人又有物**。\n**判 which 还是 where：看从句缺不缺主语或宾语——缺就用 which，不缺就用 where**。",
         "star": 2,
         "img": "img/英语_2.3_定语从句.png"
        },
        {
-        "id": "261102-EN-02-03-002",
-        "d": "261102",
+        "id": "261105-EN-02-03-002",
+        "d": "261105",
         "name": "同位语从句与定语从句的区别",
-        "body": "**同位语从句说明先行词的内容，定语从句修饰先行词**。\n同位语从句引导词 that 不作成分，定语从句 that 作成分。\n同位语从句先行词常是 news、fact、idea、hope 等抽象名词。\n判断方法：看从句与先行词的关系是说明还是修饰。\n同位语从句的 that 不能省略。",
+        "body": "**同位语从句说明先行词的内容，定语从句修饰先行词**。\n**关键区别在 that 是否作成分**：同位语从句的 that 不作任何成分、只起连接作用；定语从句的 that 必须充当主语或宾语。\n**先行词不同**：同位语从句常跟 news、fact、idea、hope、belief、promise 等抽象名词。\n**判断方法：把先行词与从句单独拿出来——能说「先行词就是从句的内容」的是同位语从句**。\n同位语从句的 that **不能省略**；定语从句作宾语时 that 可省。\n**which 不能引导同位语从句**（× the news which he won），这是常设的错项。",
         "star": 2
        },
        {
-        "id": "261102-EN-02-03-003",
-        "d": "261102",
+        "id": "261105-EN-02-03-003",
+        "d": "261105",
         "name": "状语从句的类型与连词",
-        "body": "时间：when、while、as、before、after、until、as soon as。\n条件：if、unless、as long as、in case。\n让步：although、though、even if、while（虽）。\n原因：because、since、as；结果：so...that；目的：so that、in order that。\n**注意主将从现：时间与条件状语从句中一般现在时代替将来时**。",
+        "body": "九类，按功能记：\n- **时间**：when、while、as、before、after、until、as soon as。\n- **条件**：if、unless、as long as、in case。\n- **让步**：although、though、even if、while（虽）。\n- **原因**：because、since、as（语气由强到弱）。\n- **结果**：so…that、such…that；**目的**：so that、in order that。\n- **比较**：than、as…as；**方式**：as if；**地点**：where。\n**主将从现：时间与条件状语从句中用一般现在时表将来**（When he comes, I will tell him）。\n**although 与 but 不能连用，because 与 so 不能连用**，这是最高频的中式英语错误。",
         "star": 2
        },
        {
@@ -428,10 +428,10 @@
         "star": 2
        },
        {
-        "id": "261102-EN-02-04-008",
-        "d": "261102",
+        "id": "261105-EN-02-04-008",
+        "d": "261105",
         "name": "感叹句",
-        "body": "感叹句表达强烈情感。\n用 what 或 how 引导。\nWhat a beautiful flower!。\nHow beautiful the flower is!。\n**感叹句用陈述语序**。",
+        "body": "两种结构：\n- **What + (a/an) + adj. + n. + 主语 + 谓语！**（What a beautiful flower it is!）\n- **How + adj./adv. + 主语 + 谓语！**（How beautiful the flower is!）\n**感叹句用陈述语序，不倒装**。\n**选择标准只有一条：What 修饰名词，How 修饰形容词或副词**。\n**不可数名词与复数名词前不加 a/an**：What fine weather! / What beautiful flowers!\n常见省略：What a pity! / How nice!\n**易错：How 后面不能直接跟名词**（× How a beautiful flower）。",
         "star": 2
        },
        {
@@ -510,17 +510,17 @@
         "star": 3
        },
        {
-        "id": "261102-EN-03-01-009",
-        "d": "261102",
+        "id": "261105-EN-03-01-009",
+        "d": "261105",
         "name": "阅读理解的长难句分析",
-        "body": "**长难句要抓住主干结构**。\n先找主语、谓语、宾语，划掉修饰成分。\n再分析从句和修饰成分：定语从句、状语从句、插入语。\n拆分长句，逐个理解，按意群阅读。\n遇到并列结构找 and、but、or 划分层次。\n理解长难句是阅读的关键。",
+        "body": "三步拆句：\n1. **数谓语动词**：一句话有几个谓语，就有几个分句。\n2. **定主干**：主语 + 谓语 + 宾语或表语，其余全是修饰。\n3. **剥修饰**：定语从句、状语从句、分词短语、插入语，逐层挂回主干。\n四个断句信号：**that/which/who 引导定语从句，because/although/when 引导状语从句，逗号后常是插入语，and/but/or 连接并列成分**。\n**主语后跟一长串修饰时，先把修饰整体括起来，句子立刻变短**。\n**读长句的目标不是翻译每个词，而是分清「谁做了什么」**。",
         "star": 2
        },
        {
-        "id": "261102-EN-03-01-010",
-        "d": "261102",
+        "id": "261105-EN-03-01-010",
+        "d": "261105",
         "name": "阅读理解的题文顺序",
-        "body": "阅读理解可先题后文或先文后题。\n先题后文带着问题阅读，效率高。\n先文后题整体把握后再答题，适合主旨题。\n**细节题回原文定位**，注意同义替换。\n主旨题通读后作答，关注首尾段和段首句。",
+        "body": "两种策略，按题型选：\n- **先题后文**：先看题干圈关键词，带着问题扫读定位，**适合细节题、数字题**。\n- **先文后题**：通读把握结构再答题，**适合主旨题、标题题、态度题**。\n细节题：**回原文定位 + 识别同义替换**（正确项几乎不原词照抄，而是换说法）。\n主旨题：**看首段、末段与每段首句**，警惕只覆盖一段内容的「以偏概全」选项。\n**错误项四类：偷换概念、无中生有、范围扩大或缩小、正话反说**。\n**时间分配：一篇不超过 7 分钟，卡住先跳过，回头再定位**。",
         "star": 2
        },
        {
@@ -579,10 +579,10 @@
         "star": 2
        },
        {
-        "id": "261102-EN-03-02-005",
-        "d": "261102",
+        "id": "261105-EN-03-02-005",
+        "d": "261105",
         "name": "完形填空的情感线索",
-        "body": "完形填空要把握文章的情感线索。\n注意表示情感变化的词语。\n**情感线索帮助判断空格处的用词**。\n注意人物心情的前后变化。\n结合情感基调选择最恰当的答案。",
+        "body": "完形的答案多由**情感走向**决定，而不是由语法决定。\n三步抓线索：\n- **首段定基调**：第一段往往交代心情底色（焦虑、期待、失落）。\n- **标记情感词与转折**：happy→upset、but、however、instead 之后情感常反转，**答案多落在反转之后**。\n- **看人物弧线**：从紧张到释然、从自私到担当，空格处的词要符合当下这个阶段。\n**同段前后句的情感倾向必须一致**；选出词后回读一遍，情绪不通就是错的。\n**成对记高频情感词**：relieved/guilty、embarrassed/proud、desperate/hopeful。\n**别把「语气委婉」当成「情感平淡」**，后者往往是转折的铺垫。",
         "star": 2
        },
        {
@@ -620,17 +620,17 @@
         "star": 2
        },
        {
-        "id": "261102-EN-03-03-002",
-        "d": "261102",
+        "id": "261105-EN-03-03-002",
+        "d": "261105",
         "name": "听力理解的关键技巧",
-        "body": "**听力播放前先浏览题目和选项，预测对话内容和问题**。\n注意转折词 but、however，答案常在转折之后。\n注意数字、时间、地点、人物关系等细节信息。\n听不清个别词不要停留，跟上语流抓住大意。\n第二遍听时重点核对不确定的信息，快速做出选择。",
+        "body": "四步法：\n1. **播放前抢读选项**：圈出选项差异，**差异处就是你要听的点**。\n2. **抓转折词**：but、however、actually 之后多为真正答案，前面常是干扰。\n3. **速记关键信息**：数字、时间、地点、人物关系，用符号记。\n4. **第二遍只核对不确定的题**，不在已确定的题上耗时。\n**听不清一个词就放弃它，跟上语流抓大意**，停下来回想会连丢三题。\n**预判题型**：选项都是地点就重点听 where，选项都是数字就重点听价格与时间。\n**注意同义替换**：原文 not cheap，选项可能写 expensive。",
         "star": 2
        },
        {
-        "id": "261102-EN-03-03-003",
-        "d": "261102",
+        "id": "261105-EN-03-03-003",
+        "d": "261105",
         "name": "听力高频场景词汇",
-        "body": "餐厅：menu /ˈmenjuː/、order /ˈɔːdə(r)/、reserve /rɪˈzɜːv/、bill /bɪl/、tip /tɪp/。\n机场与车站：boarding pass /ˈbɔːdɪŋ pɑːs/、delay /dɪˈleɪ/、platform /ˈplætfɔːm/、one-way ticket /ˌwʌnˈweɪ ˈtɪkɪt/。\n医院：appointment /əˈpɔɪntmənt/、symptom /ˈsɪmptəm/、prescription /prɪˈskrɪpʃn/、take medicine /teɪk ˈmedsn/。\n学校：lecture /ˈlektʃə(r)/、assignment /əˈsaɪnmənt/、deadline /ˈdedlaɪn/、scholarship /ˈskɒləʃɪp/。\n购物：discount /ˈdɪskaʊnt/、refund /ˈriːfʌnd/、try on /traɪ ɒn/、**out of stock** /ˌaʊt əv ˈstɒk/。",
+        "body": "按场景记「听到就能预判下文」的词：\n- 餐厅：menu /ˈmenjuː/、order /ˈɔːdə(r)/、reserve /rɪˈzɜːv/、bill /bɪl/、tip /tɪp/、for here or to go。\n- 机场车站：boarding pass /ˈbɔːdɪŋ pɑːs/、delay /dɪˈleɪ/、platform /ˈplætfɔːm/、one-way / round-trip ticket。\n- 医院：appointment /əˈpɔɪntmənt/、symptom /ˈsɪmptəm/、prescription /prɪˈskrɪpʃn/、take medicine /teɪk ˈmedsn/。\n- 学校：lecture /ˈlektʃə(r)/、assignment /əˈsaɪnmənt/、deadline /ˈdedlaɪn/、scholarship /ˈskɒləʃɪp/。\n- 购物：discount /ˈdɪskaʊnt/、refund /ˈriːfʌnd/、try on、**out of stock** /ˌaʊt əv ˈstɒk/。\n**听力不是逐词听懂，而是抓场景词预判下文**：听到 refund，后面多半接「为什么不能退」。\n数字题注意 **-teen 与 -ty 的重音差别**（thirteen /ˌθɜːˈtiːn/ 重音在后，thirty /ˈθɜːti/ 重音在前）。",
         "star": 2
        },
        {
@@ -641,10 +641,10 @@
         "star": 2
        },
        {
-        "id": "261102-EN-03-03-005",
-        "d": "261102",
+        "id": "261105-EN-03-03-005",
+        "d": "261105",
         "name": "听力的人物关系判断",
-        "body": "听力中判断人物关系。\n**根据称呼和用语判断**。\n如师生、医患、服务员顾客、同事、夫妻。\n人物关系帮助理解对话。\n注意称呼词和场景词。\n语气也能提示关系：正式还是随意。",
+        "body": "三类线索：\n- **称呼**：Mr./Mrs./Ms.、sir、madam、honey、dear、doctor、professor——**称呼直接暴露身份差距**。\n- **场景词**：menu/order（服务员与顾客）、prescription/symptom（医患）、assignment/deadline（师生）、interview（面试官与应聘者）。\n- **语气**：正式客气多为服务或上下级关系，随意亲昵多为家人朋友。\n**抓第一句的称呼加一个场景词，基本就能定关系**。\n**注意关系可能中途变化**：开头是同事、结尾成了客户，要听最后一句。\n**选项常给近义关系（teacher/student 与 interviewer/interviewee），必须靠场景词区分**。",
         "star": 2
        },
        {
@@ -662,10 +662,10 @@
         "star": 2
        },
        {
-        "id": "261102-EN-03-03-008",
-        "d": "261102",
+        "id": "261105-EN-03-03-008",
+        "d": "261105",
         "name": "数字与时间信息的记录",
-        "body": "听力中的数字题常考价格、时间、日期、电话号码，必须边听边记阿拉伯数字。\n价格常出现干扰项，注意 half price、discount、twenty percent off、for two 等表述。\n**时间题注意 past 与 to 的区别**：a quarter past nine 是九点一刻，a quarter to nine 是八点三刻。\n日期注意英式与美式顺序不同，英式日/月/年，美式月/日/年。\n听清疑问词再作答：how much 问价格，how long 问时长，how often 问频率，when 问时间点。\n数字题往往需要简单运算，如两人各买一张则要乘二。",
+        "body": "四类：**价格、时间、日期、电话号码**，必须边听边记阿拉伯数字。\n价格干扰项多：**half price、discount、20% off、for two、total**，听到 buy two 记得乘 2。\n**时间牢记 past 与 to**：a quarter past nine 是 9:15，a quarter to nine 是 8:45。\n日期：**英式 日/月/年，美式 月/日/年**；听清 the fifth of May 与 May fifth。\n**先看疑问词再答**：how much 问价格、how long 问时长、how often 问频率、when 问时间点。\n**数字题几乎都要运算**（两人各一张、打八折、迟到 15 分钟），先记数字最后再算。",
         "star": 2
        }
       ]
@@ -681,17 +681,17 @@
       "name": "4.1 应用文写作",
       "children": [
        {
-        "id": "261102-EN-04-01-001",
-        "d": "261102",
+        "id": "261105-EN-04-01-001",
+        "d": "261105",
         "name": "常见应用文体裁",
-        "body": "书信：开头 Dear…，结尾 Yours sincerely。\n通知：标题 Notice，正文说明时间地点事项。\n演讲稿：称呼、主题句、论证、号召。\n电子邮件：主题明确、正文简洁、结尾礼貌。\n**日记：日期、天气、正文，多用过去时**。",
+        "body": "- 书信：**Dear Sir/Madam → 三段（说明来意、展开细节、期待回复）→ Yours sincerely, Li Hua**。\n- 通知：**标题 Notice 居中**，正文交代「何事、何时、何地、参加人、要求」，落款单位与日期。\n- 演讲稿：**称呼 → 主题句 → 两三个论证（举例或数据）→ 号召收尾**，多用 we 与呼告。\n- 电子邮件：**主题行要具体**（Application for the Volunteer Program），正文一段一件事，结尾礼貌收束。\n- 日记：**日期、星期、天气 → 正文 → 感受**，主要用过去时。\n**共同要求：格式分不能丢（称呼、落款、日期），要点齐全比辞藻更重要**；字数不足时补细节，不要重复空话。",
         "star": 2
        },
        {
-        "id": "261102-EN-04-01-002",
-        "d": "261102",
+        "id": "261105-EN-04-01-002",
+        "d": "261105",
         "name": "评分要点",
-        "body": "**内容要点齐全，覆盖题目要求的全部信息点**。\n应用词汇和语法结构的数量与准确性，高级表达适当加分。\n上下文的连贯性，靠衔接词与指代保持顺畅。\n语言的得体性，称呼与语气要符合文体和对象。\n书写规范、字数达标，一般 80 词左右。",
+        "body": "五条评分维度：\n- **内容要点齐全**：覆盖题目要求的全部信息点，**漏一个要点就降档**。\n- **词汇与语法**：准确优先，**高级表达适当加分但不强求**。\n- **连贯性**：靠衔接词与指代保持顺畅。\n- **得体性**：称呼与语气符合文体和对象。\n- **书写与字数**：一般 80 词左右，**少于要求会扣分**。\n**提分优先级：要点齐全 > 语法正确 > 表达高级**，顺序不能颠倒。\n**检查清单：时态、主谓一致、名词单复数、拼写**，这四项占失分的大半。",
         "star": 2
        },
        {
@@ -751,17 +751,17 @@
         "star": 2
        },
        {
-        "id": "261102-EN-04-01-011",
-        "d": "261102",
+        "id": "261105-EN-04-01-011",
+        "d": "261105",
         "name": "高分句式与衔接词",
-        "body": "开篇句式：I am writing to inform you that...／It is a great pleasure to...\n衔接词：firstly、besides、what is more、however、as a result、in conclusion。\n高级结构：定语从句、非谓语作状语、倒装、强调句，适当使用提升档次。\n**避免全篇简单句堆砌，长短句结合**。\n结尾句式：I would appreciate it if you could...／Looking forward to your reply。",
+        "body": "开篇：I am writing to inform you that…／It is a great pleasure to…\n衔接：firstly、besides、what is more、however、as a result、in conclusion。\n高级结构（每篇用两三个即可）：**定语从句、非谓语作状语、倒装（Not only…but also）、强调句（It is…that…）**。\n**避免全篇简单句堆砌，长短句结合**。\n结尾：I would appreciate it if you could…／Looking forward to your reply。\n**忌堆砌生僻词**：用错的高级词比用对的基础词扣分更多。\n**句式多样性的判断标准：一篇里至少有三种不同结构**。",
         "star": 2
        },
        {
-        "id": "261102-EN-04-01-012",
-        "d": "261102",
+        "id": "261105-EN-04-01-012",
+        "d": "261105",
         "name": "倡议书的写作要点",
-        "body": "**倡议书要明确倡议目的，开头交代背景和意义**。\n正文分点说明倡议的具体内容，条理清晰。\n语言有感染力，能调动读者的积极性。\n结尾发出号召，表达期待和希望。\n倡议书格式规范，有标题、称呼、正文、落款。",
+        "body": "结构四段：\n1. **标题**：倡仪书／A Letter of Appeal，或直接写主题（Let's Protect Our Campus）。\n2. **称呼与背景**：说明为什么要倡议（现状 + 问题），**用数据或现象增强说服力**。\n3. **具体倡议**：**分点写（Firstly/Secondly/Finally），每点一个可执行动作**。\n4. **号召与落款**：呼吁行动 + 署名与日期。\n**语言要有感染力：多用 we、祈使句、情态动词 should/must**。\n**倡议内容必须可执行**（「随手关灯」比「爱护环境」有效）。\n**格式分不能丢：标题、称呼、落款、日期**。",
         "star": 2
        },
        {
@@ -827,10 +827,10 @@
         "star": 2
        },
        {
-        "id": "261102-EN-04-02-006",
-        "d": "261102",
+        "id": "261105-EN-04-02-006",
+        "d": "261105",
         "name": "读后续写的主题把握",
-        "body": "读后续写要准确把握原文的主题和情感。\n续写内容要与主题一致，不能跑题。\n主题通常与成长、亲情、友情、勇气等有关。\n**续写要传递积极向上的价值观**。\n结尾要点明主题，与原文呼应。",
+        "body": "主题分三层定：\n1. **看首段与末段**——核心情感往往就写在那里（亲情、成长、勇气、善意）。\n2. **看人物的变化**——他从什么状态走到什么状态，这就是主题。\n3. **看反复出现的意象或标题**——那通常是主题的具象化。\n续写必须**承接同一主题**，不能另起一个道理。\n**点题落在细节上**：不写「我懂得了坚持」，写「我把那双磨破的鞋收进柜子，第二天照样五点起床」。\n**价值取向必须积极**：冲突可以尖锐，但结尾要落在理解、成长或担当上。\n**最常见的跑题：把「亲情」写成「成功的励志故事」**。",
         "star": 2
        },
        {
@@ -841,10 +841,10 @@
         "star": 2
        },
        {
-        "id": "261102-EN-04-02-008",
-        "d": "261102",
+        "id": "261105-EN-04-02-008",
+        "d": "261105",
         "name": "读后续写的语言衔接",
-        "body": "读后续写要注意语言的连贯衔接。\n使用连接词：then、however、therefore。\n使用时间状语：soon、later、finally。\n段与段之间自然过渡。\n**保持时态一致和主语一致**。",
+        "body": "三层衔接，缺一层就不连贯：\n- **句间**：then、suddenly、before I could react、as a result。\n- **段间**：第一段结尾留一个动作或悬念，第二段开头直接承接，不另起话题。\n- **意象呼应**：开头的物件、天气、动作，结尾再出现一次。\n**时态一致：续写统一用一般过去时，回忆部分可用过去完成时**，时态跳会大量扣分。\n**主语一致：一段之内不要频繁换主语**，视角乱了读者会跟丢。\n**长短句交替：紧张处用短句，抒情处用长句**，节奏本身就是衔接。",
         "star": 2
        },
        {
@@ -869,10 +869,10 @@
         "star": 2
        },
        {
-        "id": "261102-EN-04-02-012",
-        "d": "261102",
+        "id": "261105-EN-04-02-012",
+        "d": "261105",
         "name": "读后续写的情节起伏",
-        "body": "读后续写要有情节起伏，避免平铺直叙。\n**设置矛盾和冲突，使故事有张力**。\n情节发展要有转折，制造悬念吸引读者。\n高潮部分扣人心弦，冲突达到顶点。\n结尾解决矛盾，圆满收束，与开头呼应。",
+        "body": "两段续写的通用骨架：**第一段解决眼前危机，第二段情感升华**。\n制造起伏四个手段：\n- **设置障碍**：目的刚要达成被打断（车坏了、门锁了）。\n- **误会与反转**：先给出坏结果，再揭示真相。\n- **压缩时间**：用 suddenly、at that moment、before I could react 提速。\n- **收在细节**：不写「我很感动」，写「我把那张纸折好，放进胸前的口袋」。\n**忌平铺直叙「做完这件事就回家了」——每段至少一次转折**。\n结尾用同一个意象或同一句话与开头呼应，**比空喊感悟得分高**。",
         "star": 2
        },
        {
@@ -890,10 +890,10 @@
         "star": 2
        },
        {
-        "id": "261102-EN-04-02-015",
-        "d": "261102",
+        "id": "261105-EN-04-02-015",
+        "d": "261105",
         "name": "读后续写的伏笔",
-        "body": "读后续写要注意伏笔。\n**原文的伏笔要在续写中呼应**。\n伏笔使故事前后照应。\n呼应伏笔使情节完整。\n注意原文细节的暗示：反复出现的物件、动作、话语。\n续写前先回读原文，圈出可呼应的细节。",
+        "body": "伏笔是原文故意留下、等你接的线头，**找到它等于找到情节方向**。\n三类最常见：\n- **反复出现的物件**（围巾、钥匙）——续写里让它再次出现并起作用。\n- **未完成的动作或未说出口的话**（他张了张嘴）——续写里把它完成。\n- **反常的细节**（人物的异样表情、天气突变）——往往是转折依据。\n操作：**动笔前把原文最后两段的具体细节圈出来，至少挑两处呼应**，一段开头呼应、一段结尾回应。\n**只写「他终于明白了」不算呼应**，要让具体物件或动作再次出现。",
         "star": 2
        },
        {

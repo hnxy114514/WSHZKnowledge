@@ -28,6 +28,8 @@ WSHZKnowledge/
 │   │   └── ext_bipei60.py / ext_zuowen.py   语文扩展内容（必背 60 篇、作文素材），由 chinese.py 加载
 │   ├── build_authored.py               构建数据：递归 TREE → assets/data/nodes（含去重、分数化、定稿、编号 v3）
 │   ├── check_data.py                   数据体检：编号/标题/正文/加粗/LaTeX/例题（只读，构建后跑一次）
+│   ├── apply_review.py                 抽查改写落盘：按「科目+标题」替换 body，并把该条编号日期改成当天
+│   ├── drop_nodes.py                   按标题删除源文件里的条目（人工判定重复后清理用）
 │   ├── gen_thanks.py                   生成感谢名单的静态备份 cloud/thanks.json（发版时自动跑）
 │   ├── img_map.py                      配图绑定表：科目 + 分组名关键词 + 标题关键词 → 图片文件名
 │   ├── ids.json                        节点编号台账 v3（构建时读写，必须随仓库保留）
@@ -192,6 +194,35 @@ python gen_all.py                           # 需要全部重生成时跑这个
 标亮范围内的 `rac{}`、`\sqrt{}`、`ec{}`、`^{}`、`_{}` 会一起被标亮。这些是自绘的 `ReplacementSpan`，
 不会自动继承 `ForegroundColorSpan` / `StyleSpan`，标亮状态由 `applyMarkup(src, hl)` 显式传进 `InlineSpan`。
 改这块时记得：新增任何自绘 span 都要跟着传 `hl`，否则又会出现「旁边文字亮了、公式没亮」。
+
+### 5. 抽查完善知识点（每批 100 条）
+
+不是全库重写，而是**定期随机抽一批、逐条人工打磨**：
+
+1. 抽样（脚本只做抽样，不碰内容）：从九科源文件分层随机抽 100 条，
+   排除每日一句入口、2.4 必背 60 篇原文、优美语段原文（这三类不该改写）。
+   抽过的记进 `local/抽取记录.json`（本地、不入库），下次按「科目+标题」排除，**不会重复抽到同一条**。
+2. 逐条读原文，判断四类问题并改写：**内容空泛**（只有几句口号）、**有错**（公式/史实/概念）、
+   **缺重点**（没有 `**...**` 标注）、**排版糊成一团**（长句不换行，手表上没法读）。
+3. 改写结果写在 `build/_review/editN.txt`，格式是：
+
+   ```
+   @@@ <科目key> | <条目标题>
+   <新正文，多行原样写，不需要转义>
+   ```
+
+   科目 key 用源文件名：`chinese` / `math` / `english` / `physics` / `chem` / `bio` / `politics` / `history` / `geography`，
+   语文扩展内容（必背 60 篇、作文素材）在 `ext_zuowen`、`ext_bipei60`。
+4. 落盘：`python tools/apply_review.py build/_review/editN.txt`（预演）→ 加 `--write` 真正写入。
+   它会自动把正文里的 `\` 转义成 `\\`（源文件不是 raw 字符串），
+   并把 `tools/ids.json` 里该条的**日期段改成当天**（序号不动），这样「今日新增」能看到这批改动。
+5. 重建 + 体检：`python tools/build_authored.py` → `python tools/check_data.py`。
+6. 如果构建日志出现「合并 A <= B」，说明两条被判为重复、正文被拼接：
+   **要人工读一遍拼接结果**，把重复表述合并掉；确认是同一知识点后，
+   用 `python tools/drop_nodes.py <源文件> "多余的标题" --write` 删掉多余那条。
+
+抽查的重点是**内容与排版**，不是字数：一行一个要点、关键结论单独成行、公式独占一行，
+手表小屏上「扫一眼就能抓住结构和重点」。
 
 ---
 

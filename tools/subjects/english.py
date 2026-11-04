@@ -46,7 +46,11 @@ TREE = [
             {"name": '主谓一致',
              "body": '语法一致：主语单复数决定谓语形式。\n意义一致：family、team 等集体名词视语境而定。\n**就近原则：either…or、neither…nor、there be 句型**。\n不定式、动名词、从句作主语视为单数。\n注意 the number of 与 a number of 的区别。'},
             {"name": '完成时态的用法',
-             "body": '现在完成时表示过去发生的动作对现在造成影响或持续到现在。\n结构为 \\frac{have}{has} done，常与 since、for、already、yet 连用。\n过去完成时表示「过去的过去」，结构为 had done。\n**现在完成时强调影响或结果，一般过去时只强调动作发生在过去**。\n延续性动词才能与一段时间连用，如 have had 而非 have bought。'},
+             "body": """现在完成时：**have/has + 过去分词**，两条用法——**动作已完成但对现在有影响**（I have lost my key，所以进不去门）、**动作持续到现在**（I have lived here for 5 years）。
+标志词：already、yet、ever、never、since、for、so far、recently。
+**瞬间动词不能与一段时间连用**：用 have had 而不是 have bought，用 have been in 而不是 have come。
+过去完成时：**had + 过去分词**，表示「过去的过去」，常与 by、before、when 从句搭配。
+**现在完成时不能与明确的过去时间连用**（× I have seen him yesterday），这是最高频的错。"""},
             {"name": '一般过去时与现在完成时的区别',
              "body": '一般过去时只强调动作发生在过去，与现在没有联系。\n现在完成时强调过去的动作对现在造成的影响或结果。\n**有明确过去时间状语（yesterday、last year、ago）用一般过去时**。\njust、already、yet、so far 等常用现在完成时。\nSince 引导时间状语从句时，主句用现在完成时。'},
             {"name": '将来时的表达方式',
@@ -54,7 +58,11 @@ TREE = [
             {"name": '进行时态的用法',
              "body": '**现在进行时表示说话时正在进行的动作**。\n结构为 be + 现在分词。\n也可表示按计划将要发生的动作，如 I am leaving tomorrow。\n过去进行时表示过去某一时刻正在进行的动作。\n现在完成进行时表示从过去持续到现在的动作。'},
             {"name": '过去完成时',
-             "body": '过去完成时表示在过去某一时刻之前已经完成的动作。\n结构为 had + 过去分词。\n常与 by、before、when 等时间状语连用。\n**表示「过去的过去」，强调动作的先后顺序**。\n在宾语从句中，主句用过去时，从句可用过去完成时。'},
+             "body": """构成：**had + 过去分词**，表示「在过去某一时刻之前已经完成」。
+必须有**一个过去的时间参照点**：By the time we arrived, the film had begun（参照点是 arrived）。
+三类典型场景：**by + 过去时间**、**before/after 引导的先后**、**宾语从句中主句是过去时、从句动作更早**（He said he had finished）。
+**没有过去参照点就不能用过去完成时**，这是最常见的误用。
+与一般过去时的区别：**多个过去动作按时间顺序叙述时用一般过去时**，只有需要强调「更早」时才用过去完成时。"""},
             {"name": '现在完成进行时',
              "body": '现在完成进行时表示从过去持续到现在的动作。\n结构为 \\frac{have}{has} been + 现在分词。\n强调动作的持续性和未完成性。\n如 I have been reading for two hours。\n**与现在完成时的区别：完成进行时强调持续过程**。'},
             {"name": '一般现在时的用法',
@@ -62,11 +70,25 @@ TREE = [
             {"name": '过去进行时',
              "body": '**过去进行时表示过去某时刻正在进行的动作**。\n结构为 \\frac{was}{were} + 现在分词。\n常与 when、while 连用。\n如 I was reading when he came。\n过去进行时强调动作的进行状态。'},
             {"name": '一般过去时的用法',
-             "body": '一般过去时表示过去发生的动作或状态。\n结构为动词过去式。\n常与 yesterday、last year、ago 连用。\n**表示过去经常发生的动作用 used to**。\n一般过去时强调动作发生在过去。'},
+             "body": """构成：**动词过去式**（be 用 was/were），否定与疑问用 did + 动词原形。
+四条核心用法：**过去某时的动作或状态**（I saw him yesterday）、**过去一段时间的习惯**（He smoked ten years ago）、**一连串过去的动作**（He stood up, opened the door and left）、**委婉语气**（I wondered if you could help）。
+时间标志：yesterday、last week、in 1998、two days ago、when 引导的从句。
+**与现在完成时的分界：一般过去时只说「发生在过去」，不交代与现在的关系；现在完成时必须体现「对现在的影响」或「持续到现在」**。
+**used to do 表示过去常常而现已不再**；be used to doing 是「习惯于」，别混。"""},
             {"name": '将来进行时',
-             "body": '**将来进行时表示将来某时刻正在进行的动作**。\n结构为 will be + 现在分词。\n如 I will be studying at 8 tomorrow。\n也表示按计划将要发生的动作。\n将来进行时强调将来的进行状态。'},
+             "body": """结构：**will be + 现在分词**。
+两条用法：**将来某时刻正在进行的动作**（At 8 tomorrow I will be studying）、**按计划安排将发生**（We will be meeting at the airport）。
+**与一般将来时的区别：将来进行时强调「正在」的画面感，语气也更委婉**（Will you be using the car? 比 Will you use the car? 客气）。
+**临时决定用 will do，不用 will be doing**。
+常见标志：**at this time tomorrow、at 8 next Monday、all day tomorrow**。
+**时间状语从句中仍用一般现在时表将来**（When you arrive, I will be waiting）。"""},
             {"name": '过去将来时',
-             "body": '**过去将来时表示从过去看将要发生的动作**。\n结构为 would + 动词原形。\n常用于宾语从句中。\n如 He said he would come。\n过去将来时与一般将来时对应。'},
+             "body": """结构：**would + 动词原形**（也可用 was/were going to）。
+用法：**站在过去某个时间点看将来**（He said he would come）。
+三类场景：**宾语从句（said/told/thought + would do）**、**间接引语**、**过去条件句的主句**（If I had time, I would go）。
+对应关系：**will→would，is going to→was going to，shall→should**。
+**判断标志：主句是过去时，从句说的是「在那之后」的事，就用过去将来时**。
+**would 还可表过去习惯**（He would sit for hours），要看语境区分。"""},
             {"name": '时态的一致性',
              "body": '主从句时态要呼应。\n**主句过去时，从句用过去时态**。\n主句现在时，从句根据实际用时态。\n客观真理用一般现在时，即使主句是过去时。\n时态一致是语法的重要规则。\n宾语从句注意陈述语序与时态配合。'},
             {"name": '将来完成时',
@@ -82,7 +104,12 @@ TREE = [
             {"name": '动名词',
              "body": '形式：doing、being done、having done。\n可作主语、宾语、表语、定语。\n**介词后必须用动名词**。\n常见只接动名词的动词：enjoy、finish、practise、mind、avoid。\n动名词作主语时谓语用单数。'},
             {"name": '分词',
-             "body": '**现在分词 doing 表主动或进行；过去分词 done 表被动或完成**。\n作定语时单个分词前置，分词短语后置。\n作状语时其逻辑主语应与句子主语一致。\n某些动词的现在分词表示事物特征（interesting），过去分词表示人的感受（interested）。\n作宾补时 see sb doing（正在进行）与 see sb do（全过程）不同。'},
+             "body": """**现在分词 doing 表主动或进行；过去分词 done 表被动或完成**。
+- **作定语**：单个分词前置（a sleeping baby），分词短语后置（the boy standing there）。
+- **作状语**：**逻辑主语必须与句子主语一致**（× Walking home, the rain started）。
+- **作宾补**：**see sb doing（正在进行）vs see sb do（全过程）**；have sth done（让别人做）。
+- **表感受与特征**：**interesting（事物特征）vs interested（人的感受）**，同类还有 exciting/excited、tiring/tired。
+**判断用 doing 还是 done：看逻辑主语与该动词是主动还是被动关系**。"""},
             {"name": '独立主格与with复合结构',
              "body": '独立主格：名词/代词+分词/不定式/形容词，与主句无语法连接。\n**with 复合结构：with+宾语+宾补，常作伴随状语**。\n示例：With the work finished, he went home。\n这种结构中宾补与宾语有逻辑关系。\n是写作提分的有效句式。'},
             {"name": '不定式与动名词的区别',
@@ -90,11 +117,20 @@ TREE = [
             {"name": '非谓语动词作定语',
              "body": '非谓语动词作定语时要注意与所修饰词的主被动关系和时态关系。\n**现在分词 doing 表主动、进行，过去分词 done 表被动、完成**。\n不定式 to do 表将来，常修饰抽象名词。\nThe boy standing there is my brother（主动进行）。\nThe bridge built last year is strong（被动完成）。'},
             {"name": '非谓语动词作宾语',
-             "body": '有些动词后接不定式，有些后接动名词。\nwant、hope、decide、plan 后接不定式。\nenjoy、finish、mind、avoid 后接动名词。\n**remember、forget、stop 后接不定式和动名词意义不同**。\n介词后接动名词，如 be interested in doing。'},
+             "body": """只接不定式：**want、hope、decide、plan、expect、refuse、manage、promise、agree、offer**。
+只接动名词：**enjoy、finish、mind、avoid、suggest、practise、admit、consider、look forward to**。
+两者都可但意义不同：**remember/forget to do（还没做）vs doing（做过了）**；**stop to do（停下来去做）vs stop doing（停止做）**；**try to do（努力做）vs try doing（试着做）**；**regret to do（遗憾要告知）vs regret doing（后悔做过）**。
+介词后一律用动名词：be interested in doing、succeed in doing、prevent sb from doing。
+**allow/advise/permit + doing，但 + sb to do**（allow doing / allow sb to do），这是高频考点。"""},
             {"name": '非谓语动词作状语',
              "body": '非谓语动词作状语表示时间、原因、条件、伴随等。\n现在分词作状语表主动，过去分词作状语表被动。\n不定式作状语常表目的、结果。\n**逻辑主语要与句子主语一致**。\n独立主格结构有自己的逻辑主语，如 The work done, he left。'},
             {"name": '非谓语动词作主语',
-             "body": '不定式和动名词可作主语。\n不定式作主语表具体动作。\n**动名词作主语表一般习惯**。\n常用 it 作形式主语。\n如 To learn English is important。'},
+             "body": """不定式作主语：**表具体、一次性、将来的动作**——To master a language takes years。
+动名词作主语：**表一般性、习惯性、已存在的动作**——Reading broadens the mind。
+**非谓语作主语，谓语一律用单数**（Two hours is enough）。
+常用 it 作形式主语：**It is + adj. + to do**（It is important to learn English）；动名词多用 **It is no use doing**。
+固定句型：**There is no + doing**（There is no telling what will happen）。
+前后对称：**To see is to believe**（to do 对 to do），Seeing is believing（doing 对 doing），**一边用不定式一边用动名词算错**。"""},
             {"name": '非谓语动词的否定',
              "body": '**非谓语动词的否定在非谓语前加 not**。\n如 not to do、not doing、not done。\nnot knowing what to do。\n否定形式要紧跟非谓语。\n注意否定位置。'},
             {"name": '非谓语动词作宾语补足语',
@@ -108,11 +144,30 @@ TREE = [
         ]},
         {"name": '2.3 从句', "children": [
             {"name": '定语从句',
-             "body": '限制性定语从句修饰先行词，不可缺少。\n非限制性定语从句用逗号隔开，不能修饰整个句子时也需注意。\n关系代词：who、whom、whose、which、that。\n关系副词：when、where、why，相当于介词+which。\n**介词后关系代词只能用 whom 或 which**。'},
+             "body": """限制性定语从句：**紧跟先行词、无逗号、不可省略**，删掉句子意思不完整。
+非限制性定语从句：**用逗号隔开、可删、不能用 that**，只作补充说明。
+关系代词：**who（人，主格）、whom（人，宾格）、whose（所属）、which（物）、that（人或物，限定时用）**。
+关系副词：**when=in/on which、where=in/at which、why=for which**。
+**介词后只能用 whom 或 which**，不能用 that/who。
+**只能用 that 的场合：先行词被 all/only/the first/最高级修饰，或先行词既有人又有物**。
+**判 which 还是 where：看从句缺不缺主语或宾语——缺就用 which，不缺就用 where**。"""},
             {"name": '同位语从句与定语从句的区别',
-             "body": '**同位语从句说明先行词的内容，定语从句修饰先行词**。\n同位语从句引导词 that 不作成分，定语从句 that 作成分。\n同位语从句先行词常是 news、fact、idea、hope 等抽象名词。\n判断方法：看从句与先行词的关系是说明还是修饰。\n同位语从句的 that 不能省略。'},
+             "body": """**同位语从句说明先行词的内容，定语从句修饰先行词**。
+**关键区别在 that 是否作成分**：同位语从句的 that 不作任何成分、只起连接作用；定语从句的 that 必须充当主语或宾语。
+**先行词不同**：同位语从句常跟 news、fact、idea、hope、belief、promise 等抽象名词。
+**判断方法：把先行词与从句单独拿出来——能说「先行词就是从句的内容」的是同位语从句**。
+同位语从句的 that **不能省略**；定语从句作宾语时 that 可省。
+**which 不能引导同位语从句**（× the news which he won），这是常设的错项。"""},
             {"name": '状语从句的类型与连词',
-             "body": '时间：when、while、as、before、after、until、as soon as。\n条件：if、unless、as long as、in case。\n让步：although、though、even if、while（虽）。\n原因：because、since、as；结果：so...that；目的：so that、in order that。\n**注意主将从现：时间与条件状语从句中一般现在时代替将来时**。'},
+             "body": """九类，按功能记：
+- **时间**：when、while、as、before、after、until、as soon as。
+- **条件**：if、unless、as long as、in case。
+- **让步**：although、though、even if、while（虽）。
+- **原因**：because、since、as（语气由强到弱）。
+- **结果**：so…that、such…that；**目的**：so that、in order that。
+- **比较**：than、as…as；**方式**：as if；**地点**：where。
+**主将从现：时间与条件状语从句中用一般现在时表将来**（When he comes, I will tell him）。
+**although 与 but 不能连用，because 与 so 不能连用**，这是最高频的中式英语错误。"""},
             {"name": '名词性从句的语序与引导词',
              "body": '名词性从句包括主语从句、宾语从句、表语从句、同位语从句，**一律用陈述语序**。\nthat 无实义只起连接作用，在宾语从句中可省略，其他三种从句一般不可省。\nwhether 与 if 都表「是否」，但介词后、句首主语从句、与 or not 直接连用时只能用 whether。\nwhat 在从句中充当成分（主语、宾语、表语），that 不作成分，这是最常考的区别。\n同位语从句解释前面抽象名词的内容（news、fact、idea、hope），定语从句则修饰限定该名词，注意区分。'},
         ]},
@@ -132,7 +187,14 @@ TREE = [
             {"name": '祈使句',
              "body": "祈使句表示请求、命令、建议。\n**以动词原形开头**。\n否定在句首加 Don't。\n如 Sit down / Don't be late。\n祈使句主语常省略。"},
             {"name": '感叹句',
-             "body": '感叹句表达强烈情感。\n用 what 或 how 引导。\nWhat a beautiful flower!。\nHow beautiful the flower is!。\n**感叹句用陈述语序**。'},
+             "body": """两种结构：
+- **What + (a/an) + adj. + n. + 主语 + 谓语！**（What a beautiful flower it is!）
+- **How + adj./adv. + 主语 + 谓语！**（How beautiful the flower is!）
+**感叹句用陈述语序，不倒装**。
+**选择标准只有一条：What 修饰名词，How 修饰形容词或副词**。
+**不可数名词与复数名词前不加 a/an**：What fine weather! / What beautiful flowers!
+常见省略：What a pity! / How nice!
+**易错：How 后面不能直接跟名词**（× How a beautiful flower）。"""},
             {"name": 'there be 与省略句',
              "body": 'there be 句型表示「存在」，be 的单复数与后面第一个名词一致（就近原则）。\nthere be 还可与情态动词、seem、happen 连用，如 there seems to be、there must be。\n**注意 there be 与 have 的区别：there be 表存在，have 表所属**。\n省略句常见于状语从句（When asked, he kept silent）、并列句与比较结构（I like it better than she does）。\nso do I 与 \\frac{neither}{nor} do I 表示同上或同样不，注意助动词与前句保持一致。'},
         ]},
@@ -156,9 +218,21 @@ TREE = [
             {"name": '阅读理解的干扰项特征',
              "body": '阅读理解干扰项有常见特征。\n偷换概念、张冠李戴。\n以偏概全、无中生有。\n过度推断、绝对化表述。\n**识别干扰项有助于排除错误选项**。\n选择与原文意思最相符的选项。'},
             {"name": '阅读理解的长难句分析',
-             "body": '**长难句要抓住主干结构**。\n先找主语、谓语、宾语，划掉修饰成分。\n再分析从句和修饰成分：定语从句、状语从句、插入语。\n拆分长句，逐个理解，按意群阅读。\n遇到并列结构找 and、but、or 划分层次。\n理解长难句是阅读的关键。'},
+             "body": """三步拆句：
+1. **数谓语动词**：一句话有几个谓语，就有几个分句。
+2. **定主干**：主语 + 谓语 + 宾语或表语，其余全是修饰。
+3. **剥修饰**：定语从句、状语从句、分词短语、插入语，逐层挂回主干。
+四个断句信号：**that/which/who 引导定语从句，because/although/when 引导状语从句，逗号后常是插入语，and/but/or 连接并列成分**。
+**主语后跟一长串修饰时，先把修饰整体括起来，句子立刻变短**。
+**读长句的目标不是翻译每个词，而是分清「谁做了什么」**。"""},
             {"name": '阅读理解的题文顺序',
-             "body": '阅读理解可先题后文或先文后题。\n先题后文带着问题阅读，效率高。\n先文后题整体把握后再答题，适合主旨题。\n**细节题回原文定位**，注意同义替换。\n主旨题通读后作答，关注首尾段和段首句。'},
+             "body": """两种策略，按题型选：
+- **先题后文**：先看题干圈关键词，带着问题扫读定位，**适合细节题、数字题**。
+- **先文后题**：通读把握结构再答题，**适合主旨题、标题题、态度题**。
+细节题：**回原文定位 + 识别同义替换**（正确项几乎不原词照抄，而是换说法）。
+主旨题：**看首段、末段与每段首句**，警惕只覆盖一段内容的「以偏概全」选项。
+**错误项四类：偷换概念、无中生有、范围扩大或缩小、正话反说**。
+**时间分配：一篇不超过 7 分钟，卡住先跳过，回头再定位**。"""},
             {"name": '七选五的解题步骤',
              "body": '先读首段与各段首句，把握文章结构与话题。\n再看选项中的线索词：代词、连接词、重复出现的名词。\n根据空格位置判断功能：段首多为概括句，段中为衔接句，段末为总结句。\n利用指代一致、逻辑一致（转折、因果、并列）排除干扰项。\n**选完后通读全文，检验语义与语法是否连贯**。'},
             {"name": '阅读理解的文章结构',
@@ -176,7 +250,14 @@ TREE = [
             {"name": '完形填空的复现技巧',
              "body": '完形填空常考查词汇复现，包括原词复现、同义复现、反义复现。\n做题时注意前后文反复出现的关键词。\n**同义复现：用不同词表达相同或相近的意思**。\n反义复现：前后文形成对比，提示答案。\n做完后通读全文，检查答案是否符合语境和逻辑。'},
             {"name": '完形填空的情感线索',
-             "body": '完形填空要把握文章的情感线索。\n注意表示情感变化的词语。\n**情感线索帮助判断空格处的用词**。\n注意人物心情的前后变化。\n结合情感基调选择最恰当的答案。'},
+             "body": """完形的答案多由**情感走向**决定，而不是由语法决定。
+三步抓线索：
+- **首段定基调**：第一段往往交代心情底色（焦虑、期待、失落）。
+- **标记情感词与转折**：happy→upset、but、however、instead 之后情感常反转，**答案多落在反转之后**。
+- **看人物弧线**：从紧张到释然、从自私到担当，空格处的词要符合当下这个阶段。
+**同段前后句的情感倾向必须一致**；选出词后回读一遍，情绪不通就是错的。
+**成对记高频情感词**：relieved/guilty、embarrassed/proud、desperate/hopeful。
+**别把「语气委婉」当成「情感平淡」**，后者往往是转折的铺垫。"""},
             {"name": '完形填空的逻辑关系',
              "body": '完形填空要注意句子间的逻辑关系。\n**转折关系：but、however、although**。\n因果关系：because、so、therefore。\n递进关系：besides、moreover。\n对比关系：while、on the contrary。'},
             {"name": '完形填空的固定搭配',
@@ -188,27 +269,64 @@ TREE = [
             {"name": '听力笔记与干扰项排除',
              "body": '边听边记关键词，用缩写与符号提高记录速度。\n注意数量信息与对应单位的匹配。\n**干扰项常是原文出现但不符合题意的信息**。\n注意说话人的语气与言外之意。\n对话题要抓住人物关系与谈话目的。'},
             {"name": '听力理解的关键技巧',
-             "body": '**听力播放前先浏览题目和选项，预测对话内容和问题**。\n注意转折词 but、however，答案常在转折之后。\n注意数字、时间、地点、人物关系等细节信息。\n听不清个别词不要停留，跟上语流抓住大意。\n第二遍听时重点核对不确定的信息，快速做出选择。'},
+             "body": """四步法：
+1. **播放前抢读选项**：圈出选项差异，**差异处就是你要听的点**。
+2. **抓转折词**：but、however、actually 之后多为真正答案，前面常是干扰。
+3. **速记关键信息**：数字、时间、地点、人物关系，用符号记。
+4. **第二遍只核对不确定的题**，不在已确定的题上耗时。
+**听不清一个词就放弃它，跟上语流抓大意**，停下来回想会连丢三题。
+**预判题型**：选项都是地点就重点听 where，选项都是数字就重点听价格与时间。
+**注意同义替换**：原文 not cheap，选项可能写 expensive。"""},
             {"name": '听力高频场景词汇',
-             "body": '餐厅：menu /ˈmenjuː/、order /ˈɔːdə(r)/、reserve /rɪˈzɜːv/、bill /bɪl/、tip /tɪp/。\n机场与车站：boarding pass /ˈbɔːdɪŋ pɑːs/、delay /dɪˈleɪ/、platform /ˈplætfɔːm/、one-way ticket /ˌwʌnˈweɪ ˈtɪkɪt/。\n医院：appointment /əˈpɔɪntmənt/、symptom /ˈsɪmptəm/、prescription /prɪˈskrɪpʃn/、take medicine /teɪk ˈmedsn/。\n学校：lecture /ˈlektʃə(r)/、assignment /əˈsaɪnmənt/、deadline /ˈdedlaɪn/、scholarship /ˈskɒləʃɪp/。\n购物：discount /ˈdɪskaʊnt/、refund /ˈriːfʌnd/、try on /traɪ ɒn/、**out of stock** /ˌaʊt əv ˈstɒk/。'},
+             "body": """按场景记「听到就能预判下文」的词：
+- 餐厅：menu /ˈmenjuː/、order /ˈɔːdə(r)/、reserve /rɪˈzɜːv/、bill /bɪl/、tip /tɪp/、for here or to go。
+- 机场车站：boarding pass /ˈbɔːdɪŋ pɑːs/、delay /dɪˈleɪ/、platform /ˈplætfɔːm/、one-way / round-trip ticket。
+- 医院：appointment /əˈpɔɪntmənt/、symptom /ˈsɪmptəm/、prescription /prɪˈskrɪpʃn/、take medicine /teɪk ˈmedsn/。
+- 学校：lecture /ˈlektʃə(r)/、assignment /əˈsaɪnmənt/、deadline /ˈdedlaɪn/、scholarship /ˈskɒləʃɪp/。
+- 购物：discount /ˈdɪskaʊnt/、refund /ˈriːfʌnd/、try on、**out of stock** /ˌaʊt əv ˈstɒk/。
+**听力不是逐词听懂，而是抓场景词预判下文**：听到 refund，后面多半接「为什么不能退」。
+数字题注意 **-teen 与 -ty 的重音差别**（thirteen /ˌθɜːˈtiːn/ 重音在后，thirty /ˈθɜːti/ 重音在前）。"""},
             {"name": '卷面与书写规范要点',
              "body": '字母大小写规范：句首、专有名词、标题实词首字母大写。\n字迹清晰、间距均匀，避免涂改与大段划掉。\n书面表达分段清晰，一般三段：开头点题、主体展开、结尾总结。\n标点用英文标点：句号用实心点，逗号后空一格。\n**控制词数，写在答题区域内，超出部分无效**。'},
             {"name": '听力的人物关系判断',
-             "body": '听力中判断人物关系。\n**根据称呼和用语判断**。\n如师生、医患、服务员顾客、同事、夫妻。\n人物关系帮助理解对话。\n注意称呼词和场景词。\n语气也能提示关系：正式还是随意。'},
+             "body": """三类线索：
+- **称呼**：Mr./Mrs./Ms.、sir、madam、honey、dear、doctor、professor——**称呼直接暴露身份差距**。
+- **场景词**：menu/order（服务员与顾客）、prescription/symptom（医患）、assignment/deadline（师生）、interview（面试官与应聘者）。
+- **语气**：正式客气多为服务或上下级关系，随意亲昵多为家人朋友。
+**抓第一句的称呼加一个场景词，基本就能定关系**。
+**注意关系可能中途变化**：开头是同事、结尾成了客户，要听最后一句。
+**选项常给近义关系（teacher/student 与 interviewer/interviewee），必须靠场景词区分**。"""},
             {"name": '听力的地点判断',
              "body": '听力中判断对话发生的地点。\n根据关键词判断，如 menu /ˈmenjuː/、order /ˈɔːdə(r)/ 提示餐厅。\ndoctor /ˈdɒktə(r)/、medicine /ˈmedsn/、fever /ˈfiːvə(r)/ 提示医院。\nclass /klɑːs/、exam /ɪɡˈzæm/ 提示学校，flight /flaɪt/、board /bɔːd/ 提示机场。\n**地点题是听力常考题型**。'},
             {"name": '听力的推理判断',
              "body": '听力中要能进行推理判断。\n根据说话人的语气判断态度。\n根据上下文推断对话含义。\n判断对话发生的场景和人物关系。\n**推理要基于听到的信息，不能凭空猜测**。\n注意言外之意和隐含信息。'},
             {"name": '数字与时间信息的记录',
-             "body": '听力中的数字题常考价格、时间、日期、电话号码，必须边听边记阿拉伯数字。\n价格常出现干扰项，注意 half price、discount、twenty percent off、for two 等表述。\n**时间题注意 past 与 to 的区别**：a quarter past nine 是九点一刻，a quarter to nine 是八点三刻。\n日期注意英式与美式顺序不同，英式日/月/年，美式月/日/年。\n听清疑问词再作答：how much 问价格，how long 问时长，how often 问频率，when 问时间点。\n数字题往往需要简单运算，如两人各买一张则要乘二。'},
+             "body": """四类：**价格、时间、日期、电话号码**，必须边听边记阿拉伯数字。
+价格干扰项多：**half price、discount、20% off、for two、total**，听到 buy two 记得乘 2。
+**时间牢记 past 与 to**：a quarter past nine 是 9:15，a quarter to nine 是 8:45。
+日期：**英式 日/月/年，美式 月/日/年**；听清 the fifth of May 与 May fifth。
+**先看疑问词再答**：how much 问价格、how long 问时长、how often 问频率、when 问时间点。
+**数字题几乎都要运算**（两人各一张、打八折、迟到 15 分钟），先记数字最后再算。"""},
         ]},
     ]},
     {"name": '第四板块 写作', "children": [
         {"name": '4.1 应用文写作', "children": [
             {"name": '常见应用文体裁',
-             "body": '书信：开头 Dear…，结尾 Yours sincerely。\n通知：标题 Notice，正文说明时间地点事项。\n演讲稿：称呼、主题句、论证、号召。\n电子邮件：主题明确、正文简洁、结尾礼貌。\n**日记：日期、天气、正文，多用过去时**。'},
+             "body": """- 书信：**Dear Sir/Madam → 三段（说明来意、展开细节、期待回复）→ Yours sincerely, Li Hua**。
+- 通知：**标题 Notice 居中**，正文交代「何事、何时、何地、参加人、要求」，落款单位与日期。
+- 演讲稿：**称呼 → 主题句 → 两三个论证（举例或数据）→ 号召收尾**，多用 we 与呼告。
+- 电子邮件：**主题行要具体**（Application for the Volunteer Program），正文一段一件事，结尾礼貌收束。
+- 日记：**日期、星期、天气 → 正文 → 感受**，主要用过去时。
+**共同要求：格式分不能丢（称呼、落款、日期），要点齐全比辞藻更重要**；字数不足时补细节，不要重复空话。"""},
             {"name": '评分要点',
-             "body": '**内容要点齐全，覆盖题目要求的全部信息点**。\n应用词汇和语法结构的数量与准确性，高级表达适当加分。\n上下文的连贯性，靠衔接词与指代保持顺畅。\n语言的得体性，称呼与语气要符合文体和对象。\n书写规范、字数达标，一般 80 词左右。'},
+             "body": """五条评分维度：
+- **内容要点齐全**：覆盖题目要求的全部信息点，**漏一个要点就降档**。
+- **词汇与语法**：准确优先，**高级表达适当加分但不强求**。
+- **连贯性**：靠衔接词与指代保持顺畅。
+- **得体性**：称呼与语气符合文体和对象。
+- **书写与字数**：一般 80 词左右，**少于要求会扣分**。
+**提分优先级：要点齐全 > 语法正确 > 表达高级**，顺序不能颠倒。
+**检查清单：时态、主谓一致、名词单复数、拼写**，这四项占失分的大半。"""},
             {"name": '书信类应用文格式',
              "body": '书信格式包含称呼、正文、结束语、署名和日期五部分。\n称呼顶格写，后用逗号；正文每段开头可缩进。\n**结束语常用 Yours sincerely（熟人）/ Yours faithfully（正式）**。\n正文开头常用 I am writing to... 表明写作目的。\n结尾常用 Looking forward to your reply 表达期待。'},
             {"name": '通知类应用文的写法',
@@ -226,9 +344,22 @@ TREE = [
             {"name": '请假条的写法',
              "body": '请假条是向老师或领导请假的便条。\n**写明请假原因和天数**。\n语气诚恳，理由合理。\n格式有称呼、正文、落款（署名和日期）。\n请假条要简洁明了。\n常用开头 I am writing to ask for leave...，结尾表示感谢。'},
             {"name": '高分句式与衔接词',
-             "body": '开篇句式：I am writing to inform you that...／It is a great pleasure to...\n衔接词：firstly、besides、what is more、however、as a result、in conclusion。\n高级结构：定语从句、非谓语作状语、倒装、强调句，适当使用提升档次。\n**避免全篇简单句堆砌，长短句结合**。\n结尾句式：I would appreciate it if you could...／Looking forward to your reply。'},
+             "body": """开篇：I am writing to inform you that…／It is a great pleasure to…
+衔接：firstly、besides、what is more、however、as a result、in conclusion。
+高级结构（每篇用两三个即可）：**定语从句、非谓语作状语、倒装（Not only…but also）、强调句（It is…that…）**。
+**避免全篇简单句堆砌，长短句结合**。
+结尾：I would appreciate it if you could…／Looking forward to your reply。
+**忌堆砌生僻词**：用错的高级词比用对的基础词扣分更多。
+**句式多样性的判断标准：一篇里至少有三种不同结构**。"""},
             {"name": '倡议书的写作要点',
-             "body": '**倡议书要明确倡议目的，开头交代背景和意义**。\n正文分点说明倡议的具体内容，条理清晰。\n语言有感染力，能调动读者的积极性。\n结尾发出号召，表达期待和希望。\n倡议书格式规范，有标题、称呼、正文、落款。'},
+             "body": """结构四段：
+1. **标题**：倡仪书／A Letter of Appeal，或直接写主题（Let's Protect Our Campus）。
+2. **称呼与背景**：说明为什么要倡议（现状 + 问题），**用数据或现象增强说服力**。
+3. **具体倡议**：**分点写（Firstly/Secondly/Finally），每点一个可执行动作**。
+4. **号召与落款**：呼吁行动 + 署名与日期。
+**语言要有感染力：多用 we、祈使句、情态动词 should/must**。
+**倡议内容必须可执行**（「随手关灯」比「爱护环境」有效）。
+**格式分不能丢：标题、称呼、落款、日期**。"""},
             {"name": '投诉信的写法',
              "body": '投诉信开头说明投诉的问题，用 I am writing to complain about。\n正文描述问题的具体情况，包括时间、经过和影响。\n提出解决方案或合理要求，表达期待处理。\n**语气要礼貌而坚定，不卑不亢**。\n结尾用 I look forward to your reply，投诉信格式规范。'},
             {"name": '电子邮件的写作',
@@ -248,11 +379,24 @@ TREE = [
             {"name": '读后续写的人物塑造',
              "body": '读后续写要通过描写塑造人物形象。\n用动作描写表现人物行为，用心理描写表现内心。\n用语言描写表现人物性格，用外貌描写勾勒形象。\n**人物性格要与原文一致，不能前后矛盾**。\n通过人物在事件中的表现体现主题。'},
             {"name": '读后续写的主题把握',
-             "body": '读后续写要准确把握原文的主题和情感。\n续写内容要与主题一致，不能跑题。\n主题通常与成长、亲情、友情、勇气等有关。\n**续写要传递积极向上的价值观**。\n结尾要点明主题，与原文呼应。'},
+             "body": """主题分三层定：
+1. **看首段与末段**——核心情感往往就写在那里（亲情、成长、勇气、善意）。
+2. **看人物的变化**——他从什么状态走到什么状态，这就是主题。
+3. **看反复出现的意象或标题**——那通常是主题的具象化。
+续写必须**承接同一主题**，不能另起一个道理。
+**点题落在细节上**：不写「我懂得了坚持」，写「我把那双磨破的鞋收进柜子，第二天照样五点起床」。
+**价值取向必须积极**：冲突可以尖锐，但结尾要落在理解、成长或担当上。
+**最常见的跑题：把「亲情」写成「成功的励志故事」**。"""},
             {"name": '读后续写的对话描写',
              "body": '对话描写能推动情节发展、刻画人物。\n**对话要符合人物身份和性格**。\n用恰当的引语动词，如 said、replied、shouted。\n对话中穿插动作和神态描写，使画面生动。\n对话要简洁，避免冗长。'},
             {"name": '读后续写的语言衔接',
-             "body": '读后续写要注意语言的连贯衔接。\n使用连接词：then、however、therefore。\n使用时间状语：soon、later、finally。\n段与段之间自然过渡。\n**保持时态一致和主语一致**。'},
+             "body": """三层衔接，缺一层就不连贯：
+- **句间**：then、suddenly、before I could react、as a result。
+- **段间**：第一段结尾留一个动作或悬念，第二段开头直接承接，不另起话题。
+- **意象呼应**：开头的物件、天气、动作，结尾再出现一次。
+**时态一致：续写统一用一般过去时，回忆部分可用过去完成时**，时态跳会大量扣分。
+**主语一致：一段之内不要频繁换主语**，视角乱了读者会跟丢。
+**长短句交替：紧张处用短句，抒情处用长句**，节奏本身就是衔接。"""},
             {"name": '读后续写的动作描写',
              "body": '动作描写要具体生动。\n用一连串动作表现人物行为。\n如 ran、jumped、grabbed 等动词。\n动作描写推动情节发展。\n**动作与心理描写结合，使人物鲜活**。'},
             {"name": '读后续写的细节描写',
@@ -260,13 +404,26 @@ TREE = [
             {"name": '读后续写的结尾技巧',
              "body": '读后续写的结尾要简洁有力。\n**结尾点明主题，升华中心**。\n与开头呼应，结构完整。\n可含蓄留白，引发思考。\n避免冗长拖沓的结尾。\n结尾常回归情感或感悟，一两句点睛即可。'},
             {"name": '读后续写的情节起伏',
-             "body": '读后续写要有情节起伏，避免平铺直叙。\n**设置矛盾和冲突，使故事有张力**。\n情节发展要有转折，制造悬念吸引读者。\n高潮部分扣人心弦，冲突达到顶点。\n结尾解决矛盾，圆满收束，与开头呼应。'},
+             "body": """两段续写的通用骨架：**第一段解决眼前危机，第二段情感升华**。
+制造起伏四个手段：
+- **设置障碍**：目的刚要达成被打断（车坏了、门锁了）。
+- **误会与反转**：先给出坏结果，再揭示真相。
+- **压缩时间**：用 suddenly、at that moment、before I could react 提速。
+- **收在细节**：不写「我很感动」，写「我把那张纸折好，放进胸前的口袋」。
+**忌平铺直叙「做完这件事就回家了」——每段至少一次转折**。
+结尾用同一个意象或同一句话与开头呼应，**比空喊感悟得分高**。"""},
             {"name": '续写的情节构思',
              "body": '先读原文，把握人物关系、冲突与情感基调。\n找出伏笔与线索，让续写的情节与之呼应。\n**两段分工：第一段解决主要冲突，第二段收束情感与主题**。\n避免引入新人物或新的大事件，情节要合理可信。\n结尾要有情感升华或主题点题，但不能生硬说教。'},
             {"name": '读后续写的时间线索',
              "body": '读后续写要理清时间线索。\n**按时间顺序展开情节**，避免时间线混乱。\n注意时间状语的使用：later、the next day、after a while。\n时间线索保持连贯，续写与原文衔接自然。\n情节发展符合时间逻辑。\n用时间词分段推进，使层次清晰。'},
             {"name": '读后续写的伏笔',
-             "body": '读后续写要注意伏笔。\n**原文的伏笔要在续写中呼应**。\n伏笔使故事前后照应。\n呼应伏笔使情节完整。\n注意原文细节的暗示：反复出现的物件、动作、话语。\n续写前先回读原文，圈出可呼应的细节。'},
+             "body": """伏笔是原文故意留下、等你接的线头，**找到它等于找到情节方向**。
+三类最常见：
+- **反复出现的物件**（围巾、钥匙）——续写里让它再次出现并起作用。
+- **未完成的动作或未说出口的话**（他张了张嘴）——续写里把它完成。
+- **反常的细节**（人物的异样表情、天气突变）——往往是转折依据。
+操作：**动笔前把原文最后两段的具体细节圈出来，至少挑两处呼应**，一段开头呼应、一段结尾回应。
+**只写「他终于明白了」不算呼应**，要让具体物件或动作再次出现。"""},
             {"name": '读后续写的悬念设置',
              "body": '读后续写可以适当设置悬念。\n悬念能吸引读者，增强故事吸引力。\n常在段末设置悬念，引发读者兴趣。\n悬念推动情节发展，制造起伏。\n**悬念要在后续合理解决，前后照应**。'},
             {"name": '续写的高频情节模板',
