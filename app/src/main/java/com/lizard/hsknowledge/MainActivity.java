@@ -180,6 +180,10 @@ public class MainActivity extends Activity {
     private LinearLayout dailyScreen;
     private SvList dailyList;
     private TextView dailyTitle, dailyHint, dailyBtnFav;
+    /** 句子卡片与加载块都是固定的 head：翻页只改文字，不重建列表，页面不会跳回顶部。 */
+    private LinearLayout dailyCardBox, dailyLoadingBox;
+    private TextView dailyMain, dailyOrigin;
+    private ProgressBar dailyBar;
     private Node dailyNode;
     private String dailyKind = "phil";
     private int dailyBack = S_NODE;
@@ -302,13 +306,7 @@ public class MainActivity extends Activity {
                 int cut = text.indexOf('\n');
                 String main = (cut >= 0) ? text.substring(0, cut) : text;
                 String origin = (cut >= 0) ? text.substring(cut + 1).trim() : "";
-                View row = hitRow(main, origin,
-                        new Runnable() {
-                            public void run() {
-                                copyToClipboard(text);
-                                toast("已复制这句话");
-                            }
-                        });
+                View row = hitRow(main, origin, null);
                 if (fav) {
                     row.setOnLongClickListener(new View.OnLongClickListener() {
                         public boolean onLongClick(View v) {
@@ -1813,6 +1811,53 @@ public class MainActivity extends Activity {
         dailyHint.setText("每天第一次打开会自动换一句，也可以点下面的按钮换一批");
         dailyList.addHead(dailyHint);
 
+        // 句子卡片（固定，不随翻页重建）
+        dailyCardBox = new LinearLayout(this);
+        dailyCardBox.setOrientation(LinearLayout.VERTICAL);
+        dailyCardBox.setPadding(dp(12), dp(13), dp(12), dp(13));
+        GradientDrawable dcb = new GradientDrawable();
+        dcb.setColor(C_CARD);
+        dcb.setCornerRadius(dp(12));
+        dailyCardBox.setBackgroundDrawable(dcb);
+        dailyMain = new TextView(this);
+        dailyMain.setTextSize(fsSp() + 0.5f);
+        dailyMain.setTextColor(C_TEXT);
+        dailyMain.setLineSpacing(dp(4), 1.35f);
+        dailyMain.setGravity(Gravity.CENTER);
+        dailyCardBox.addView(dailyMain, wrap());
+        dailyOrigin = new TextView(this);
+        dailyOrigin.setTextSize(m.subtitleSize - 2f);
+        dailyOrigin.setTextColor(C_SUB);
+        dailyOrigin.setGravity(Gravity.CENTER);
+        dailyOrigin.setPadding(0, dp(9), 0, 0);
+        dailyCardBox.addView(dailyOrigin, wrap());
+        dailyList.addHead(dailyCardBox);
+        dailyCardBox.setVisibility(View.GONE);
+
+        // 加载块（进度圈 + 文字 + 取消），默认隐藏
+        dailyLoadingBox = new LinearLayout(this);
+        dailyLoadingBox.setOrientation(LinearLayout.VERTICAL);
+        dailyLoadingBox.setGravity(Gravity.CENTER);
+        dailyLoadingBox.setPadding(dp(10), dp(22), dp(10), dp(16));
+        dailyBar = new ProgressBar(this);
+        dailyBar.setIndeterminate(true);
+        try {
+            dailyBar.setIndeterminateTintList(ColorStateList.valueOf(C_PRIMARY));
+        } catch (Exception ignored) { }
+        dailyLoadingBox.addView(dailyBar, new LinearLayout.LayoutParams(dp(30), dp(30)));
+        TextView loadingTxt = new TextView(this);
+        loadingTxt.setText("正在从网络拉取…");
+        loadingTxt.setTextSize(fsSp());
+        loadingTxt.setTextColor(C_SUB);
+        loadingTxt.setGravity(Gravity.CENTER);
+        loadingTxt.setPadding(0, dp(10), 0, 0);
+        dailyLoadingBox.addView(loadingTxt, wrap());
+        dailyLoadingBox.addView(dailyBtn("取消", new View.OnClickListener() {
+            public void onClick(View v) { vibrate(); cancelDailyRefresh(); }
+        }), wrap());
+        dailyLoadingBox.setVisibility(View.GONE);
+        dailyList.addHead(dailyLoadingBox);
+
         LinearLayout dailyBtns = new LinearLayout(this);
         dailyBtns.setOrientation(LinearLayout.HORIZONTAL);
         dailyBtns.setGravity(Gravity.CENTER_VERTICAL);
@@ -2456,7 +2501,8 @@ public class MainActivity extends Activity {
         dailyItems.clear();
         if (mem != null) dailyItems.addAll(mem);
         dailyIdx = 0;
-        if (dailyItems.isEmpty() && dailyLoadingKinds.contains(dailyKind)) renderDailyLoading();
+        if (dailyRefreshing || (dailyItems.isEmpty() && dailyLoadingKinds.contains(dailyKind)))
+            renderDailyLoading();
         else renderDailyBody();
         showScreen(S_DAILY);
         boolean fresh = todayTag().equals(prefs.getString("daily_day_" + dailyKind, ""));
@@ -2471,14 +2517,21 @@ public class MainActivity extends Activity {
             dailyIdx = 0;
         }
         if (dailyNode != null) dailyTitle.setText("每日一句 · " + dailyNode.name);
-        renderDailyBody();
+        if (dailyRefreshing) renderDailyLoading();
+        else renderDailyBody();
     }
 
     /** 点「换一批」：先把现在这批收进备份，页面换成加载态；拉到了就换新，失败/取消就还原。 */
     private void startDailyRefresh() {
         if (dailyRefreshing) return;
         if (dailyLoadingKinds.contains(dailyKind)) {
-            toast("正在拉取，稍等一下");
+            // 已经在取：直接进加载态等这一批回来，不重复发请求
+            dailyRefreshing = true;
+            dailyBackup.clear();
+            dailyBackup.addAll(dailyItems);
+            dailyItems.clear();
+            dailyIdx = 0;
+            renderDailyLoading();
             return;
         }
         dailyRefreshing = true;
@@ -2502,98 +2555,34 @@ public class MainActivity extends Activity {
         renderDailyBody();
     }
 
-    /** 加载态：一句提示 + 取消按钮，不做假内容。 */
+    /** 加载态：固定的进度圈 + 取消按钮，翻页按钮暂时不响应。 */
     private void renderDailyLoading() {
         dailyHint.setText("正在从网络拉取…");
-        dailyList.bind(new RowSource() {
-            public int size() { return 2; }
-            public View make(final int i) {
-                if (i == 1) {
-                    return dailyBtn("取消", new View.OnClickListener() {
-                        public void onClick(View v) { vibrate(); cancelDailyRefresh(); }
-                    });
-                }
-                LinearLayout box = new LinearLayout(MainActivity.this);
-                box.setOrientation(LinearLayout.VERTICAL);
-                box.setGravity(Gravity.CENTER);
-                box.setPadding(dp(10), dp(20), dp(10), dp(14));
-                ProgressBar pb = new ProgressBar(MainActivity.this);
-                pb.setIndeterminate(true);
-                box.addView(pb, new LinearLayout.LayoutParams(dp(26), dp(26)));
-                TextView t = new TextView(MainActivity.this);
-                t.setText("正在从网络拉取…");
-                t.setTextSize(fsSp());
-                t.setTextColor(C_SUB);
-                t.setGravity(Gravity.CENTER);
-                t.setPadding(0, dp(8), 0, 0);
-                box.addView(t, wrap());
-                return box;
-            }
-        });
+        if (dailyCardBox != null) dailyCardBox.setVisibility(View.GONE);
+        if (dailyLoadingBox != null) dailyLoadingBox.setVisibility(View.VISIBLE);
+        paintDailyFav();
     }
 
     private void renderDailyBody() {
+        if (dailyLoadingBox != null) dailyLoadingBox.setVisibility(View.GONE);
         if (dailyItems.isEmpty()) {
-            dailyHint.setText(dailyLoading ? "正在从网络取句子…" : "还没取到句子，点下面「换一批」试试");
-            dailyList.bind(new RowSource() {
-                public int size() { return 1; }
-                public View make(int i) {
-                    TextView t = new TextView(MainActivity.this);
-                    t.setText(dailyLoading ? "加载中…" : "（暂无内容）");
-                    t.setTextSize(fsSp());
-                    t.setTextColor(C_SUB);
-                    t.setGravity(Gravity.CENTER);
-                    t.setPadding(dp(10), dp(24), dp(10), dp(24));
-                    return t;
-                }
-            });
+            if (dailyCardBox != null) dailyCardBox.setVisibility(View.GONE);
+            dailyHint.setText("还没取到句子，点下面「换一批」试试");
             paintDailyFav();
             return;
         }
         if (dailyIdx < 0) dailyIdx = dailyItems.size() - 1;
         if (dailyIdx >= dailyItems.size()) dailyIdx = 0;
-        final String cur = dailyItems.get(dailyIdx);
+        String cur = dailyItems.get(dailyIdx);
         pushDailyHist(cur);                 // 看过就记一条（文本 + 本地号）
         paintDailyFav();
         dailyHint.setText("第 " + (dailyIdx + 1) + " / " + dailyItems.size() + " 句");
-        dailyList.bind(new RowSource() {
-            public int size() { return 1; }
-            public View make(int i) { return dailyCard(cur); }
-        });
-    }
-
-    /** 一句一张卡：正文在上，出处小字在下。 */
-    private View dailyCard(String line) {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(12), dp(13), dp(12), dp(13));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(C_CARD);
-        bg.setCornerRadius(dp(12));
-        card.setBackgroundDrawable(bg);
-
-        int cut = line.indexOf('\n');
-        String main = (cut >= 0) ? line.substring(0, cut) : line;
-        String src = (cut >= 0) ? line.substring(cut + 1).trim() : "";
-
-        TextView t = new TextView(this);
-        t.setText(applyMarkup(main));
-        t.setTextSize(fsSp() + 0.5f);
-        t.setTextColor(C_TEXT);
-        t.setLineSpacing(dp(4), 1.35f);
-        t.setGravity(Gravity.CENTER);
-        card.addView(t, wrap());
-
-        if (src.length() > 0) {
-            TextView sm = new TextView(this);
-            sm.setText(src);
-            sm.setTextSize(m.subtitleSize - 2f);
-            sm.setTextColor(C_SUB);
-            sm.setGravity(Gravity.CENTER);
-            sm.setPadding(0, dp(9), 0, 0);
-            card.addView(sm, wrap());
-        }
-        return card;
+        int cut = cur.indexOf('\n');
+        dailyMain.setText(applyMarkup(cut >= 0 ? cur.substring(0, cut) : cur));
+        String origin = (cut >= 0) ? cur.substring(cut + 1).trim() : "";
+        dailyOrigin.setText(origin);
+        dailyOrigin.setVisibility(origin.length() > 0 ? View.VISIBLE : View.GONE);
+        if (dailyCardBox != null) dailyCardBox.setVisibility(View.VISIBLE);
     }
 
     private void stepDaily(int d) {
@@ -2764,14 +2753,14 @@ public class MainActivity extends Activity {
                         dailyLoadingKinds.remove(kind);
                         if (mySeq != dailySeq) return;      // 用户已经点了取消或又换了一批，这次结果作废
                         if (got.isEmpty()) {
-                            if (manual) {
-                                toast("没取到句子，检查一下网络再试");
+                            if (manual || dailyRefreshing) {
                                 dailyRefreshing = false;
                                 dailyItems.clear();
                                 dailyItems.addAll(dailyBackup);   // 失败就把原来那批放回来
                                 dailyBackup.clear();
                                 dailyIdx = 0;
                                 if (kind.equals(dailyKind) && screen == S_DAILY) renderDailyBody();
+                                toast("没取到句子，检查一下网络再试");
                             }
                             return;
                         }
