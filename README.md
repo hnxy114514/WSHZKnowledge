@@ -66,7 +66,7 @@ tools/subjects/*.py  （九科递归节点树，人工维护，只写内容不�
 app/src/main/assets/data/*.json  （每科一份 nodes 递归树，构建时生成）
         │  打包进 APK
         ▼
-App 启动时 parseSubject 递归解析，MainActivity 用「导航栈 + 通用列表页」渲染
+App 启动时在子线程用 parseSubject 递归解析，主线程先显示开屏；主界面用「导航栈 + 通用列表页」渲染
 ```
 
 改完 `subjects/*.py` 或 `build_authored.py`，跑 `python build/check_data.py` 做一次体检：
@@ -179,6 +179,8 @@ python gen_all.py                           # 需要全部重生成时跑这个
 ### 3. 修改 App 代码（UI / 排版引擎 / 更新逻辑）
 
 改 `app/src/main/java/.../MainActivity.java`，然后重新构建。
+动手前先看上面的《App 端实现地图》：屏幕表、SvList 分页、导航栈、存储键、每日一句流程都在那里，
+照着改就行，不用先通读代码。新增一屏要同步改的四处（常量 / screens[] / screenView / svOf）也在那里列了。
 
 ### 4. 修改重点高亮
 
@@ -344,6 +346,186 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
   REST 没有删 issue 的接口，必须走 GraphQL 的 `deleteIssue`，需要仓库写权限；失败时把 GitHub 返回的原因直接提示出来。
 - 上面三个操作都走 GraphQL（`POST https://api.github.com/graphql`，直连带 token，认证头用 `Bearer`），
   issue 的 `node_id` 从列表接口带回来直接用。改完会重新拉一次列表（`mineDirty` 标记，回到列表页时触发）。
+
+---
+
+## App 端实现地图（不读代码先看这一节）
+
+整个 App 只有 **一个 Activity、一个 Java 文件**：`app/src/main/java/com/lizard/hsknowledge/MainActivity.java`
+（约 8300 行，界面、排版引擎、联网、更新、本地存储全在里面），加一个 `ApkFileProvider.java`
+（只干一件事：把下载好的安装包以 content:// 交给系统安装器）。
+没有第三方 UI 库，**没有 XML 布局**，除主题与开屏底图外的所有界面都是代码里 new 出来的 View。
+所以改界面 = 改这个文件里的 `buildXxxScreen()` / `renderXxx()`，不需要找 layout 文件。
+
+### 启动流程与开屏（v2.9.2 起）
+
+```
+系统先画 windowBackground
+  └ AppTheme.Splash → res/drawable/splash_bg.xml（黑底 + 居中图标）
+     这一步在 Activity 创建之前就完成，所以从点图标开始就不是黑屏
+        ▼
+MainActivity.onCreate：只做很快的事
+  ├ 读 prefs（字号 / 缩放 / 滑动返回 / 震动 / 科目顺序）
+  ├ showBootSplash()   自绘开屏：图标 + 转圈 + 「正在载入知识库…」
+  └ bootLoad()         起子线程去读数据
+        ▼
+子线程：cleanupOldApk() → loadData() → loadMarks() → loadOrderKeys()
+        ▼
+回主线程 bootFinish()：补足最短显示时长 BOOT_MIN_MS = 320ms（数据读太快也让 logo 亮一下）
+        ▼
+enterApp()：buildUi() 建主界面（setContentView 换掉开屏）→ 定首屏
+          → startRouteProbe() 探测网络通道 → checkUpdate() → installCrashHandler()
+          → 700ms 后问候语 → 1600ms 后每日一句自动刷新
+```
+
+- **主线程不干重活**：九科 JSON（1300+ 节点）全在子线程解析；`loadData` / `loadMarks` / `loadOrderKeys`
+  只写内存字段、不碰任何 View，所以可以安全地放在子线程。
+- 子线程**不能弹 Toast**（没有 Looper）：加载异常记到 `loadError`，进主界面后再提示。
+- 开屏是纯 View（ImageView + ProgressBar + 一行字），创建只要几毫秒，能立刻上屏；
+  它是 `setContentView` 的第一份内容，主界面建好后被 `setContentView(root)` 顶掉。
+- 窗口底色全程是 `C_BG`（纯黑），换内容不会白闪。
+
+### 界面骨架：18 个「屏幕」叠在一个 FrameLayout 里
+
+`buildUi()` 建一个 `root`（FrameLayout），往里 add 18 个 `newScreen()`（LinearLayout，位置 `fp()` 铺满），
+同一时刻只有一个 `VISIBLE`，切换就是「把旧的 GONE、新的 VISIBLE」——不是跳 Activity，所以很快、也没有转场黑屏。
+
+屏幕常量与「第几个」强绑定，**顺序不能乱**：
+
+| 值 | 常量 | 页面 | 怎么建 / 怎么画 |
+|---|---|---|---|
+| 0 | S_SUBJECT | 主页（科目 + 每日问候 + 入口） | `buildSubjectScreen()` / `renderSubjects()` |
+| 1 | S_NODE | 通用节点列表（任意层级） | `renderNodes()` → `bindNodes()` |
+| 2 | S_DETAIL | 知识点正文 | `openDetail()` |
+| 3 | S_SETTINGS | 设置 | `buildSettingsScreen()` |
+| 4 | S_SEARCH | 全局搜索 | `refreshGlobalSearch()` |
+| 5 | S_FEEDBACK | 反馈（提 issue） | `buildFeedbackScreen()` |
+| 6 | S_MYFEEDBACK | 我的反馈 | `renderMine()` |
+| 7 | S_PROFILE | 个人主页（GitHub 账号） | `renderProfile()` |
+| 8 | S_CHANGELOG | 更新日志 | `buildChangelogScreen()` |
+| 9 | S_ABOUT | 关于 | `buildAboutScreen()` |
+| 10 | S_DISPLAY | 调节显示 | `buildDisplayScreen()` |
+| 11 | S_TODAY | 今日新增 | `renderToday()` |
+| 12 | S_EXAMPLES | 例题 | `renderExamples()` |
+| 13 | S_FAV | 我的收藏（第一级：按科目） | `renderFav()` |
+| 14 | S_HIST | 最近浏览 | `renderHist()` |
+| 15 | S_FAV_SUB | 某科目的收藏（第二级） | `renderFavSub()` |
+| 16 | S_DAILY | 每日一句 | `renderDaily()` |
+| 17 | S_SENT | 每日一句的收藏 / 浏览记录 | `renderSent()` |
+
+`SCREEN_COUNT = 18`。四个地方必须同步改，漏一个就会错位或崩：
+① 常量与 `SCREEN_COUNT`；② `showScreen()` 里的 `screens[]` 数组（**下标即常量值**）；
+③ `screenView(s)` 的 switch（滑动预览用）；④ `svOf(s)` 的 switch（返回时记滚动位置用）。
+另外 `backTarget()` 决定返回键去哪，`showScreen()` 里要加该页的渲染分支。
+
+### 加一屏的完整步骤
+
+1. 在常量后面加 `S_XXX = 18`，`SCREEN_COUNT` 改 19；
+2. `buildUi()` 里 `xxxScreen = newScreen(); ... root.addView(xxxScreen, fp());`；
+3. `screens[]` 数组末尾加 `xxxScreen`（顺序必须和常量值一致）；
+4. `screenView()` 与 `svOf()` 各加一个 `case S_XXX:`；
+5. `backTarget()` 里写返回去哪，`showScreen()` 里加 `else if (s == S_XXX) renderXxx();`；
+6. 需要从主页进就在 `buildSubjectScreen()` 加一行入口。
+
+### SvList：唯一的列表实现
+
+不用 ListView/RecyclerView，全部是 `SvList`：**外层 `OverScrollScrollView` + 竖排 LinearLayout，一行就是一个普通 View**。
+
+- `addHead(view)` 把返回键、标题、搜索框放进滚动区顶部，**跟着内容一起滚**（不固定占位）。
+- `bind(RowSource)` 交给它一个「有多少行 + 第 i 行长什么样」的对象，它负责分页：
+  首屏 `first = 30` 行，滚到还剩约一屏续载 `page = 40` 行，每帧只追加 `chunk = 15` 行。
+- 搜索结果与今日新增受 `HIT_LIMIT = 400` 限制（一次最多 400 行），超了标题会注明。
+- `enter()` 进页面时跳过顶部占位把第一个内容贴顶；`restore()` 恢复上次滚动位置（`savedY`，只有「返回上一级」才恢复）。
+- 圆屏才有上下 25% 屏高的透明占位（`makeScrollSpacer()`），方屏不加；内容不满一屏时 `fitSpacers()` 自动收掉。
+
+### 数据模型只有一个 Node
+
+```java
+Node {
+  String id, name;            // 编号、标题
+  String body;                // 叶子正文（单段，多行用 \n）
+  List<Node> children;        // 非空 = 分组节点
+  List<Example> ex;           // 例题，只挂叶子
+  int star; String img, d;    // 星级、配图、加入日期
+  String daily;               // 非空 = 每日一句入口（phil / poem）
+  Node parent; Subject subj;  // 父链与所属科目（路径、收藏页都要用）
+  int savedY;                 // 离开时记下列表位置
+  boolean isLeaf() { return children.isEmpty(); }
+  String path();              // 面包屑：科目 › … › 自己，由父链现算
+}
+```
+
+**层级判断只看 `children`，绝不看编号段数**。所以数据里三层、四层、五层混着都行，UI 一行不用改。
+
+### 导航：一个栈 + 一个通用列表页
+
+- `curSubject` 当前科目；`navStack` 从科目根走到当前分组的节点链；`curNode` 当前列表页展示的是谁的 children。
+- `openNode(n)`：`n.isLeaf()` → 开详情；否则压栈、`renderNodes()`、留在此页。
+- `nodeBack()`：弹栈；栈空且是从收藏/搜索进来（`nodeEntryBack`）就回那一页，否则回主页。
+- `openNodeFrom(n, back)`：从搜索 / 收藏 / 历史 / 今日跳进来时，先把祖先链补进 `navStack`，
+  保证详情页的面包屑和返回都有得退。
+- 面包屑 `currentPath()` + `setPath()` 按栈动态拼，有几级几段，每段带 `pathSpan` 可点跳回那一层；
+  最后一段灰字不可点。
+- 切页动画在 `showScreen()`：按 `pageDepth()` 差决定「从右进 / 从左退 / 同级上浮」，185ms 减速曲线；
+  节点页内部换层（S_NODE→S_NODE）用 `slideNodeList(±1)` 单独做轻动画。
+
+### 渲染：正文与重点高亮
+
+正文一律走 `applyMarkup(text)`：它认两种写法——
+`**加粗**` → **加粗 + 琥珀金 `C_HI`**（就是「标重点」）；`$...$` 里的公式 → 自绘 span（分数、根号、上下标、向量）。
+新增任何自绘 span 都要把「当前是否在标亮区间」显式传下去，否则会出现「旁边字亮了、公式没亮」。
+
+### 本地存储一览（都在 SharedPreferences `settings` 里）
+
+| 键 | 内容 | 说明 |
+|---|---|---|
+| `fav_ids` | 收藏的节点编号（逗号分隔） | 稳定编号，跳过 6 位日期段 |
+| `hist_ids` | 浏览过的节点编号 | 最多 `HIST_MAX = 50`，`pushHistory()` 维护 |
+| `daily_pool` | 本地号 → 句子原文（JSON） | 每日一句专用，不存知识点编号 |
+| `daily_fav` | 收藏的本地号列表 | 有序，最新在前 |
+| `daily_hist` | 浏览过的本地号 | 最多 `DAILY_HIST_MAX = 50` |
+| `daily_day_phil` / `daily_day_poem` | 上次自动刷新的日期（yyMMdd） | 两类各自记 |
+| `downloaded_tag` | 已下载的版本标记 | 用来判断安装包是否可以删 |
+| `subject_order` | 主页科目顺序 | |
+| `font_size` / `list_size` / `title_size` / `sub_size` / `ui_scale` | 显示设置 | 改完必须重建界面 |
+| `display_tuned` | 是否已完成首次显示调节 | false 时启动进 S_DISPLAY |
+
+收藏页两级：`S_FAV` 只列「有收藏的科目 + 每日一句」，点科目进 `S_FAV_SUB` 倒序平铺，每行带短路径小字。
+所有节点行右侧都有收藏星（每日一句入口行例外，句子在页面里收藏）。
+
+### 每日一句（联网取句 + 本地文本收藏）
+
+- 接口：一言 `https://v1.hitokoto.cn/?{分类}&encode=json&charset=utf-8`；
+  哲思美句 `c=k&c=d`，古诗文 `c=i`。免费、免登录。返回取 `hitokoto` / `from` / `from_who`
+  （`null` 字符串要过滤掉，否则界面上会显示「—— null」）。
+- 每类至少备 `DAILY_WANT = 10` 条：取不够继续取，去重；取不到就提示重试，**绝不编句子**。
+  句子只放内存 `dailyMem`（本次运行有效），不写盘、不进 assets。
+- 每天第一次打开 `checkDailyForToday()` 各刷一批；页面里「换一批」手动刷。
+- 手动刷新是一套「可撤销」流程：`startDailyRefresh()` 把当前这批存进 `dailyBackup`、页面切成加载态
+  （固定加载块：转圈 + 取消；此时翻页/收藏/换一批先隐藏，避免误点）；
+  拉到新句子 → 换新 + 清备份；点取消或拉取失败 → 还原备份。`dailySeq` 用来丢弃已取消的在途结果，
+  避免「取消了结果又回来」。
+- 收藏与历史存「本地号 + 原文」：`ensureDailyNo()` 找同文本的号、没有就取当前最小空号；
+  取消收藏或历史被挤出后 `dropDailyIfUnused()` 在无人引用时把文本从 `daily_pool` 删掉，号随之空出复用。
+- 界面：句子卡片和加载块都是**固定 head**，翻页只改文字，不重建列表 —— 否则页面会跳回顶部。
+
+### 在线更新与安装
+
+1. `checkUpdate()` 拉 GitHub Release，比对 `versionName`，弹窗展示更新说明；
+2. 确认后 `downloadApkWithMirrors()` 依次试「直连 + 几个镜像」，下到 `files/update.apk`（先写 `.tmp` 再改名）；
+   **下载前先删掉上一次的旧包**，避免占空间、装错版本；
+3. 写完记 `downloaded_tag = v<新版>`，再拉起安装器；
+4. `installApkWithRetry()`：等界面稳定、**要求窗口已拿到焦点**才 `startActivity` 安装；
+   拿不到焦点每 400ms 重试，最多 4 次，仍不行就 `pendingInstall` 等回到前台再装；
+5. `ApkFileProvider.query()` 要返回真实的文件名和大小，返回 null 时个别系统会认为 URI 无效、直接不弹安装器；
+6. `cleanupOldApk()` 在下次启动时清理：版本号已经等于 `downloaded_tag` 说明装上了，删包；顺带清掉残留 `.apk` 与 `.tmp`。
+
+### 显示设置为什么必须重建界面
+
+字号是 `Metrics` 快照、尺寸走 `dp()`（含 `uiScale`），都是**建界面时就算进控件**的，
+光电改变量界面看起来完全没变。所以调完必须重建——但用 `rebuildUi()` **就地重建**（重新 `buildUi()` 再 `showScreen(backTo)`），
+**不要用 `recreate()`**：那会把 Activity 整个销毁重建，窗口背景先露出开屏图、还要再走一遍启动流程，
+用户看到的就是「调完显示退出来闪一下黑屏」。
 
 ---
 

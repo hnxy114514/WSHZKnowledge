@@ -270,7 +270,10 @@ public class MainActivity extends Activity {
     private String lastPath = "";
     private boolean subjectDirty = true;
     private String lastQuery = null;
-    private final boolean[] restoreNext = new boolean[SCREEN_COUNT];   // 下一刻进入该页时回到离开时的位置（只有「返回上一级」才置）
+    private final boolean[] restoreNext = new boolean[SCREEN_COUNT];
+    private LinearLayout bootSplash;      // 启动开屏（数据就绪后被主界面替换）
+    private long bootStart = 0;
+    private String loadError = null;   // 下一刻进入该页时回到离开时的位置（只有「返回上一级」才置）
 
     // 关于 / 感谢名单
     private LinearLayout aboutScreen, aboutInner, thanksBox, thanksLoading;
@@ -452,22 +455,91 @@ public class MainActivity extends Activity {
         m = new Metrics();
         swipeBack = prefs.getBoolean("swipe_back", true);
         haptic = prefs.getBoolean("haptic", true);
-        loadGitHub();
-        cleanupOldApk();      // 装完新版本后把遗留的安装包删掉
-        loadData();
-        loadMarks();
-        loadOrderKeys();
-        buildUi();
+        loadGitHub();         // 只读 prefs，很快
+        bootStart = System.currentTimeMillis();
+        showBootSplash();     // 先把开屏画出来，绝不留黑屏
+        bootLoad();           // 数据在子线程读，读完整再建界面
+    }
+
+    // ================= 启动开屏 =================
+    /** 开屏最短显示时长：数据读得飞快时也让 logo 至少亮一下，不要一闪就跳。 */
+    private static final long BOOT_MIN_MS = 320;
+
+    /** 开屏：图标 + 转圈 + 一行字。纯 View，创建只花几毫秒，可立即上屏。 */
+    private void showBootSplash() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER);
+        box.setBackgroundColor(C_BG);
+
+        ImageView logo = new ImageView(this);
+        int rid = getResources().getIdentifier("ic_launcher_foreground", "mipmap", getPackageName());
+        if (rid != 0) logo.setImageResource(rid);
+        box.addView(logo, new LinearLayout.LayoutParams(dp(52), dp(52)));
+
+        ProgressBar bar = new ProgressBar(this);
+        bar.setIndeterminate(true);
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(dp(28), dp(28));
+        bp.topMargin = dp(10);
+        try {
+            bar.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(C_PRIMARY));
+        } catch (Exception ignored) { }
+        box.addView(bar, bp);
+
+        TextView tip = new TextView(this);
+        tip.setText("正在载入知识库…");
+        tip.setTextSize(m.subtitleSize - 2f);
+        tip.setTextColor(C_SUB);
+        tip.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        tp.topMargin = dp(9);
+        box.addView(tip, tp);
+
+        bootSplash = box;
+        setContentView(box);
+    }
+
+    /** 子线程读数据：assets 里的 JSON 解析不碰任何 View。 */
+    private void bootLoad() {
+        new Thread(new Runnable() {
+            public void run() {
+                cleanupOldApk();     // 装完新版本后把遗留的安装包删掉
+                loadData();
+                loadMarks();
+                loadOrderKeys();
+                runOnUiThread(new Runnable() {
+                    public void run() { bootFinish(); }
+                });
+            }
+        }).start();
+    }
+
+    /** 数据就绪：等开屏露一下脸，再进主界面。 */
+    private void bootFinish() {
+        if (isFinishing() || isDestroyed()) return;
+        long cost = System.currentTimeMillis() - bootStart;
+        long wait = Math.max(0, BOOT_MIN_MS - cost);
+        getWindow().getDecorView().postDelayed(new Runnable() {
+            public void run() { enterApp(); }
+        }, wait);
+    }
+
+    /** 建界面、定首屏、挂后台任务。开屏在这里被主界面替换。 */
+    private void enterApp() {
+        if (isFinishing() || isDestroyed()) return;
+        buildUi();               // 内部会 setContentView(root)，开屏随之替换掉
+        bootSplash = null;
         boolean tuned = prefs.getBoolean("display_tuned", false);
         if (!tuned) tuningFirstRun = true;
-        if (pendingScreen >= 0) {
-            int back = pendingScreen;
-            pendingScreen = -1;
-            showScreen(back);
-        } else if (!tuned) {
-            showScreen(S_DISPLAY);
+        if (!tuned) {
+            showScreen(S_DISPLAY);       // 第一次装：先进显示调节，让用户把字号调舒服
         } else {
             showScreen(S_SUBJECT);
+        }
+        if (loadError != null) {
+            toast("数据加载失败：" + loadError);
+            loadError = null;
         }
         // 后台探测最优通道（直连 / 镜像），探测结果给所有联网页面共用
         startRouteProbe();
@@ -676,7 +748,8 @@ public class MainActivity extends Activity {
             }
             buildHits();
         } catch (Exception ex) {
-            Toast.makeText(this, "数据加载失败：" + ex.getMessage(), Toast.LENGTH_LONG).show();
+            // 现在是在子线程读数据，不能直接弹 Toast（无 Looper），记下来回主线程再提示
+            loadError = String.valueOf(ex.getMessage());
         }
     }
 
@@ -6233,8 +6306,18 @@ public class MainActivity extends Activity {
      */
     private void applyDisplayChange(int backTo) {
         saveDisplaySettings();
-        pendingScreen = backTo;
-        recreate();
+        // 字号、尺寸是「建界面时算进控件」的，必须重建视图树；但**不要 recreate()**：
+        // 重建 Activity 会重新走一遍窗口创建，窗口背景先露出开屏图、再走一次启动流程，
+        // 用户看到的就是「调完显示退出来闪一下黑屏」（踩过）。
+        // 就地重建：数据、导航状态、收藏都在内存里，不重读 JSON，直接换一棵 View 树。
+        m = new Metrics();          // 字号/缩放是快照，改完必须重新取
+        rebuildUi(backTo);
+    }
+
+    /** 就地重建整个界面（不销毁 Activity）：几毫秒完成，屏幕不会黑。 */
+    private void rebuildUi(final int backTo) {
+        buildUi();                  // 内部 setContentView(root)，旧树被替换
+        showScreen(backTo);         // 切页动画自带淡入，这里不再叠加第二层
     }
 
     /**
