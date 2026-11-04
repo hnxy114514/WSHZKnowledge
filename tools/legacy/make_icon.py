@@ -3,7 +3,7 @@
 
 思路：
   - 腕表：圆形深色盘面 + 双层金属表圈 + 12 点琥珀金三角标 + 3/6/9 点细刻度
-  - 知识：盘面正中一本打开的书（Emoji，源图见 tools/emoji_src/）
+  - 知识：盘面正中一本打开的书（Emoji，源图见 tools/legacy/emoji_src/）
   - 书底一层柔和投影，让图"浮"在盘面上；缩到小尺寸仍保持清晰剪影
 
 图标里的书籍图形来自 OpenMoji（https://openmoji.org，CC BY-SA 4.0）。
@@ -159,7 +159,11 @@ COLORS_XML = [
 
 
 def main():
-    root = os.path.join(HERE, "..")
+    # 向上找仓库根（同时有 app/ 和 tools/ 的那一层）
+    root = HERE
+    while root != os.path.dirname(root) and not (
+            os.path.isdir(os.path.join(root, "app")) and os.path.isdir(os.path.join(root, "tools"))):
+        root = os.path.dirname(root)
     res = os.path.join(root, "app", "src", "main", "res")
 
     # 1. 传统图标（API 25 及以下）：深色方底 + 满幅表盘，任何容器里都不会露白圈

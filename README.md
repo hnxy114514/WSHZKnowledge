@@ -11,30 +11,32 @@ WSHZKnowledge/
 ├── app/                              Android 工程
 │   ├── src/main/
 │   │   ├── java/com/lizard/hsknowledge/
-│   │   │   ├── MainActivity.java        UI + 数学排版引擎 + 更新 + 反馈（单文件，约 7100 行）
+│   │   │   ├── MainActivity.java        UI + 数学排版引擎 + 更新 + 反馈（单文件，约 8300 行）
 │   │   │   ├── OverScrollScrollView.java 圆屏内容过滚滚动容器（列表与正文共用，方屏过滚为 0）
 │   │   │   └── ApkFileProvider.java     APK 覆盖安装用的 ContentProvider
 │   │   ├── assets/
 │   │   │   ├── data/                    九科知识库 JSON（构建时自动生成，勿手改）
-│   │   │   └── img/                     配图 PNG（tools/img_gen 生成，勿手改）
+│   │   │   └── img/                     配图 PNG（tools/legacy/img_gen 生成，勿手改）
 │   │   ├── res/                         资源（图标、样式、字符串）
 │   │   └── AndroidManifest.xml          版本号、权限、Provider 声明
 │
-├── tools/                             数据与配图的「源」和生成脚本
+├── tools/                             日常在用的脚本与数据源（这里的东西每次构建/都可能用到）
 │   ├── subjects/                       九科源文件（唯一需要手改内容的地方）
 │   │   ├── chinese.py / math.py / english.py /
 │   │   ├── physics.py / chem.py / bio.py /
-│   │   └── politics.py / history.py / geography.py
+│   │   ├── politics.py / history.py / geography.py
+│   │   └── ext_bipei60.py / ext_zuowen.py   语文扩展内容（必背 60 篇、作文素材），由 chinese.py 加载
 │   ├── build_authored.py               构建数据：递归 TREE → assets/data/nodes（含去重、分数化、定稿、编号 v3）
-│   ├── img_map.py                      配图绑定表：科目 + 分组名关键词 + 标题关键词 → 图片文件名
-│   ├── img_gen/                       配图生成（每张图一个脚本 + 共享 common.py）
-│   │   ├── common.py                   公式排版库（LaTeX 解析 + 分式/根号绘制）+ 颜色/coords/save
-│   │   ├── <图片名>.py                 每张配图一个脚本，单独运行只生成那一张
-│   │   └── gen_all.py                  一键重新生成全部在用配图
-│   ├── make_icon.py                    生成应用图标（表盘 + Emoji 书本，输出 5 个 dpi）
+│   ├── check_data.py                   数据体检：编号/标题/正文/加粗/LaTeX/例题（只读，构建后跑一次）
 │   ├── gen_thanks.py                   生成感谢名单的静态备份 cloud/thanks.json（发版时自动跑）
+│   ├── img_map.py                      配图绑定表：科目 + 分组名关键词 + 标题关键词 → 图片文件名
 │   ├── ids.json                        节点编号台账 v3（构建时读写，必须随仓库保留）
-│   └── emoji_src/open_book.png          图标用的书本 Emoji 源图（Fluent Emoji, MIT）
+│   └── legacy/                         老工具归档：现在流程不跑、特殊需求才翻出来（见下方说明）
+│       ├── README.md                   每个归档脚本是什么、什么时候会用、怎么跑
+│       ├── img_gen/                    配图生成（common.py + 每张图一个脚本 + gen_all.py）
+│       ├── make_icon.py                生成应用图标（表盘 + Emoji 书本，输出 5 个 dpi）
+│       ├── emoji_src/open_book.png     图标用的书本 Emoji 源图（Fluent Emoji, MIT）
+│       └── hl_kit.py                   批量标重点辅助（export 缺标条目 / apply 回写）
 │
 ├── cloud/
 │   ├── version.json                    更新兜底用的版本号（App 拉不到 GitHub API 时读它）
@@ -49,9 +51,10 @@ WSHZKnowledge/
 
 未入库的本地目录（已 gitignore，按需清理）：
 
-- `build/`：构建中间产物与产出 APK（每次构建重建）。
-  另有几个只在本机跑、不参与打包的校验/补丁脚本：`build/check_data.py`（知识点数据体检）、`build/patch_*.py`（成批改动源码的补丁）。
-- `local/`：发布凭据、签名 keystore、本地备忘，不进仓库。
+- `build/`：**纯构建产物**（obj / dex / 中间 apk / 日志），每次构建重建，可以随时整个删掉。
+  脚本一律不放这里——历史上 `build/check_data.py`、`build/patch_*.py` 二十多个一次性补丁脚本混在这里，
+  清一次 build 就全丢，且多数早已失效，v2.9.3 已把仍在用的搬到 `tools/`、一次性工具归档到 `tools/legacy/`。
+- `local/`：发布凭据、签名 keystore、本地备忘（含 `local/backup/` 的笔记旧备份），不进仓库。
 
 ---
 
@@ -69,7 +72,7 @@ app/src/main/assets/data/*.json  （每科一份 nodes 递归树，构建时生�
 App 启动时在子线程用 parseSubject 递归解析，主线程先显示开屏；主界面用「导航栈 + 通用列表页」渲染
 ```
 
-改完 `subjects/*.py` 或 `build_authored.py`，跑 `python build/check_data.py` 做一次体检：
+改完 `subjects/*.py` 或 `build_authored.py`，跑 `python tools/check_data.py` 做一次体检：
 查编号重复 / 标题重复 / 空正文 / 加粗与花括号配对 / 未被排版引擎支持的 LaTeX 命令 /
 `\frac` 参数完整性 / 上下标写法，并核对编号里的科目码与日期。
 `build_authored.py` 分数化（`fracify`）时分子分母的边界扫描对 `()`、`[]`、`{}` 三种括号都要做
@@ -78,7 +81,7 @@ App 启动时在子线程用 parseSubject 递归解析，主线程先显示开�
 配图走另一条独立的链：
 
 ```
-tools/img_gen/  （common.py + 每张图一个 <图片名>.py + gen_all.py）
+tools/legacy/img_gen/  （common.py + 每张图一个 <图片名>.py + gen_all.py）
         │  直接运行某个脚本 / 或 gen_all.py
         ▼
 app/src/main/assets/img/*.png  （57 张）
@@ -166,11 +169,11 @@ TREE = [
 
 ### 2. 修改 / 新增配图
 
-配图代码在 `tools/img_gen/`：每张图一个 `<图片名>.py`，共享绘制能力在 `common.py`。
+配图代码在 `tools/legacy/img_gen/`：每张图一个 `<图片名>.py`，共享绘制能力在 `common.py`。
 要改某张图，只编辑对应的那个脚本，单独运行即可只重新生成它：
 
 ```bash
-cd tools/img_gen && python m_quad.py        # 只重新生成「数学_3.1_二次函数.png」
+cd tools/legacy/img_gen && python m_quad.py  # 只重新生成「数学_3.1_二次函数.png」
 python gen_all.py                           # 需要全部重生成时跑这个
 ```
 
@@ -351,9 +354,10 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
 
 ## App 端实现地图（不读代码先看这一节）
 
-整个 App 只有 **一个 Activity、一个 Java 文件**：`app/src/main/java/com/lizard/hsknowledge/MainActivity.java`
-（约 8300 行，界面、排版引擎、联网、更新、本地存储全在里面），加一个 `ApkFileProvider.java`
-（只干一件事：把下载好的安装包以 content:// 交给系统安装器）。
+Android 端只有 **一个 Activity、三个 Java 文件**：
+`MainActivity.java`（约 8300 行，界面、排版引擎、联网、更新、本地存储全在里面）、
+`OverScrollScrollView.java`（圆屏内容过滚的滚动容器，列表和正文共用；方屏过滚距离为 0）、
+`ApkFileProvider.java`（把下载好的安装包以 content:// 交给系统安装器）。
 没有第三方 UI 库，**没有 XML 布局**，除主题与开屏底图外的所有界面都是代码里 new 出来的 View。
 所以改界面 = 改这个文件里的 `buildXxxScreen()` / `renderXxx()`，不需要找 layout 文件。
 

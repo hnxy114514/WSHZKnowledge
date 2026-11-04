@@ -13,7 +13,11 @@ from PIL import Image, ImageDraw, ImageFont
 
 W, H = 640, 470
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(os.path.dirname(HERE))   # <root>/tools/img_gen -> <root>
+# 向上找仓库根（同时有 app/ 和 tools/ 的那一层）：脚本在 tools/ 或 tools/legacy/ 下都不会找错
+ROOT = HERE
+while ROOT != os.path.dirname(ROOT) and not (
+        os.path.isdir(os.path.join(ROOT, "app")) and os.path.isdir(os.path.join(ROOT, "tools"))):
+    ROOT = os.path.dirname(ROOT)
 OUT = os.path.join(ROOT, "app", "src", "main", "assets", "img")
 FONT_R = "C:/Windows/Fonts/msyh.ttc"
 FONT_B = "C:/Windows/Fonts/msyhbd.ttc"

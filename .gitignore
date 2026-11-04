@@ -10,10 +10,7 @@ release.keystore
 /build/
 /tmp/
 
-# 工具中间产物
-/tools/_archive/
-/tools/gen_out/
-/tools/__pycache__/
+# 工具中间产物（__pycache__ 由下面的 **/__pycache__/ 统一覆盖）
 
 # 本地核对目录
 /配图核对/
