@@ -453,6 +453,7 @@ public class MainActivity extends Activity {
         swipeBack = prefs.getBoolean("swipe_back", true);
         haptic = prefs.getBoolean("haptic", true);
         loadGitHub();
+        cleanupOldApk();      // 装完新版本后把遗留的安装包删掉
         loadData();
         loadMarks();
         loadOrderKeys();
@@ -922,6 +923,7 @@ public class MainActivity extends Activity {
                         toast("已取消更新");
                         return;
                     }
+                    prefs.edit().putString("downloaded_tag", "v" + tag).apply();
                     progressShow("下载完成", "正在打开安装程序…", 100);
                     runOnUiThread(new Runnable() {
                         public void run() {
@@ -932,17 +934,11 @@ public class MainActivity extends Activity {
                                 toast("更新已下载，回到应用后自动安装");
                                 return;
                             }
-                            // 刚 rename 完 APK，慢的手表存储可能还没「反应过来」，稍等片刻再装，
-                            // 否则安装器可能读到不完整/不存在的文件
+                            // 刚 rename 完 APK、进度条也刚收起，安装器立刻拉起容易被系统当成
+                            // 「后台启动界面」拦掉；先等一会儿，再要求窗口有焦点才真正启动
                             root.postDelayed(new Runnable() {
-                                public void run() {
-                                    if (!foreground) {
-                                        pendingInstall = true;
-                                        return;
-                                    }
-                                    installApk();
-                                }
-                            }, 800);
+                                public void run() { installApkWithRetry(0); }
+                            }, 1200);
                         }
                     });
                 } catch (final Exception e) {
@@ -1345,6 +1341,9 @@ public class MainActivity extends Activity {
     /** 直连 + 各镜像依次尝试下载，边下边更新进度；成功后落到 filesDir/update.apk。 */
     private void downloadApkWithMirrors(String originUrl, String tag) throws Exception {
         File dir = getFilesDir();
+        // 每次下载前先清掉上次遗留的安装包（含半截的 .tmp），避免旧包占空间、也避免装错版本
+        deleteQuietly(new File(dir, APK_FILE));
+        deleteQuietly(new File(dir, APK_FILE + ".tmp"));
         String lastErr = null;
         for (int i = 0; i <= MIRRORS.length; i++) {
             if (downloadCancel) throw new Exception("已取消");
@@ -1508,6 +1507,63 @@ public class MainActivity extends Activity {
         progFill.setLayoutParams(lp);
     }
 
+    /** 拉起安装器前确认 App 仍在前台、窗口已拿到焦点；拿不到就多等一拍再试，
+     *  最多试 4 次，避免安装器被系统当成后台启动而静默忽略。 */
+    private void installApkWithRetry(final int attempt) {
+        if (!foreground || isFinishing()) {
+            pendingInstall = true;
+            toast("更新已下载，回到应用后自动安装");
+            return;
+        }
+        if (!hasWindowFocus() && attempt < 4) {
+            root.postDelayed(new Runnable() {
+                public void run() { installApkWithRetry(attempt + 1); }
+            }, 400);
+            return;
+        }
+        installApk();
+    }
+
+    /** 启动时清理：安装成功的旧包（版本号已经等于下载标记）和任何残留 apk 都删掉。 */
+    private void cleanupOldApk() {
+        try {
+            File dir = getFilesDir();
+            String tag = prefs.getString("downloaded_tag", "");
+            File f = new File(dir, APK_FILE);
+            if (f.exists()) {
+                String cur = "v" + getVersionName();
+                boolean installed = tag.length() > 0 && tag.equals(cur);
+                // 已经装上了这一版，或者压根没记录，就把文件删掉
+                if (installed || tag.length() == 0) {
+                    deleteQuietly(f);
+                    prefs.edit().remove("downloaded_tag").apply();
+                }
+            }
+            deleteQuietly(new File(dir, APK_FILE + ".tmp"));
+            File[] fs = dir.listFiles();
+            if (fs != null) {
+                for (File x : fs) {
+                    if (x.isFile() && x.getName().toLowerCase(java.util.Locale.US).endsWith(".apk")
+                            && !x.getName().equals(APK_FILE)) {
+                        deleteQuietly(x);
+                    }
+                }
+            }
+        } catch (Exception ignored) { }
+    }
+
+    private void deleteQuietly(File f) {
+        try { if (f != null && f.exists()) f.delete(); } catch (Exception ignored) { }
+    }
+
+    private String getVersionName() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     private void installApk() {
         File f = new File(getFilesDir(), APK_FILE);
         if (!f.exists() || f.length() < 100 * 1024) {
@@ -1540,10 +1596,12 @@ public class MainActivity extends Activity {
             startUpdate(pendingUrl, pendingTag);
             return;
         }
-        if (pendingInstall && Build.VERSION.SDK_INT >= 26
-                && getPackageManager().canRequestPackageInstalls()) {
+        if (pendingInstall) {
             pendingInstall = false;
-            installApk();
+            // 等这一帧布局稳定再拉安装器
+            root.postDelayed(new Runnable() {
+                public void run() { installApkWithRetry(0); }
+            }, 300);
         }
     }
 
