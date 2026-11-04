@@ -5,6 +5,7 @@ import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
@@ -197,6 +198,10 @@ public class MainActivity extends Activity {
     private SvList sentList;
     private TextView sentTitle;
     private String sentMode = "fav";
+    /** 点「换一批」时先把当前这批临时存下来：拉取失败或用户点取消，就还原它。 */
+    private final List<String> dailyBackup = new ArrayList<String>();
+    private boolean dailyRefreshing = false;
+    private long dailySeq = 0;              // 每次刷新 +1，用来丢弃「已经取消掉」的在途结果
     private final List<Node> shownNodes = new ArrayList<Node>();
     private int detailBack = S_NODE;
     /** 当前详情页知识点的例题列表（为空则不显示例题按钮）。 */
@@ -297,7 +302,7 @@ public class MainActivity extends Activity {
                 int cut = text.indexOf('\n');
                 String main = (cut >= 0) ? text.substring(0, cut) : text;
                 String origin = (cut >= 0) ? text.substring(cut + 1).trim() : "";
-                View row = hitRow(main, (origin.length() > 0 ? origin + "  ·  " : "") + "本地号 " + no,
+                View row = hitRow(main, origin,
                         new Runnable() {
                             public void run() {
                                 copyToClipboard(text);
@@ -1824,7 +1829,7 @@ public class MainActivity extends Activity {
         dailyList.addHead(dailyBtns);
 
         TextView refreshBtn = dailyBtn("换一批（从网络重新取）", new View.OnClickListener() {
-            public void onClick(View v) { vibrate(); refreshDaily(dailyKind, true); }
+            public void onClick(View v) { vibrate(); startDailyRefresh(); }
         });
         refreshBtn.setPadding(dp(6), dp(8), dp(6), dp(8));
         dailyList.addHead(refreshBtn);
@@ -1849,6 +1854,11 @@ public class MainActivity extends Activity {
         }));
         histTitle = pageTitle("最近浏览");
         histList.addHead(histTitle);
+        TextView clearHist = dailyBtn("清除全部浏览记录", new View.OnClickListener() {
+            public void onClick(View v) { confirmClearHist(); }
+        });
+        clearHist.setTextColor(C_SUB);
+        histList.addHead(clearHist);
         histScreen.addView(histList.sc, lw());
         root.addView(histScreen, fp());
 
@@ -2290,7 +2300,8 @@ public class MainActivity extends Activity {
         // 「（例）」要单独上色，不能塞进整串一起渲染，否则会跟着正文变成白色。
         SpannableStringBuilder label;
         if (n.isLeaf()) {
-            label = applyMarkup(starText(n.star) + "  " + n.name);
+            String prefix = (n.star > 0) ? (starText(n.star) + "  ") : "";
+            label = applyMarkup(prefix + n.name);
             if (!n.ex.isEmpty()) {
                 int st = label.length();
                 label.append("（例）");
@@ -2390,6 +2401,29 @@ public class MainActivity extends Activity {
     }
 
     // ================= 每日一句（联网取句 + 本地文本收藏） =================
+    /** 清除全部浏览记录：知识点历史与每日一句历史一起清，句子文本没被收藏的也一并删掉。 */
+    private void confirmClearHist() {
+        new AlertDialog.Builder(this)
+                .setTitle("清除浏览记录")
+                .setMessage("会清空「最近浏览」里的全部记录（含每日一句）。收藏不受影响。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("清除", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        histIds.clear();
+                        saveHist();
+                        loadDailyStore();
+                        List<Integer> olds = new ArrayList<Integer>(dailyHist);
+                        dailyHist.clear();
+                        for (int no : olds) dropDailyIfUnused(no);
+                        saveDailyStore();
+                        toast("已清除浏览记录");
+                        renderHist();
+                    }
+                })
+                .show();
+    }
+
+
     /** 页面上的小按钮：胶囊底、居中、点了有反馈。 */
     private TextView dailyBtn(String text, View.OnClickListener l) {
         TextView b = new TextView(this);
@@ -2413,6 +2447,8 @@ public class MainActivity extends Activity {
         dailyNode = n;
         dailyKind = (n.daily == null || n.daily.length() == 0) ? "phil" : n.daily;
         dailyBack = back;
+        dailyRefreshing = false;
+        dailyBackup.clear();
         loadDailyStore();
         dailyTitle.setText("每日一句 · " + n.name);
         // 句子只存在内存里（本次运行有效），不落盘：真正的来源永远是接口
@@ -2420,7 +2456,8 @@ public class MainActivity extends Activity {
         dailyItems.clear();
         if (mem != null) dailyItems.addAll(mem);
         dailyIdx = 0;
-        renderDailyBody();
+        if (dailyItems.isEmpty() && dailyLoadingKinds.contains(dailyKind)) renderDailyLoading();
+        else renderDailyBody();
         showScreen(S_DAILY);
         boolean fresh = todayTag().equals(prefs.getString("daily_day_" + dailyKind, ""));
         if (dailyItems.isEmpty() || !fresh) refreshDaily(dailyKind, false);
@@ -2435,6 +2472,64 @@ public class MainActivity extends Activity {
         }
         if (dailyNode != null) dailyTitle.setText("每日一句 · " + dailyNode.name);
         renderDailyBody();
+    }
+
+    /** 点「换一批」：先把现在这批收进备份，页面换成加载态；拉到了就换新，失败/取消就还原。 */
+    private void startDailyRefresh() {
+        if (dailyRefreshing) return;
+        if (dailyLoadingKinds.contains(dailyKind)) {
+            toast("正在拉取，稍等一下");
+            return;
+        }
+        dailyRefreshing = true;
+        dailySeq++;
+        dailyBackup.clear();
+        dailyBackup.addAll(dailyItems);
+        dailyItems.clear();
+        dailyIdx = 0;
+        renderDailyLoading();
+        refreshDaily(dailyKind, true);
+    }
+
+    private void cancelDailyRefresh() {
+        if (!dailyRefreshing) return;
+        dailyRefreshing = false;
+        dailySeq++;                       // 在途结果作废
+        dailyItems.clear();
+        dailyItems.addAll(dailyBackup);
+        dailyBackup.clear();
+        dailyIdx = 0;
+        renderDailyBody();
+    }
+
+    /** 加载态：一句提示 + 取消按钮，不做假内容。 */
+    private void renderDailyLoading() {
+        dailyHint.setText("正在从网络拉取…");
+        dailyList.bind(new RowSource() {
+            public int size() { return 2; }
+            public View make(final int i) {
+                if (i == 1) {
+                    return dailyBtn("取消", new View.OnClickListener() {
+                        public void onClick(View v) { vibrate(); cancelDailyRefresh(); }
+                    });
+                }
+                LinearLayout box = new LinearLayout(MainActivity.this);
+                box.setOrientation(LinearLayout.VERTICAL);
+                box.setGravity(Gravity.CENTER);
+                box.setPadding(dp(10), dp(20), dp(10), dp(14));
+                ProgressBar pb = new ProgressBar(MainActivity.this);
+                pb.setIndeterminate(true);
+                box.addView(pb, new LinearLayout.LayoutParams(dp(26), dp(26)));
+                TextView t = new TextView(MainActivity.this);
+                t.setText("正在从网络拉取…");
+                t.setTextSize(fsSp());
+                t.setTextColor(C_SUB);
+                t.setGravity(Gravity.CENTER);
+                t.setPadding(0, dp(8), 0, 0);
+                box.addView(t, wrap());
+                return box;
+            }
+        });
     }
 
     private void renderDailyBody() {
@@ -2642,6 +2737,7 @@ public class MainActivity extends Activity {
     private void refreshDaily(final String kind, final boolean manual) {
         if (dailyLoadingKinds.contains(kind)) return;
         dailyLoadingKinds.add(kind);
+        final long mySeq = dailySeq;
         if (manual && dailyHint != null && kind.equals(dailyKind)) dailyHint.setText("正在从网络取句子…");
         new Thread(new Runnable() {
             public void run() {
@@ -2656,6 +2752,8 @@ public class MainActivity extends Activity {
                         String from = o.optString("from", "").trim();
                         String who = o.optString("from_who", "").trim();
                         if (t.length() == 0) continue;
+                        if ("null".equalsIgnoreCase(who)) who = "";
+                        if ("null".equalsIgnoreCase(from)) from = "";
                         String src = who.length() > 0 ? who : from;
                         String line = src.length() > 0 ? (t + "\n—— " + src) : t;
                         if (!got.contains(line)) got.add(line);
@@ -2664,14 +2762,24 @@ public class MainActivity extends Activity {
                 runOnUiThread(new Runnable() {
                     public void run() {
                         dailyLoadingKinds.remove(kind);
+                        if (mySeq != dailySeq) return;      // 用户已经点了取消或又换了一批，这次结果作废
                         if (got.isEmpty()) {
-                            if (manual) toast("没取到句子，检查一下网络再试");
-                            if (kind.equals(dailyKind) && screen == S_DAILY) renderDailyBody();
+                            if (manual) {
+                                toast("没取到句子，检查一下网络再试");
+                                dailyRefreshing = false;
+                                dailyItems.clear();
+                                dailyItems.addAll(dailyBackup);   // 失败就把原来那批放回来
+                                dailyBackup.clear();
+                                dailyIdx = 0;
+                                if (kind.equals(dailyKind) && screen == S_DAILY) renderDailyBody();
+                            }
                             return;
                         }
                         dailyMem.put(kind, new ArrayList<String>(got));
                         markDailyDay(kind);
                         if (manual) toast("已换一批 · " + got.size() + " 句");
+                        if (dailyRefreshing) dailyRefreshing = false;
+                        dailyBackup.clear();                    // 拉到了，临时备份没用了
                         if (kind.equals(dailyKind) && screen == S_DAILY) {
                             dailyItems.clear();
                             dailyItems.addAll(got);
@@ -2710,7 +2818,7 @@ public class MainActivity extends Activity {
             public int size() { return subs.isEmpty() ? (extra > 0 ? 1 : 1) : subs.size() + extra; }
             public View make(final int i) {
                 if (extra > 0 && i == 0) {
-                    return textRow("每日一句 · " + sentCount + " 条", C_PRIMARY, new Runnable() {
+                    return textRow("每日一句  (" + sentCount + ")", C_PRIMARY, new Runnable() {
                         public void run() {
                             sentMode = "fav";
                             showScreen(S_SENT);
@@ -2771,7 +2879,7 @@ public class MainActivity extends Activity {
             public int size() { return items.size(); }
             public View make(final int i) {
                 if (i > 0 && "daily".equals(items.get(i))) {
-                    return textRow("每日一句 · " + sentHist + " 条", C_PRIMARY, new Runnable() {
+                    return textRow("每日一句  (" + sentHist + ")", C_PRIMARY, new Runnable() {
                         public void run() {
                             sentMode = "hist";
                             showScreen(S_SENT);
