@@ -55,6 +55,7 @@ import android.view.ViewOutlineProvider;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
+import android.view.animation.DecelerateInterpolator;
 import android.view.ViewGroup;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -127,14 +128,12 @@ public class MainActivity extends Activity {
 
     // ---------- 数据模型 ----------
     // 层级只有一种东西：Node。有 children 就是分组节点，否则是叶子知识点。
-    // 源文件/JSON 里正文是单个 body 字符串；sec 只是解析时包成的单元素列表，
-    // 用来复用详情页那套 Section 渲染，不表示数据里还有分节。
-    static class Section { String h, c, body; }
+    // 叶子只有一段正文（body 字符串），数据里没有分节、没有第二种正文结构。
     static class Example { String t, body; }
     static class Node {
         String id, name;
+        String body = "";                       // 叶子正文（单段，多行用换行）
         List<Node> children = new ArrayList<Node>();
-        List<Section> sec = new ArrayList<Section>();
         List<Example> ex = new ArrayList<Example>();
         int star; String img, d;
         Node parent; Subject subj;
@@ -509,7 +508,7 @@ public class MainActivity extends Activity {
         return new JSONObject(new String(bos.toByteArray(), StandardCharsets.UTF_8));
     }
 
-    /** 递归解析节点：有 children 就是分组，否则是叶子（正文 body 包成单元素 sec）。 */
+    /** 递归解析节点：有 children 就是分组，否则是叶子（正文只有一个 body 字段）。 */
     private Node parseNode(JSONObject no, Node parent, Subject s) {
         Node n = new Node();
         n.id = no.optString("id", "");
@@ -522,11 +521,7 @@ public class MainActivity extends Activity {
                 n.children.add(parseNode(kids.optJSONObject(i), n, s));
             }
         } else {
-            Section sec = new Section();
-            sec.h = "";
-            sec.c = "K";
-            sec.body = no.optString("body", "");
-            n.sec.add(sec);
+            n.body = no.optString("body", "");
             n.star = no.optInt("star", 2);
             n.img = no.optString("img", "");
             n.d = no.optString("d", "");
@@ -1648,19 +1643,6 @@ public class MainActivity extends Activity {
         h.postDelayed(step[0], 1000);
     }
 
-    private List<Section> parseSections(JSONArray arr) throws Exception {
-        List<Section> out = new ArrayList<Section>();
-        for (int i = 0; i < arr.length(); i++) {
-            JSONObject so = arr.getJSONObject(i);
-            Section s = new Section();
-            s.h = so.optString("h", "知识清单");
-            s.c = so.optString("c", "K");
-            s.body = so.optString("body", "");
-            out.add(s);
-        }
-        return out;
-    }
-
     // ================= UI =================
     private void buildUi() {
         getWindow().setBackgroundDrawable(new ColorDrawable(C_BG));
@@ -2179,13 +2161,23 @@ public class MainActivity extends Activity {
         name.setMaxLines(6);
         name.setEllipsize(null);
         name.setLineSpacing(dp(1), 1.08f);
-        String label;
+        // 星级 + 标题交给 applyMarkup 渲染（正文里的 **重点**、分数占位都在这一步处理）；
+        // 「（例）」要单独上色，不能塞进整串一起渲染，否则会跟着正文变成白色。
+        SpannableStringBuilder label;
         if (n.isLeaf()) {
-            label = starText(n.star) + "  " + n.name + (n.ex.isEmpty() ? "" : "（例）");
+            label = applyMarkup(starText(n.star) + "  " + n.name);
+            if (!n.ex.isEmpty()) {
+                int st = label.length();
+                label.append("（例）");
+                label.setSpan(new ForegroundColorSpan(C_HI), st, label.length(),
+                        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                label.setSpan(new RelativeSizeSpan(0.92f), st, label.length(),
+                        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
         } else {
-            label = n.name + "  (" + n.children.size() + ")";
+            label = applyMarkup(n.name + "  (" + n.children.size() + ")");
         }
-        name.setText(applyMarkup(label));
+        name.setText(label);
         View pad = new View(this);
         row.addView(pad, new LinearLayout.LayoutParams(STAR_W(), dp(1)));
         row.addView(name, new LinearLayout.LayoutParams(0,
@@ -2592,13 +2584,14 @@ public class MainActivity extends Activity {
     /** 打开一个节点：有下级就压栈列下级，是叶子就直接看正文。层数由数据决定。 */
     private void openNode(final Node n) {
         if (n.isLeaf()) {
-            openDetail(n.name, n.sec, n.path(), S_NODE, n.img, n.ex, n.id);
+            openDetail(n.name, n.body, n.path(), S_NODE, n.img, n.ex, n.id);
             return;
         }
         navStack.add(n);
         curNode = n;
         renderNodes();
         showScreen(S_NODE);
+        slideNodeList(1);
     }
 
     /** 从搜索/收藏/历史/今日跳进某个节点：把它的祖先链补进导航栈，返回时能一路退回来。 */
@@ -2613,8 +2606,12 @@ public class MainActivity extends Activity {
         if (n.subj != null) curSubject = n.subj;
         nodeEntryBack = back;
         renderNodes();
-        if (n.isLeaf()) openDetail(n.name, n.sec, n.path(), back, n.img, n.ex, n.id);
-        else showScreen(S_NODE);
+        if (n.isLeaf()) {
+            openDetail(n.name, n.body, n.path(), back, n.img, n.ex, n.id);
+        } else {
+            showScreen(S_NODE);
+            slideNodeList(1);
+        }
     }
 
     /** 进入某科目：清空栈，展示顶层节点。 */
@@ -2625,6 +2622,7 @@ public class MainActivity extends Activity {
         curNode = null;
         renderNodes();
         showScreen(S_NODE);
+        slideNodeList(1);
     }
 
     /** 返回上一级：弹栈；栈空就回科目页。 */
@@ -2643,6 +2641,7 @@ public class MainActivity extends Activity {
         renderNodes();
         restoreNext[S_NODE] = true;
         showScreen(S_NODE);
+        slideNodeList(-1);
         return true;
     }
 
@@ -2665,6 +2664,20 @@ public class MainActivity extends Activity {
         bindNodes();
     }
 
+    /** 节点页内部换层（进下一级 / 退回上一级）时的轻动画：列表跟手方向轻微滑入，
+     *  让人一眼看出是往里进还是往外退。dir = 1 进、-1 退。 */
+    private void slideNodeList(int dir) {
+        if (nodeList == null || nodeList.sc == null) return;
+        View v = nodeList.sc;
+        v.animate().cancel();
+        v.setTranslationX(dir * dp(7));
+        v.setAlpha(0.55f);
+        v.animate().translationX(0f).alpha(1f)
+                .setDuration(150)
+                .setInterpolator(new DecelerateInterpolator(1.6f))
+                .start();
+    }
+
     /** 真正把当前层的节点绑到列表；renderNodes 与 refreshNodes 共用。 */
     private void bindNodes() {
         String q = itemSearchBox.getText().toString().trim();
@@ -2673,7 +2686,7 @@ public class MainActivity extends Activity {
             if (q.length() == 0) { shownNodes.add(n); continue; }
             if (n.name.contains(q)) { shownNodes.add(n); continue; }
             if (n.isLeaf()) {
-                for (Section sec : n.sec) if (sec.body.contains(q)) { shownNodes.add(n); break; }
+                if (n.body.contains(q)) shownNodes.add(n);
             } else {
                 // 分组：名字没命中时，若它的后代有命中的也列出来
                 if (subtreeMatches(n, q)) shownNodes.add(n);
@@ -2689,7 +2702,7 @@ public class MainActivity extends Activity {
         for (Node c : n.children) {
             if (c.name.contains(q)) return true;
             if (c.isLeaf()) {
-                for (Section sec : c.sec) if (sec.body.contains(q)) return true;
+                if (c.body.contains(q)) return true;
             } else if (subtreeMatches(c, q)) return true;
         }
         return false;
@@ -2710,7 +2723,7 @@ public class MainActivity extends Activity {
         String ql = q.toLowerCase();
         int total = 0;
         for (Node n : allHits) {
-            String blob = (n.name + " " + (n.isLeaf() ? plain(n.sec) : "")).toLowerCase();
+            String blob = (n.name + " " + (n.isLeaf() ? n.body : "")).toLowerCase();
             if (!blob.contains(ql)) continue;
             total++;
             if (searchHits.size() < HIT_LIMIT) searchHits.add(n);
@@ -2737,13 +2750,6 @@ public class MainActivity extends Activity {
         if (seg.length <= 2) return p;
         if (seg.length <= 4) return TextUtils.join(" › ", seg);
         return seg[0] + " › … › " + seg[seg.length - 2] + " › " + seg[seg.length - 1];
-    }
-
-    private String plain(List<Section> secs) {
-        if (secs == null) return "";
-        StringBuilder sb = new StringBuilder();
-        for (Section s : secs) sb.append(s.body).append(" ");
-        return sb.toString();
     }
 
     private String starText(int s) {
@@ -2961,16 +2967,26 @@ public class MainActivity extends Activity {
     }
 
     // ================= 详情 =================
-    private void openDetail(String title, List<Section> secs, String path, int back) {
-        openDetail(title, secs, path, back, null, null, null);
+    /** 详情页的一张卡片（纯 UI 结构，不是数据层级）：h 为空就不显示顶部标签。 */
+    static class Card { String h, c, body; }
+
+    static Card card(String h, String c, String body) {
+        Card k = new Card();
+        k.h = h; k.c = c; k.body = body;
+        return k;
     }
 
-    private void openDetail(String title, List<Section> secs, String path, int back, String img) {
-        openDetail(title, secs, path, back, img, null, null);
-    }
-
-    private void openDetail(String title, List<Section> secs, String path, int back, String img,
+    /** 知识点详情：正文只有一段，直接铺成一张无标签卡片。 */
+    private void openDetail(String title, String body, String path, int back, String img,
                             List<Example> ex, String id) {
+        List<Card> cards = new ArrayList<Card>();
+        cards.add(card("", "K", body == null ? "" : body));
+        openDetailCards(title, cards, path, back, img, ex, id);
+    }
+
+    /** 详情页主体：反馈详情这类要用多张带标签的卡片，所以卡片由调用方给定。 */
+    private void openDetailCards(String title, List<Card> cards, String path, int back, String img,
+                                 List<Example> ex, String id) {
         detailBack = back;
         curExamples = (ex == null) ? new ArrayList<Example>() : ex;
         lastPath = (path == null) ? "" : path;
@@ -3018,7 +3034,7 @@ public class MainActivity extends Activity {
         detailInner.addView(titleRow, wrap());
         if (img != null && img.length() > 0) addFigure(img);
 
-        if (secs == null || secs.isEmpty()) {
+        if (cards == null || cards.isEmpty()) {
             TextView empty = new TextView(this);
             empty.setText("（暂无内容）");
             empty.setTextSize(fsSp());
@@ -3026,7 +3042,7 @@ public class MainActivity extends Activity {
             empty.setGravity(Gravity.CENTER);
             detailInner.addView(empty, wrap());
         } else {
-            for (Section s : secs) {
+            for (Card s : cards) {
                 LinearLayout card = new LinearLayout(this);
                 card.setOrientation(LinearLayout.VERTICAL);
                 card.setPadding(dp(11), dp(9), dp(11), dp(9));
@@ -4244,8 +4260,15 @@ public class MainActivity extends Activity {
 
     // ================= 页面切换（带动画） =================
     private void showScreen(int s) {
+        final int old = screen;
         SvList leaving = svOf(screen);
-        if (leaving != null) leaving.savedY = leaving.sc.getScrollY();
+        if (leaving != null) {
+            leaving.savedY = leaving.sc.getScrollY();
+            // 上一个页面若正好在放 slideNodeList 的位移动画，被 cancel 会停在半中间，
+            // 这里统一归位，免得下次进来列表偏着。
+            leaving.sc.setTranslationX(0f);
+            leaving.sc.setAlpha(1f);
+        }
         screen = s;
         // 顺序必须与 S_* 常量一一对应（0..15）
         View[] screens = {subjectScreen, nodeScreen, detailScreen, settingsScreen,
@@ -4259,16 +4282,28 @@ public class MainActivity extends Activity {
             screens[i].animate().cancel();
             screens[i].setVisibility(View.GONE);
             screens[i].setTranslationX(0f);
+            screens[i].setTranslationY(0f);
             screens[i].setAlpha(1f);
         }
         target.animate().cancel();
         target.setVisibility(View.VISIBLE);
-        target.setTranslationX(0f);
         if (shown) {
+            // 已经在位（例如右滑返回时上一页已跟手归位），别再动它，免得跳一下
+            target.setTranslationX(0f);
+            target.setTranslationY(0f);
             target.setAlpha(1f);
         } else {
-            target.setAlpha(0f);
-            target.animate().alpha(1f).setDuration(180).start();
+            int dir = (old == s) ? 0 : (pageDepth(s) - pageDepth(old));
+            float dx = dir > 0 ? dp(12) : (dir < 0 ? -dp(12) : 0f);
+            float dy = (dir == 0) ? dp(7) : 0f;
+            target.setTranslationX(dx);
+            target.setTranslationY(dy);
+            target.setAlpha(0.25f);
+            target.animate()
+                    .translationX(0f).translationY(0f).alpha(1f)
+                    .setDuration(185)
+                    .setInterpolator(new DecelerateInterpolator(1.6f))
+                    .start();
         }
 
         if (s == S_SUBJECT) {
@@ -4359,6 +4394,14 @@ public class MainActivity extends Activity {
                 enter.enter();
             }
         }
+    }
+
+    /** 页面在导航里的深浅：用来决定切页动画往哪个方向滑。 */
+    private static int pageDepth(int s) {
+        if (s == S_SUBJECT) return 0;
+        if (s == S_FAV_SUB || s == S_DETAIL) return 2;
+        if (s == S_EXAMPLES) return 3;
+        return 1;
     }
 
     private SvList svOf(int s) {
@@ -6737,24 +6780,15 @@ public class MainActivity extends Activity {
                 final String finalReply = reply;
                 runOnUiThread(new Runnable() {
                     public void run() {
-                        List<Section> secs = new ArrayList<Section>();
-                        Section s1 = new Section();
-                        s1.h = "反馈内容";
-                        s1.c = "K";
-                        s1.body = body.length() == 0 ? "(没有正文)" : body;
-                        secs.add(s1);
-
-                        Section s2 = new Section();
-                        s2.h = "处理回复";
+                        List<Card> cards = new ArrayList<Card>();
+                        cards.add(card("反馈内容", "K", body.length() == 0 ? "(没有正文)" : body));
                         if (finalReply != null) {
-                            s2.c = "M";
-                            s2.body = finalReply;
+                            cards.add(card("处理回复", "M", finalReply));
                         } else {
-                            s2.c = "E";
-                            s2.body = "还没有回复。处理后会写在这里，状态变成「已处理」时说明已经修好。";
+                            cards.add(card("处理回复", "E",
+                                    "还没有回复。处理后会写在这里，状态变成「已处理」时说明已经修好。"));
                         }
-                        secs.add(s2);
-                        openDetail("#" + number + " " + title, secs, status + " · " + shortTime(
+                        openDetailCards("#" + number + " " + title, cards, status + " · " + shortTime(
                                 issue.optString("created_at", "")), S_MYFEEDBACK, null, null, null);
                         curIssue = issue;
                         addIssueActions(issue);
