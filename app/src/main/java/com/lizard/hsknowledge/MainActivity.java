@@ -136,6 +136,7 @@ public class MainActivity extends Activity {
         List<Node> children = new ArrayList<Node>();
         List<Example> ex = new ArrayList<Example>();
         int star; String img, d;
+        String daily;                          // 非空 = 每日一句入口（phil/poem），句子走接口
         Node parent; Subject subj;
         int savedY = -1;                        // 离开时记下列表位置，返回时恢复
         boolean isLeaf() { return children.isEmpty(); }
@@ -160,8 +161,8 @@ public class MainActivity extends Activity {
     private static final int S_SUBJECT = 0, S_NODE = 1, S_DETAIL = 2, S_SETTINGS = 3,
             S_SEARCH = 4, S_FEEDBACK = 5, S_MYFEEDBACK = 6, S_PROFILE = 7,
             S_CHANGELOG = 8, S_ABOUT = 9, S_DISPLAY = 10, S_TODAY = 11,
-            S_EXAMPLES = 12, S_FAV = 13, S_HIST = 14, S_FAV_SUB = 15;
-    private static final int SCREEN_COUNT = 16;
+            S_EXAMPLES = 12, S_FAV = 13, S_HIST = 14, S_FAV_SUB = 15, S_DAILY = 16, S_SENT = 17;
+    private static final int SCREEN_COUNT = 18;
     private int screen = S_SUBJECT;
     private Subject curSubject;
     /** 从科目根走到当前所在的分组节点；空 = 正在看某科目的顶层节点。 */
@@ -170,6 +171,32 @@ public class MainActivity extends Activity {
     private Node curNode;
     /** 从收藏/搜索/历史/今日跳进节点树时，退到栈顶该回哪个页面。 */
     private int nodeEntryBack = -1;
+
+    // ---------- 每日一句 ----------
+    // 句子来自一言（hitokoto）接口，不落进 assets：每天首次打开刷新一次，也可手动换一批。
+    // 收藏/历史不存知识点编号，而是「本地号 + 句子原文」：号可回收顶替，
+    // 不再被任何收藏/历史引用的文本要从 pool 里彻底删掉，避免本地越攒越多。
+    private LinearLayout dailyScreen;
+    private SvList dailyList;
+    private TextView dailyTitle, dailyHint, dailyBtnFav;
+    private Node dailyNode;
+    private String dailyKind = "phil";
+    private int dailyBack = S_NODE;
+    private boolean dailyLoading = false;
+    private final List<String> dailyItems = new ArrayList<String>();
+    /** 本次运行取到的句子（只放内存，不写盘；下次启动重新调接口）。 */
+    private final Map<String, List<String>> dailyMem = new LinkedHashMap<String, List<String>>();
+    private int dailyIdx = 0;
+    private final Map<Integer, String> dailyPool = new LinkedHashMap<Integer, String>();
+    private final List<Integer> dailyFav = new ArrayList<Integer>();
+    private final List<Integer> dailyHist = new ArrayList<Integer>();
+    private static final int DAILY_WANT = 10;      // 每次至少备 10 条，少了要补
+    private static final int DAILY_HIST_MAX = 50;
+    // 每日一句的收藏 / 浏览记录列表（句子存在 pool 里，这里只列号）
+    private LinearLayout sentScreen;
+    private SvList sentList;
+    private TextView sentTitle;
+    private String sentMode = "fav";
     private final List<Node> shownNodes = new ArrayList<Node>();
     private int detailBack = S_NODE;
     /** 当前详情页知识点的例题列表（为空则不显示例题按钮）。 */
@@ -250,6 +277,49 @@ public class MainActivity extends Activity {
     private final List<String> histIds = new ArrayList<String>();
     /** 稳定编号 → 节点（分组与叶子都在内）；收藏页、搜索、历史、今日都查它。 */
     private final Map<String, Node> nodeById = new HashMap<String, Node>();
+    /** 每日一句的收藏 / 浏览记录：点一下复制整句，收藏模式长按取消收藏。 */
+    private void renderSent() {
+        loadDailyStore();
+        final boolean fav = "fav".equals(sentMode);
+        List<Integer> src = fav ? dailyFav : dailyHist;
+        final List<Integer> rows = new ArrayList<Integer>();
+        for (int no : src) if (dailyPool.containsKey(no)) rows.add(no);
+        sentTitle.setText((fav ? "每日一句收藏 · " : "每日一句最近浏览 · ") + rows.size() + " 条");
+        sentList.bind(new RowSource() {
+            public int size() { return rows.isEmpty() ? 1 : rows.size(); }
+            public View make(final int i) {
+                if (rows.isEmpty()) {
+                    return textRow(fav ? "还没有收藏句子，去「每日一句」里点收藏" : "还没有看过句子",
+                            C_SUB, null);
+                }
+                final int no = rows.get(i);
+                final String text = dailyPool.get(no);
+                int cut = text.indexOf('\n');
+                String main = (cut >= 0) ? text.substring(0, cut) : text;
+                String origin = (cut >= 0) ? text.substring(cut + 1).trim() : "";
+                View row = hitRow(main, (origin.length() > 0 ? origin + "  ·  " : "") + "本地号 " + no,
+                        new Runnable() {
+                            public void run() {
+                                copyToClipboard(text);
+                                toast("已复制这句话");
+                            }
+                        });
+                if (fav) {
+                    row.setOnLongClickListener(new View.OnLongClickListener() {
+                        public boolean onLongClick(View v) {
+                            vibrate();
+                            toggleDailyFav(text);
+                            toast("已取消收藏");
+                            renderSent();
+                            return true;
+                        }
+                    });
+                }
+                return row;
+            }
+        });
+    }
+
     /** 收藏页第一级点进的科目。 */
     private String favSubKey = "";
     private static final int HIST_MAX = 50;
@@ -400,6 +470,10 @@ public class MainActivity extends Activity {
         root.postDelayed(new Runnable() {
             public void run() { showGreeting(); }
         }, 700);
+        // 每天第一次打开：两类各刷一批新句子（后台请求，不打扰界面）
+        root.postDelayed(new Runnable() {
+            public void run() { checkDailyForToday(); }
+        }, 1600);
     }
 
     /** 收藏星这一列的宽度（标题左边也留同宽，保证标题相对整行居中）。 */
@@ -522,6 +596,7 @@ public class MainActivity extends Activity {
             }
         } else {
             n.body = no.optString("body", "");
+            n.daily = no.optString("daily", "");
             n.star = no.optInt("star", 2);
             n.img = no.optString("img", "");
             n.d = no.optString("d", "");
@@ -1717,6 +1792,56 @@ public class MainActivity extends Activity {
         favSubScreen.addView(favSubList.sc, lw());
         root.addView(favSubScreen, fp());
 
+        // 每日一句：句子来自接口，页面只负责「显示今天这一句 + 换一句 + 收藏」
+        dailyScreen = newScreen();
+        dailyList = new SvList();
+        dailyList.addHead(makeBackHeader("‹ 返回", new View.OnClickListener() {
+            public void onClick(View v) { handleBack(); }
+        }));
+        dailyTitle = pageTitle("每日一句");
+        dailyList.addHead(dailyTitle);
+        dailyHint = new TextView(this);
+        dailyHint.setTextSize(m.subtitleSize - 2.5f);
+        dailyHint.setTextColor(C_SUB);
+        dailyHint.setGravity(Gravity.CENTER);
+        dailyHint.setPadding(dp(4), 0, dp(4), dp(6));
+        dailyHint.setText("每天第一次打开会自动换一句，也可以点下面的按钮换一批");
+        dailyList.addHead(dailyHint);
+
+        LinearLayout dailyBtns = new LinearLayout(this);
+        dailyBtns.setOrientation(LinearLayout.HORIZONTAL);
+        dailyBtns.setGravity(Gravity.CENTER_VERTICAL);
+        dailyBtns.addView(dailyBtn("‹ 上一句", new View.OnClickListener() {
+            public void onClick(View v) { stepDaily(-1); }
+        }), new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        dailyBtnFav = dailyBtn("☆ 收藏", new View.OnClickListener() {
+            public void onClick(View v) { toggleDailyFavCurrent(); }
+        });
+        dailyBtns.addView(dailyBtnFav, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        dailyBtns.addView(dailyBtn("下一句 ›", new View.OnClickListener() {
+            public void onClick(View v) { stepDaily(1); }
+        }), new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        dailyList.addHead(dailyBtns);
+
+        TextView refreshBtn = dailyBtn("换一批（从网络重新取）", new View.OnClickListener() {
+            public void onClick(View v) { vibrate(); refreshDaily(dailyKind, true); }
+        });
+        refreshBtn.setPadding(dp(6), dp(8), dp(6), dp(8));
+        dailyList.addHead(refreshBtn);
+        dailyScreen.addView(dailyList.sc, lw());
+        root.addView(dailyScreen, fp());
+
+        // 每日一句的收藏 / 最近浏览：都只列句子文本，点一下复制，长按取消收藏
+        sentScreen = newScreen();
+        sentList = new SvList();
+        sentList.addHead(makeBackHeader("‹ 返回", new View.OnClickListener() {
+            public void onClick(View v) { handleBack(); }
+        }));
+        sentTitle = pageTitle("每日一句");
+        sentList.addHead(sentTitle);
+        sentScreen.addView(sentList.sc, lw());
+        root.addView(sentScreen, fp());
+
         histScreen = newScreen();
         histList = new SvList();
         histList.addHead(makeBackHeader("‹ 返回", new View.OnClickListener() {
@@ -2183,21 +2308,28 @@ public class MainActivity extends Activity {
         row.addView(name, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
+        final boolean dailyEntry = (n.daily != null && n.daily.length() > 0);
         final TextView star = new TextView(this);
         star.setText("★");
         star.setTextSize(m.subtitleSize);
         star.setTypeface(Typeface.DEFAULT_BOLD);
         star.setGravity(Gravity.CENTER);
         star.setPadding(dp(8), dp(2), dp(4), dp(2));
-        paintStar(star, n.id);
-        star.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                vibrate();
-                boolean on = toggleFav(n.id);
-                toast(on ? "已收藏，可在主页「我的收藏」里找到" : "已取消收藏");
-                paintStar(star, n.id);
-            }
-        });
+        if (dailyEntry) {
+            star.setVisibility(View.INVISIBLE);   // 入口本身不收藏，句子在页面里收藏
+        } else {
+            paintStar(star, n.id);
+        }
+        if (!dailyEntry) {
+            star.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    vibrate();
+                    boolean on = toggleFav(n.id);
+                    toast(on ? "已收藏，可在主页「我的收藏」里找到" : "已取消收藏");
+                    paintStar(star, n.id);
+                }
+            });
+        }
         row.addView(star, new LinearLayout.LayoutParams(STAR_W(),
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
@@ -2257,6 +2389,305 @@ public class MainActivity extends Activity {
         return t;
     }
 
+    // ================= 每日一句（联网取句 + 本地文本收藏） =================
+    /** 页面上的小按钮：胶囊底、居中、点了有反馈。 */
+    private TextView dailyBtn(String text, View.OnClickListener l) {
+        TextView b = new TextView(this);
+        b.setText(text);
+        b.setTextSize(m.subtitleSize - 1f);
+        b.setTextColor(C_PRIMARY);
+        b.setTypeface(Typeface.DEFAULT_BOLD);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(4), dp(7), dp(4), dp(7));
+        applyClickBg(b, C_PILL);
+        b.setOnClickListener(l);
+        return b;
+    }
+
+    private String todayTag() {
+        return new SimpleDateFormat("yyMMdd", Locale.US).format(new Date());
+    }
+
+    /** 从节点进来：先把「今天这一批」准备好再切页，避免空页面闪一下。 */
+    private void openDaily(Node n, int back) {
+        dailyNode = n;
+        dailyKind = (n.daily == null || n.daily.length() == 0) ? "phil" : n.daily;
+        dailyBack = back;
+        loadDailyStore();
+        dailyTitle.setText("每日一句 · " + n.name);
+        // 句子只存在内存里（本次运行有效），不落盘：真正的来源永远是接口
+        List<String> mem = dailyMem.get(dailyKind);
+        dailyItems.clear();
+        if (mem != null) dailyItems.addAll(mem);
+        dailyIdx = 0;
+        renderDailyBody();
+        showScreen(S_DAILY);
+        boolean fresh = todayTag().equals(prefs.getString("daily_day_" + dailyKind, ""));
+        if (dailyItems.isEmpty() || !fresh) refreshDaily(dailyKind, false);
+    }
+
+    /** showScreen 调到：页面已有内容就只重画，没有就先拿缓存/兜底垫上。 */
+    private void renderDaily() {
+        if (dailyItems.isEmpty()) {
+            List<String> mem = dailyMem.get(dailyKind);
+            if (mem != null) dailyItems.addAll(mem);
+            dailyIdx = 0;
+        }
+        if (dailyNode != null) dailyTitle.setText("每日一句 · " + dailyNode.name);
+        renderDailyBody();
+    }
+
+    private void renderDailyBody() {
+        if (dailyItems.isEmpty()) {
+            dailyHint.setText(dailyLoading ? "正在从网络取句子…" : "还没取到句子，点下面「换一批」试试");
+            dailyList.bind(new RowSource() {
+                public int size() { return 1; }
+                public View make(int i) {
+                    TextView t = new TextView(MainActivity.this);
+                    t.setText(dailyLoading ? "加载中…" : "（暂无内容）");
+                    t.setTextSize(fsSp());
+                    t.setTextColor(C_SUB);
+                    t.setGravity(Gravity.CENTER);
+                    t.setPadding(dp(10), dp(24), dp(10), dp(24));
+                    return t;
+                }
+            });
+            paintDailyFav();
+            return;
+        }
+        if (dailyIdx < 0) dailyIdx = dailyItems.size() - 1;
+        if (dailyIdx >= dailyItems.size()) dailyIdx = 0;
+        final String cur = dailyItems.get(dailyIdx);
+        pushDailyHist(cur);                 // 看过就记一条（文本 + 本地号）
+        paintDailyFav();
+        dailyHint.setText("第 " + (dailyIdx + 1) + " / " + dailyItems.size() + " 句");
+        dailyList.bind(new RowSource() {
+            public int size() { return 1; }
+            public View make(int i) { return dailyCard(cur); }
+        });
+    }
+
+    /** 一句一张卡：正文在上，出处小字在下。 */
+    private View dailyCard(String line) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(12), dp(13), dp(12), dp(13));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(C_CARD);
+        bg.setCornerRadius(dp(12));
+        card.setBackgroundDrawable(bg);
+
+        int cut = line.indexOf('\n');
+        String main = (cut >= 0) ? line.substring(0, cut) : line;
+        String src = (cut >= 0) ? line.substring(cut + 1).trim() : "";
+
+        TextView t = new TextView(this);
+        t.setText(applyMarkup(main));
+        t.setTextSize(fsSp() + 0.5f);
+        t.setTextColor(C_TEXT);
+        t.setLineSpacing(dp(4), 1.35f);
+        t.setGravity(Gravity.CENTER);
+        card.addView(t, wrap());
+
+        if (src.length() > 0) {
+            TextView sm = new TextView(this);
+            sm.setText(src);
+            sm.setTextSize(m.subtitleSize - 2f);
+            sm.setTextColor(C_SUB);
+            sm.setGravity(Gravity.CENTER);
+            sm.setPadding(0, dp(9), 0, 0);
+            card.addView(sm, wrap());
+        }
+        return card;
+    }
+
+    private void stepDaily(int d) {
+        if (dailyItems.isEmpty()) return;
+        vibrate();
+        dailyIdx += d;
+        if (dailyIdx < 0) dailyIdx = dailyItems.size() - 1;
+        if (dailyIdx >= dailyItems.size()) dailyIdx = 0;
+        renderDailyBody();
+    }
+
+    private String currentDailyText() {
+        if (dailyItems.isEmpty()) return "";
+        int i = Math.max(0, Math.min(dailyIdx, dailyItems.size() - 1));
+        return dailyItems.get(i);
+    }
+
+    private void paintDailyFav() {
+        if (dailyBtnFav == null) return;
+        boolean on = isDailyFav(currentDailyText());
+        dailyBtnFav.setText(on ? "★ 已收藏" : "☆ 收藏");
+        dailyBtnFav.setTextColor(on ? C_HI : C_PRIMARY);
+    }
+
+    private void toggleDailyFavCurrent() {
+        String text = currentDailyText();
+        if (text.length() == 0) return;
+        vibrate();
+        boolean on = toggleDailyFav(text);
+        toast(on ? "已收藏，可在「我的收藏 › 每日一句」里找到" : "已取消收藏");
+        paintDailyFav();
+    }
+
+    // ----- 本地存储：号 → 文本，收藏与历史都只存号 -----
+    private void loadDailyStore() {
+        dailyPool.clear();
+        dailyFav.clear();
+        dailyHist.clear();
+        try {
+            JSONObject o = new JSONObject(prefs.getString("daily_pool", "{}"));
+            java.util.Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                try { dailyPool.put(Integer.parseInt(k), o.optString(k, "")); } catch (Exception ignored) { }
+            }
+        } catch (Exception ignored) { }
+        for (String x : prefs.getString("daily_fav", "").split(",")) {
+            if (x.length() == 0) continue;
+            try { dailyFav.add(Integer.parseInt(x)); } catch (Exception ignored) { }
+        }
+        for (String x : prefs.getString("daily_hist", "").split(",")) {
+            if (x.length() == 0) continue;
+            try { dailyHist.add(Integer.parseInt(x)); } catch (Exception ignored) { }
+        }
+    }
+
+    private static String joinInts(List<Integer> list) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < list.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append(list.get(i));
+        }
+        return sb.toString();
+    }
+
+    private void saveDailyStore() {
+        JSONObject o = new JSONObject();
+        for (Map.Entry<Integer, String> e : dailyPool.entrySet()) {
+            try { o.put(String.valueOf(e.getKey()), e.getValue()); } catch (Exception ignored) { }
+        }
+        prefs.edit()
+                .putString("daily_pool", o.toString())
+                .putString("daily_fav", joinInts(dailyFav))
+                .putString("daily_hist", joinInts(dailyHist))
+                .apply();
+    }
+
+    /** 文本对应的本地号：已有就复用，没有就取当前空着的最小的号（号回收靠这里）。 */
+    private int ensureDailyNo(String text) {
+        for (Map.Entry<Integer, String> e : dailyPool.entrySet()) {
+            if (text.equals(e.getValue())) return e.getKey();
+        }
+        int no = 1;
+        while (dailyPool.containsKey(no)) no++;
+        dailyPool.put(no, text);
+        return no;
+    }
+
+    /** 这个号已经不被任何收藏/历史引用：把文本彻底删掉，号空出来给新句子用。 */
+    private void dropDailyIfUnused(int no) {
+        if (dailyFav.contains(no) || dailyHist.contains(no)) return;
+        dailyPool.remove(no);
+    }
+
+    private boolean isDailyFav(String text) {
+        if (text.length() == 0) return false;
+        for (int no : dailyFav) {
+            if (text.equals(dailyPool.get(no))) return true;
+        }
+        return false;
+    }
+
+    private boolean toggleDailyFav(String text) {
+        int no = ensureDailyNo(text);
+        if (dailyFav.contains(no)) {
+            dailyFav.remove(Integer.valueOf(no));
+            dropDailyIfUnused(no);
+            saveDailyStore();
+            return false;
+        }
+        dailyFav.add(no);
+        saveDailyStore();
+        return true;
+    }
+
+    /** 浏览记录：同一条提到最前，最多 50 条；被挤出去的号若没人收藏就删文本。 */
+    private void pushDailyHist(String text) {
+        if (text == null || text.length() == 0) return;
+        int no = ensureDailyNo(text);
+        dailyHist.remove(Integer.valueOf(no));
+        dailyHist.add(0, no);
+        while (dailyHist.size() > DAILY_HIST_MAX) {
+            int old = dailyHist.remove(dailyHist.size() - 1);
+            dropDailyIfUnused(old);
+        }
+        saveDailyStore();
+    }
+
+    // ----- 取句：只在内存里放本次运行取到的这一批 -----
+    /** 每天第一次打开刷新一次；两类各自记日期，互不影响。 */
+    private void checkDailyForToday() {
+        String td = todayTag();
+        if (!td.equals(prefs.getString("daily_day_phil", ""))) refreshDaily("phil", false);
+        if (!td.equals(prefs.getString("daily_day_poem", ""))) refreshDaily("poem", false);
+    }
+
+    /** 分别记录「这一类正在取」，两路互不阻塞（两类可能同时刷新）。 */
+    private final java.util.Set<String> dailyLoadingKinds = new java.util.HashSet<String>();
+
+    /** 调一言接口取一批句子：每类至少备 10 条，多了不嫌多；取不到就提示，绝不编句子。 */
+    private void refreshDaily(final String kind, final boolean manual) {
+        if (dailyLoadingKinds.contains(kind)) return;
+        dailyLoadingKinds.add(kind);
+        if (manual && dailyHint != null && kind.equals(dailyKind)) dailyHint.setText("正在从网络取句子…");
+        new Thread(new Runnable() {
+            public void run() {
+                final List<String> got = new ArrayList<String>();
+                String cats = "phil".equals(kind) ? "c=k&c=d" : "c=i";
+                for (int i = 0; i < DAILY_WANT * 3 && got.size() < DAILY_WANT; i++) {
+                    try {
+                        String body = httpGetText("https://v1.hitokoto.cn/?" + cats
+                                + "&encode=json&charset=utf-8", 4000, 5000);
+                        JSONObject o = new JSONObject(body);
+                        String t = o.optString("hitokoto", "").trim();
+                        String from = o.optString("from", "").trim();
+                        String who = o.optString("from_who", "").trim();
+                        if (t.length() == 0) continue;
+                        String src = who.length() > 0 ? who : from;
+                        String line = src.length() > 0 ? (t + "\n—— " + src) : t;
+                        if (!got.contains(line)) got.add(line);
+                    } catch (Exception ignored) { }
+                }
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        dailyLoadingKinds.remove(kind);
+                        if (got.isEmpty()) {
+                            if (manual) toast("没取到句子，检查一下网络再试");
+                            if (kind.equals(dailyKind) && screen == S_DAILY) renderDailyBody();
+                            return;
+                        }
+                        dailyMem.put(kind, new ArrayList<String>(got));
+                        markDailyDay(kind);
+                        if (manual) toast("已换一批 · " + got.size() + " 句");
+                        if (kind.equals(dailyKind) && screen == S_DAILY) {
+                            dailyItems.clear();
+                            dailyItems.addAll(got);
+                            dailyIdx = 0;
+                            renderDailyBody();
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private void markDailyDay(String kind) {
+        prefs.edit().putString("daily_day_" + kind, todayTag()).apply();
+    }
+
     /** 收藏页第一级：只列「有收藏的科目」，点进去才显示该科目收藏的内容。 */
     private void renderFav() {
         final Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
@@ -2270,12 +2701,25 @@ public class MainActivity extends Activity {
             counts.put(subj, (c == null ? 0 : c) + 1);
         }
         final List<String> subs = new ArrayList<String>(counts.keySet());
-        favTitle.setText(found == 0 ? "还没有收藏" : "我的收藏 · " + found + " 项");
+        loadDailyStore();
+        final int sentCount = dailyFav.size();
+        favTitle.setText((found == 0 && sentCount == 0) ? "还没有收藏"
+                : "我的收藏 · " + (found + sentCount) + " 项");
+        final int extra = sentCount > 0 ? 1 : 0;
         favList.bind(new RowSource() {
-            public int size() { return subs.isEmpty() ? 1 : subs.size(); }
+            public int size() { return subs.isEmpty() ? (extra > 0 ? 1 : 1) : subs.size() + extra; }
             public View make(final int i) {
+                if (extra > 0 && i == 0) {
+                    return textRow("每日一句 · " + sentCount + " 条", C_PRIMARY, new Runnable() {
+                        public void run() {
+                            sentMode = "fav";
+                            showScreen(S_SENT);
+                        }
+                    });
+                }
                 if (subs.isEmpty()) return textRow("还没有收藏任何内容", C_SUB, null);
-                final String name = subs.get(i);
+                final int idx = i - extra;
+                final String name = subs.get(idx);
                 return textRow(name + "  (" + counts.get(name) + ")", C_PRIMARY, new Runnable() {
                     public void run() {
                         favSubKey = subjectKeyOf(name);
@@ -2315,13 +2759,25 @@ public class MainActivity extends Activity {
             Node n = nodeOf(id);
             if (n != null) rows.add(n);
         }
-        histTitle.setText(rows.isEmpty() ? "还没有浏览记录" : "最近浏览 · " + rows.size() + " 条");
+        loadDailyStore();
+        final int sentHist = dailyHist.size();
+        histTitle.setText((rows.isEmpty() && sentHist == 0) ? "还没有浏览记录"
+                : "最近浏览 · " + (rows.size() + sentHist) + " 条");
         final List<Object> items = new ArrayList<Object>();
         items.add("最多保留 50 条，超出自动清除最旧的");
+        if (sentHist > 0) items.add("daily");     // 每日一句的浏览记录（另存文本，不占知识点编号）
         items.addAll(rows);
         histList.bind(new RowSource() {
             public int size() { return items.size(); }
             public View make(final int i) {
+                if (i > 0 && "daily".equals(items.get(i))) {
+                    return textRow("每日一句 · " + sentHist + " 条", C_PRIMARY, new Runnable() {
+                        public void run() {
+                            sentMode = "hist";
+                            showScreen(S_SENT);
+                        }
+                    });
+                }
                 if (i == 0) {
                     TextView note = new TextView(MainActivity.this);
                     note.setText((String) items.get(0));
@@ -2583,6 +3039,7 @@ public class MainActivity extends Activity {
 
     /** 打开一个节点：有下级就压栈列下级，是叶子就直接看正文。层数由数据决定。 */
     private void openNode(final Node n) {
+        if (n.daily != null && n.daily.length() > 0) { openDaily(n, S_NODE); return; }
         if (n.isLeaf()) {
             openDetail(n.name, n.body, n.path(), S_NODE, n.img, n.ex, n.id);
             return;
@@ -2596,6 +3053,7 @@ public class MainActivity extends Activity {
 
     /** 从搜索/收藏/历史/今日跳进某个节点：把它的祖先链补进导航栈，返回时能一路退回来。 */
     private void openNodeFrom(final Node n, int back) {
+        if (n.daily != null && n.daily.length() > 0) { openDaily(n, back); return; }
         // 无论叶子还是分组，都先把祖先链补进栈：详情页/节点页的面包屑与返回才有得退
         ArrayList<Node> chain = new ArrayList<Node>();
         Node top = n.isLeaf() ? n.parent : n;
@@ -4273,7 +4731,8 @@ public class MainActivity extends Activity {
         // 顺序必须与 S_* 常量一一对应（0..15）
         View[] screens = {subjectScreen, nodeScreen, detailScreen, settingsScreen,
                 searchScreen, feedbackScreen, mineScreen, profileScreen, changelogScreen, aboutScreen,
-                displayScreen, todayScreen, examplesScreen, favScreen, histScreen, favSubScreen};
+                displayScreen, todayScreen, examplesScreen, favScreen, histScreen, favSubScreen,
+                dailyScreen, sentScreen};
         View target = screens[s];
         boolean shown = target.getVisibility() == View.VISIBLE && target.getAlpha() > 0.95f
                 && Math.abs(target.getTranslationX()) < dp(4);
@@ -4287,6 +4746,11 @@ public class MainActivity extends Activity {
         }
         target.animate().cancel();
         target.setVisibility(View.VISIBLE);
+        // 动画的起点状态先摆好，但**不在这里启动**：这一页的内容（列表绑定、详情卡片重建）
+        // 是在下面才渲染的，渲染期间如果已经可见，会露出「空页面 → 内容突然出现」的闪屏。
+        // 所以先设成全透明（alpha 0，用户看不到中间态），等本帧渲染完、下一帧再淡入。
+        boolean animate = !shown;
+        float dx = 0f, dy = 0f;
         if (shown) {
             // 已经在位（例如右滑返回时上一页已跟手归位），别再动它，免得跳一下
             target.setTranslationX(0f);
@@ -4294,16 +4758,11 @@ public class MainActivity extends Activity {
             target.setAlpha(1f);
         } else {
             int dir = (old == s) ? 0 : (pageDepth(s) - pageDepth(old));
-            float dx = dir > 0 ? dp(12) : (dir < 0 ? -dp(12) : 0f);
-            float dy = (dir == 0) ? dp(7) : 0f;
+            dx = dir > 0 ? dp(12) : (dir < 0 ? -dp(12) : 0f);
+            dy = (dir == 0) ? dp(7) : 0f;
             target.setTranslationX(dx);
             target.setTranslationY(dy);
-            target.setAlpha(0.25f);
-            target.animate()
-                    .translationX(0f).translationY(0f).alpha(1f)
-                    .setDuration(185)
-                    .setInterpolator(new DecelerateInterpolator(1.6f))
-                    .start();
+            target.setAlpha(0f);
         }
 
         if (s == S_SUBJECT) {
@@ -4380,6 +4839,10 @@ public class MainActivity extends Activity {
             renderFav();
         } else if (s == S_FAV_SUB) {
             renderFavSub();
+        } else if (s == S_DAILY) {
+            renderDaily();
+        } else if (s == S_SENT) {
+            renderSent();
         } else if (s == S_HIST) {
             renderHist();
         }
@@ -4394,12 +4857,29 @@ public class MainActivity extends Activity {
                 enter.enter();
             }
         }
+
+        // 内容、滚动位置都就绪了，下一帧再淡入：中间不会有一帧「空白页」被看见。
+        if (animate) {
+            final View tv = target;
+            final int fn = s;
+            tv.post(new Runnable() {
+                public void run() {
+                    // 这一帧里用户可能又点走了：目标已不是这一页就别再让它淡入
+                    if (screen != fn || tv.getVisibility() != View.VISIBLE) return;
+                    tv.animate().cancel();
+                    tv.animate().translationX(0f).translationY(0f).alpha(1f)
+                            .setDuration(185)
+                            .setInterpolator(new DecelerateInterpolator(1.6f))
+                            .start();
+                }
+            });
+        }
     }
 
     /** 页面在导航里的深浅：用来决定切页动画往哪个方向滑。 */
     private static int pageDepth(int s) {
         if (s == S_SUBJECT) return 0;
-        if (s == S_FAV_SUB || s == S_DETAIL) return 2;
+        if (s == S_FAV_SUB || s == S_DETAIL || s == S_DAILY || s == S_SENT) return 2;
         if (s == S_EXAMPLES) return 3;
         return 1;
     }
@@ -4414,6 +4894,8 @@ public class MainActivity extends Activity {
             case S_FAV: return favList;
             case S_HIST: return histList;
             case S_FAV_SUB: return favSubList;
+            case S_DAILY: return dailyList;
+            case S_SENT: return sentList;
             default: return null;
         }
     }
@@ -4470,6 +4952,8 @@ public class MainActivity extends Activity {
         if (screen == S_FAV) return S_SUBJECT;
         if (screen == S_HIST) return S_SUBJECT;
         if (screen == S_FAV_SUB) return S_FAV;
+        if (screen == S_DAILY) return dailyBack;
+        if (screen == S_SENT) return "hist".equals(sentMode) ? S_HIST : S_FAV;
         return -1;
     }
 
@@ -4491,6 +4975,8 @@ public class MainActivity extends Activity {
             case S_FAV: return favScreen;
             case S_HIST: return histScreen;
             case S_FAV_SUB: return favSubScreen;
+            case S_DAILY: return dailyScreen;
+            case S_SENT: return sentScreen;
             default: return null;
         }
     }
@@ -4592,6 +5078,8 @@ public class MainActivity extends Activity {
             case S_FAV: return favScreen;
             case S_HIST: return histScreen;
             case S_FAV_SUB: return favSubScreen;
+            case S_DAILY: return dailyScreen;
+            case S_SENT: return sentScreen;
             default: return subjectScreen;
         }
     }

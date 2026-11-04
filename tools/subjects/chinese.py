@@ -241,3 +241,35 @@ TREE = [
         ]},
     ]},
 ]
+
+
+# ---------------- 扩展内容（单独成文件，拼进对应板块） ----------------
+# 2.4 必背 60 篇（全文）挂在「古诗文阅读」下；4.3 作文素材挂在「写作」下。
+# 用 importlib 按本文件所在目录加载，避免依赖 sys.path。
+import os as _os
+import importlib.util as _ilu
+
+
+def _load_ext(_name):
+    _p = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _name + ".py")
+    _sp = _ilu.spec_from_file_location(_name, _p)
+    _m = _ilu.module_from_spec(_sp)
+    _sp.loader.exec_module(_m)
+    return _m
+
+
+def _block_of(_kw):
+    for _b in TREE:
+        if _kw in _b.get("name", ""):
+            return _b
+    return None
+
+
+_bp = _load_ext("ext_bipei60")
+_zw = _load_ext("ext_zuowen")
+_seg = _block_of("古诗文阅读")
+if _seg is not None:
+    _seg["children"].append(_bp.BIBEI)
+_wri = _block_of("写作")
+if _wri is not None:
+    _wri["children"].append(_zw.NODE)

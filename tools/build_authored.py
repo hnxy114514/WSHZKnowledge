@@ -72,6 +72,8 @@ def to_node(n):
                      for e in ex if e.get("t") or e.get("body")]
     if n.get("img"):
         out["img"] = n["img"]
+    if n.get("daily"):
+        out["daily"] = n["daily"]
     return out
 
 
@@ -1053,6 +1055,8 @@ def to_output_node(n):
         out["ex"] = n["ex"]
     if n.get("img"):
         out["img"] = n["img"]
+    if n.get("daily"):
+        out["daily"] = n["daily"]
     return out
 
 
