@@ -184,6 +184,8 @@ public class MainActivity extends Activity {
     private LinearLayout dailyCardBox, dailyLoadingBox;
     private TextView dailyMain, dailyOrigin;
     private ProgressBar dailyBar;
+    private LinearLayout dailyBtns;
+    private TextView dailyRefreshBtn;
     private Node dailyNode;
     private String dailyKind = "phil";
     private int dailyBack = S_NODE;
@@ -1858,7 +1860,7 @@ public class MainActivity extends Activity {
         dailyLoadingBox.setVisibility(View.GONE);
         dailyList.addHead(dailyLoadingBox);
 
-        LinearLayout dailyBtns = new LinearLayout(this);
+        dailyBtns = new LinearLayout(this);
         dailyBtns.setOrientation(LinearLayout.HORIZONTAL);
         dailyBtns.setGravity(Gravity.CENTER_VERTICAL);
         dailyBtns.addView(dailyBtn("‹ 上一句", new View.OnClickListener() {
@@ -1873,11 +1875,11 @@ public class MainActivity extends Activity {
         }), new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         dailyList.addHead(dailyBtns);
 
-        TextView refreshBtn = dailyBtn("换一批（从网络重新取）", new View.OnClickListener() {
+        dailyRefreshBtn = dailyBtn("换一批（从网络重新取）", new View.OnClickListener() {
             public void onClick(View v) { vibrate(); startDailyRefresh(); }
         });
-        refreshBtn.setPadding(dp(6), dp(8), dp(6), dp(8));
-        dailyList.addHead(refreshBtn);
+        dailyRefreshBtn.setPadding(dp(6), dp(8), dp(6), dp(8));
+        dailyList.addHead(dailyRefreshBtn);
         dailyScreen.addView(dailyList.sc, lw());
         root.addView(dailyScreen, fp());
 
@@ -2559,12 +2561,16 @@ public class MainActivity extends Activity {
     private void renderDailyLoading() {
         dailyHint.setText("正在从网络拉取…");
         if (dailyCardBox != null) dailyCardBox.setVisibility(View.GONE);
+        // 拉取期间上一句/下一句/收藏/换一批都没有意义，先收起来，只留「取消」
+        if (dailyBtns != null) dailyBtns.setVisibility(View.GONE);
+        if (dailyRefreshBtn != null) dailyRefreshBtn.setVisibility(View.GONE);
         if (dailyLoadingBox != null) dailyLoadingBox.setVisibility(View.VISIBLE);
-        paintDailyFav();
     }
 
     private void renderDailyBody() {
         if (dailyLoadingBox != null) dailyLoadingBox.setVisibility(View.GONE);
+        if (dailyBtns != null) dailyBtns.setVisibility(View.VISIBLE);
+        if (dailyRefreshBtn != null) dailyRefreshBtn.setVisibility(View.VISIBLE);
         if (dailyItems.isEmpty()) {
             if (dailyCardBox != null) dailyCardBox.setVisibility(View.GONE);
             dailyHint.setText("还没取到句子，点下面「换一批」试试");
