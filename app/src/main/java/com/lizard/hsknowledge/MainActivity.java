@@ -130,17 +130,31 @@ public class MainActivity extends Activity {
     // ---------- 数据模型 ----------
     // 层级只有一种东西：Node。有 children 就是分组节点，否则是叶子知识点。
     // 叶子只有一段正文（body 字符串），数据里没有分节、没有第二种正文结构。
-    static class Example { String t, body; }
+    // 附加内容块：例题、译文等**共用同一套结构**，按钮名与每行标签都由数据给出，
+    // 界面不认识「例题」「译文」，只认识「块 → 若干组 → 每组若干行」。
+    static class ExtraLine { String tag, text, tone; }        // tag 可空；tone = head / body / note
+    static class ExtraItem { List<ExtraLine> lines = new ArrayList<ExtraLine>(); }
+    static class ExtraBlock {
+        String name = "", unit = "";                          // 例：「例题」+「道」、「译文」+「句」
+        String mark = "";                                     // 列表行里的短标记，例：「例」「译」
+        List<ExtraItem> items = new ArrayList<ExtraItem>();
+    }
     static class Node {
         String id, name;
         String body = "";                       // 叶子正文（单段，多行用换行）
         List<Node> children = new ArrayList<Node>();
-        List<Example> ex = new ArrayList<Example>();
+        List<ExtraBlock> extras = new ArrayList<ExtraBlock>();
         int star; String img, d;
         String daily;                          // 非空 = 每日一句入口（phil/poem），句子走接口
         Node parent; Subject subj;
         int savedY = -1;                        // 离开时记下列表位置，返回时恢复
         boolean isLeaf() { return children.isEmpty(); }
+        /** 列表行显示的短标记，由数据里的 mark 汇总（例 → 「（例）」），界面不自造文案。 */
+        String marks() {
+            LinkedHashSet<String> set = new LinkedHashSet<String>();
+            for (ExtraBlock b : extras) if (b.mark != null && b.mark.length() > 0) set.add(b.mark);
+            return TextUtils.join("/", set);
+        }
         /** 面包屑/收藏页显示的完整路径，由父链现算，不写死层数。 */
         String path() {
             ArrayList<String> seg = new ArrayList<String>();
@@ -162,7 +176,7 @@ public class MainActivity extends Activity {
     private static final int S_SUBJECT = 0, S_NODE = 1, S_DETAIL = 2, S_SETTINGS = 3,
             S_SEARCH = 4, S_FEEDBACK = 5, S_MYFEEDBACK = 6, S_PROFILE = 7,
             S_CHANGELOG = 8, S_ABOUT = 9, S_DISPLAY = 10, S_TODAY = 11,
-            S_EXAMPLES = 12, S_FAV = 13, S_HIST = 14, S_FAV_SUB = 15, S_DAILY = 16, S_SENT = 17;
+            S_EXTRA = 12, S_FAV = 13, S_HIST = 14, S_FAV_SUB = 15, S_DAILY = 16, S_SENT = 17;
     private static final int SCREEN_COUNT = 18;
     private int screen = S_SUBJECT;
     private Subject curSubject;
@@ -210,18 +224,18 @@ public class MainActivity extends Activity {
     private long dailySeq = 0;              // 每次刷新 +1，用来丢弃「已经取消掉」的在途结果
     private final List<Node> shownNodes = new ArrayList<Node>();
     private int detailBack = S_NODE;
-    /** 当前详情页知识点的例题列表（为空则不显示例题按钮）。 */
-    private List<Example> curExamples = new ArrayList<Example>();
+    /** 当前详情页的附加内容块（例题、译文…）：有几块就画几个按钮，为空则都不画。 */
+    private List<ExtraBlock> curExtras = new ArrayList<ExtraBlock>();
 
     // ---------- UI ----------
     private FrameLayout root;
-    private LinearLayout subjectScreen, nodeScreen, detailScreen, settingsScreen, searchScreen, examplesScreen;
+    private LinearLayout subjectScreen, nodeScreen, detailScreen, settingsScreen, searchScreen, extraScreen;
     private SvList subjectList, nodeList, searchList;
-    private TextView listTitle, detailTitle, detailPath, searchTitle, examplesTitle, examplesPath;
-    private TextView detailBackBtn, settingsBackBtn, examplesBackBtn;
+    private TextView listTitle, detailTitle, detailPath, searchTitle, extraTitle, extraPath, extraKind;
+    private TextView detailBackBtn, settingsBackBtn, extraBackBtn;
     private EditText itemSearchBox, gSearchBox;
-    private ScrollView detailScroll, settingsScroll, examplesScroll;
-    private LinearLayout detailInner, settingsInner, examplesInner;
+    private ScrollView detailScroll, settingsScroll, extraScroll;
+    private LinearLayout detailInner, settingsInner, extraInner;
     private FrameLayout fullscreenView;
 
     // ---------- 反馈 ----------
@@ -679,15 +693,35 @@ public class MainActivity extends Activity {
             n.img = no.optString("img", "");
             n.d = no.optString("d", "");
             try {
-                JSONArray exs = no.optJSONArray("ex");
-                if (exs != null) {
-                    for (int i = 0; i < exs.length(); i++) {
-                        JSONObject eo = exs.optJSONObject(i);
-                        if (eo == null) continue;
-                        Example e = new Example();
-                        e.t = eo.optString("t", "");
-                        e.body = eo.optString("body", "");
-                        if (e.t.length() > 0 || e.body.length() > 0) n.ex.add(e);
+                JSONArray blks = no.optJSONArray("extra");
+                if (blks != null) {
+                    for (int i = 0; i < blks.length(); i++) {
+                        JSONObject bo = blks.optJSONObject(i);
+                        if (bo == null) continue;
+                        ExtraBlock b = new ExtraBlock();
+                        b.name = bo.optString("name", "");
+                        b.unit = bo.optString("unit", "");
+                        b.mark = bo.optString("mark", "");
+                        JSONArray its = bo.optJSONArray("items");
+                        if (its != null) {
+                            for (int j = 0; j < its.length(); j++) {
+                                JSONObject io2 = its.optJSONObject(j);
+                                JSONArray lns = (io2 == null) ? null : io2.optJSONArray("lines");
+                                if (lns == null) continue;
+                                ExtraItem it = new ExtraItem();
+                                for (int m = 0; m < lns.length(); m++) {
+                                    JSONObject lo = lns.optJSONObject(m);
+                                    if (lo == null) continue;
+                                    ExtraLine ln = new ExtraLine();
+                                    ln.tag = lo.optString("tag", "");
+                                    ln.text = lo.optString("text", "");
+                                    ln.tone = lo.optString("tone", "body");
+                                    if (ln.text.length() > 0) it.lines.add(ln);
+                                }
+                                if (!it.lines.isEmpty()) b.items.add(it);
+                            }
+                        }
+                        if (!b.items.isEmpty()) n.extras.add(b);
                     }
                 }
             } catch (Exception ignored) { }
@@ -1864,7 +1898,7 @@ public class MainActivity extends Activity {
         subjectScreen = newScreen();
         nodeScreen = newScreen();
         detailScreen = newScreen();
-        examplesScreen = newScreen();
+        extraScreen = newScreen();
         settingsScreen = newScreen();
         searchScreen = newScreen();
         feedbackScreen = newScreen();
@@ -1872,7 +1906,7 @@ public class MainActivity extends Activity {
         root.addView(subjectScreen, fp());
         root.addView(nodeScreen, fp());
         root.addView(detailScreen, fp());
-        root.addView(examplesScreen, fp());
+        root.addView(extraScreen, fp());
         root.addView(settingsScreen, fp());
         root.addView(searchScreen, fp());
         buildFeedbackScreen();
@@ -2104,34 +2138,42 @@ public class MainActivity extends Activity {
         detailScreen.addView(detailScroll, lw());
 
         // 例题页
-        examplesBackBtn = makeBack("‹ 返回知识点", new View.OnClickListener() {
+        extraBackBtn = makeBack("‹ 返回知识点", new View.OnClickListener() {
             public void onClick(View v) { goBack(S_DETAIL); }
         });
-        examplesPath = new TextView(this);
-        examplesPath.setTextSize(m.subtitleSize);        // 与知识点页的面包屑一个规格
-        examplesPath.setTypeface(Typeface.DEFAULT_BOLD);
-        examplesPath.setTextColor(C_SUB);
-        examplesPath.setPadding(dp(2), 0, dp(2), dp(1));
-        examplesPath.setMaxLines(2);
-        // examplesPath 随内容滚动，在 openExamples 里加进 examplesInner
+        extraPath = new TextView(this);
+        extraPath.setTextSize(m.subtitleSize);        // 与知识点页的面包屑一个规格
+        extraPath.setTypeface(Typeface.DEFAULT_BOLD);
+        extraPath.setTextColor(C_SUB);
+        extraPath.setPadding(dp(2), 0, dp(2), dp(1));
+        extraPath.setMaxLines(2);
+        // extraPath 随内容滚动，在 openExtra 里加进 extraInner
 
-        examplesTitle = new TextView(this);
-        examplesTitle.setTextSize(m.titleSize);
-        examplesTitle.setTypeface(Typeface.DEFAULT_BOLD);
-        examplesTitle.setTextColor(C_PRIMARY);
-        examplesTitle.setGravity(Gravity.CENTER);
-        examplesTitle.setPadding(0, dp(2), 0, dp(6));
-        examplesTitle.setMaxLines(3);
-        // examplesTitle 随内容滚动，在 openExamples 里加进 examplesInner
+        extraTitle = new TextView(this);
+        extraTitle.setTextSize(m.titleSize);
+        extraTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        extraTitle.setTextColor(C_PRIMARY);
+        extraTitle.setGravity(Gravity.CENTER);
+        extraTitle.setPadding(0, dp(2), 0, dp(6));
+        extraTitle.setMaxLines(3);
+        // extraTitle 随内容滚动，在 openExtra 里加进 extraInner
 
-        examplesScroll = new OverScrollScrollView(this);
-        examplesScroll.setFillViewport(true);
-        roundPadScroll(examplesScroll);
-        examplesInner = new LinearLayout(this);
-        examplesInner.setOrientation(LinearLayout.VERTICAL);
-        examplesScroll.addView(examplesInner, new ViewGroup.LayoutParams(
+        // 页面副标题：内容由数据给（例题 / 译文…），界面只负责显示
+        extraKind = new TextView(this);
+        extraKind.setTextSize(m.subtitleSize - 1f);
+        extraKind.setTypeface(Typeface.DEFAULT_BOLD);
+        extraKind.setTextColor(C_HI);
+        extraKind.setGravity(Gravity.CENTER);
+        extraKind.setPadding(0, 0, 0, dp(8));
+
+        extraScroll = new OverScrollScrollView(this);
+        extraScroll.setFillViewport(true);
+        roundPadScroll(extraScroll);
+        extraInner = new LinearLayout(this);
+        extraInner.setOrientation(LinearLayout.VERTICAL);
+        extraScroll.addView(extraInner, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        examplesScreen.addView(examplesScroll, lw());
+        extraScreen.addView(extraScroll, lw());
 
         // 设置页
         settingsBackBtn = makeBack("‹ 返回", new View.OnClickListener() {
@@ -2480,9 +2522,10 @@ public class MainActivity extends Activity {
         if (n.isLeaf()) {
             String prefix = (n.star > 0) ? (starText(n.star) + "  ") : "";
             label = applyMarkup(prefix + n.name);
-            if (!n.ex.isEmpty()) {
+            String mk = n.marks();
+            if (mk.length() > 0) {
                 int st = label.length();
-                label.append("（例）");
+                label.append("（").append(mk).append("）");
                 label.setSpan(new ForegroundColorSpan(C_HI), st, label.length(),
                         Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                 label.setSpan(new RelativeSizeSpan(0.92f), st, label.length(),
@@ -3275,7 +3318,7 @@ public class MainActivity extends Activity {
     private void openNode(final Node n) {
         if (n.daily != null && n.daily.length() > 0) { openDaily(n, S_NODE); return; }
         if (n.isLeaf()) {
-            openDetail(n.name, n.body, n.path(), S_NODE, n.img, n.ex, n.id);
+            openDetail(n.name, n.body, n.path(), S_NODE, n.img, n.extras, n.id);
             return;
         }
         navStack.add(n);
@@ -3299,7 +3342,7 @@ public class MainActivity extends Activity {
         nodeEntryBack = back;
         renderNodes();
         if (n.isLeaf()) {
-            openDetail(n.name, n.body, n.path(), back, n.img, n.ex, n.id);
+            openDetail(n.name, n.body, n.path(), back, n.img, n.extras, n.id);
         } else {
             showScreen(S_NODE);
             slideNodeList(1);
@@ -3670,17 +3713,17 @@ public class MainActivity extends Activity {
 
     /** 知识点详情：正文只有一段，直接铺成一张无标签卡片。 */
     private void openDetail(String title, String body, String path, int back, String img,
-                            List<Example> ex, String id) {
+                            List<ExtraBlock> extras, String id) {
         List<Card> cards = new ArrayList<Card>();
         cards.add(card("", "K", body == null ? "" : body));
-        openDetailCards(title, cards, path, back, img, ex, id);
+        openDetailCards(title, cards, path, back, img, extras, id);
     }
 
     /** 详情页主体：反馈详情这类要用多张带标签的卡片，所以卡片由调用方给定。 */
     private void openDetailCards(String title, List<Card> cards, String path, int back, String img,
-                                 List<Example> ex, String id) {
+                                 List<ExtraBlock> extras, String id) {
         detailBack = back;
-        curExamples = (ex == null) ? new ArrayList<Example>() : ex;
+        curExtras = (extras == null) ? new ArrayList<ExtraBlock>() : extras;
         lastPath = (path == null) ? "" : path;
         curDetailId = (id == null) ? "" : id;
         if (curDetailId.length() > 0) pushHistory(curDetailId);
@@ -3774,117 +3817,116 @@ public class MainActivity extends Activity {
                 detailInner.addView(card, clp);
             }
         }
-        if (curExamples != null && !curExamples.isEmpty()) {
-            TextView exBtn = new TextView(this);
-            exBtn.setText("例题 · " + curExamples.size() + " 道");
-            exBtn.setTextSize(m.subtitleSize);
-            exBtn.setTypeface(Typeface.DEFAULT_BOLD);
-            exBtn.setTextColor(0xFF1A242E);
-            exBtn.setGravity(Gravity.CENTER);
-            exBtn.setPadding(dp(10), dp(11), dp(10), dp(11));
-            exBtn.setBackgroundDrawable(pill(C_HI));
+        // 附加内容按钮：数据里有几块就画几个（例题、译文…），
+        // 按钮文字 = 数据给的「块名 · 组数 单位」，界面不写死任何名字。
+        if (curExtras != null) {
             final String ttl = title;
-            exBtn.setOnClickListener(new View.OnClickListener() {
-                public void onClick(View v) {
-                    vibrate();
-                    openExamples(ttl, curExamples, lastPath);
-                }
-            });
-            LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            elp.topMargin = dp(2);
-            detailInner.addView(exBtn, elp);
+            for (final ExtraBlock blk : curExtras) {
+                if (blk.items.isEmpty()) continue;
+                TextView exBtn = new TextView(this);
+                exBtn.setText(blk.unit.length() > 0
+                        ? blk.name + " · " + blk.items.size() + " " + blk.unit
+                        : blk.name + " · " + blk.items.size());
+                exBtn.setTextSize(m.subtitleSize);
+                exBtn.setTypeface(Typeface.DEFAULT_BOLD);
+                exBtn.setTextColor(0xFF1A242E);
+                exBtn.setGravity(Gravity.CENTER);
+                exBtn.setPadding(dp(10), dp(11), dp(10), dp(11));
+                exBtn.setBackgroundDrawable(pill(C_HI));
+                exBtn.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) {
+                        vibrate();
+                        openExtra(blk, ttl, lastPath);
+                    }
+                });
+                LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                elp.topMargin = dp(2);
+                detailInner.addView(exBtn, elp);
+            }
         }
         if (overDist() > 0) detailInner.addView(makeScrollSpacer());
         scrollToTop(detailScroll);
         showScreen(S_DETAIL);
     }
 
-    /** 例题页：展示某知识点的例题（题干 + 选项 + 答案与解析）。 */
-    private void openExamples(String title, List<Example> exs, String path) {
-        examplesTitle.setText(applyMarkup(title));
-        setPath(examplesPath, path);
-        examplesInner.removeAllViews();
-        if (overDist() > 0) examplesInner.addView(makeScrollSpacer());
-        examplesInner.addView(examplesBackBtn, wrapM());
-        examplesInner.addView(examplesPath, wrap());
-        examplesInner.addView(examplesTitle, wrap());
-        int no = 1;
-        for (Example e : exs) {
-            LinearLayout q = new LinearLayout(this);
-            q.setOrientation(LinearLayout.VERTICAL);
-            q.setPadding(dp(11), dp(9), dp(11), dp(9));
-            GradientDrawable qb = new GradientDrawable();
-            qb.setColor(C_CARD);
-            qb.setCornerRadius(dp(11));
-            q.setBackgroundDrawable(qb);
+    /** 附加内容页（例题 / 译文共用同一套渲染）：一组一张卡，卡内每行 = 数据给的标签 + 文本。
+     *  界面不认识「例题」「译文」，只按 tone 决定字号与颜色，以后加新类型不用改这里。 */
+    private void openExtra(ExtraBlock b, String title, String path) {
+        extraTitle.setText(applyMarkup(title));
+        extraKind.setText(b.name);
+        setPath(extraPath, path);
+        extraInner.removeAllViews();
+        if (overDist() > 0) extraInner.addView(makeScrollSpacer());
+        extraInner.addView(extraBackBtn, wrapM());
+        extraInner.addView(extraPath, wrap());
+        extraInner.addView(extraTitle, wrap());
+        extraInner.addView(extraKind, wrap());
 
-            TextView qTag = new TextView(this);
-            qTag.setText("例题 " + no);
-            qTag.setTextSize(m.secTagSize);
-            qTag.setTypeface(Typeface.DEFAULT_BOLD);
-            qTag.setTextColor(Color.WHITE);
-            qTag.setPadding(dp(9), dp(3), dp(9), dp(3));
-            GradientDrawable qt = new GradientDrawable();
-            qt.setColor(secColor("K"));
-            qt.setCornerRadius(dp(9));
-            qTag.setBackgroundDrawable(qt);
-            LinearLayout.LayoutParams qtp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            qtp.bottomMargin = dp(5);
-            q.addView(qTag, qtp);
+        for (ExtraItem it : b.items) {
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setPadding(dp(11), dp(10), dp(11), dp(10));
+            GradientDrawable cb = new GradientDrawable();
+            cb.setColor(C_CARD);
+            cb.setCornerRadius(dp(11));
+            card.setBackgroundDrawable(cb);
 
-            TextView qBody = new TextView(this);
-            qBody.setText(applyMarkup(e.t));
-            qBody.setTextSize(fsSp());
-            qBody.setTextColor(C_TEXT);
-            qBody.setLineSpacing(dp(3), 1.25f);
-            q.addView(qBody, wrap());
+            boolean first = true;
+            for (ExtraLine ln : it.lines) {
+                if (ln.tag != null && ln.tag.trim().length() > 0) {
+                    TextView tag = new TextView(this);
+                    tag.setText(ln.tag);
+                    tag.setTextSize(m.secTagSize);
+                    tag.setTypeface(Typeface.DEFAULT_BOLD);
+                    tag.setTextColor(Color.WHITE);
+                    tag.setPadding(dp(9), dp(3), dp(9), dp(3));
+                    GradientDrawable tg = new GradientDrawable();
+                    tg.setColor(toneChipColor(ln.tone));
+                    tg.setCornerRadius(dp(9));
+                    tag.setBackgroundDrawable(tg);
+                    LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                    tlp.topMargin = first ? 0 : dp(9);
+                    tlp.bottomMargin = dp(5);
+                    card.addView(tag, tlp);
+                }
+                TextView body = new TextView(this);
+                body.setText(applyMarkup(ln.text));
+                body.setTextSize(toneTextSize(ln.tone));
+                body.setTextColor(toneTextColor(ln.tone));
+                if ("head".equals(ln.tone)) body.setTypeface(Typeface.DEFAULT_BOLD);
+                body.setLineSpacing(dp(3), 1.3f);
+                card.addView(body, wrap());
+                first = false;
+            }
 
-            LinearLayout.LayoutParams qlp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            qlp.bottomMargin = dp(8);
-            examplesInner.addView(q, qlp);
-
-            LinearLayout a = new LinearLayout(this);
-            a.setOrientation(LinearLayout.VERTICAL);
-            a.setPadding(dp(11), dp(9), dp(11), dp(9));
-            GradientDrawable ab = new GradientDrawable();
-            ab.setColor(0xFF1A242E);
-            ab.setCornerRadius(dp(11));
-            a.setBackgroundDrawable(ab);
-
-            TextView aTag = new TextView(this);
-            aTag.setText("答案与解析");
-            aTag.setTextSize(m.secTagSize);
-            aTag.setTypeface(Typeface.DEFAULT_BOLD);
-            aTag.setTextColor(0xFF1A242E);
-            aTag.setPadding(dp(9), dp(3), dp(9), dp(3));
-            GradientDrawable at = new GradientDrawable();
-            at.setColor(C_HI);
-            at.setCornerRadius(dp(9));
-            aTag.setBackgroundDrawable(at);
-            LinearLayout.LayoutParams atp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            atp.bottomMargin = dp(5);
-            a.addView(aTag, atp);
-
-            TextView aBody = new TextView(this);
-            aBody.setText(applyMarkup(e.body));
-            aBody.setTextSize(fsSp());
-            aBody.setTextColor(C_TEXT);
-            aBody.setLineSpacing(dp(3), 1.25f);
-            a.addView(aBody, wrap());
-
-            LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            alp.bottomMargin = dp(12);
-            examplesInner.addView(a, alp);
-            no++;
+            clp.bottomMargin = dp(9);
+            extraInner.addView(card, clp);
         }
-        if (overDist() > 0) examplesInner.addView(makeScrollSpacer());
-        scrollToTop(examplesScroll);
-        showScreen(S_EXAMPLES);
+
+        if (overDist() > 0) extraInner.addView(makeScrollSpacer());
+        scrollToTop(extraScroll);
+        showScreen(S_EXTRA);
+    }
+
+    /** 三种语义角色 → 字号 / 颜色 / 标签底色：样式只在这里，数据只说「这行是什么角色」。 */
+    private float toneTextSize(String tone) {
+        if ("head".equals(tone)) return fsSp();
+        if ("note".equals(tone)) return fsSp() - 2f;
+        return fsSp() - 0.5f;
+    }
+
+    private int toneTextColor(String tone) {
+        return "note".equals(tone) ? C_SUB : C_TEXT;
+    }
+
+    private int toneChipColor(String tone) {
+        if ("head".equals(tone)) return secColor("K");
+        if ("note".equals(tone)) return 0xFF39424E;
+        return C_HI;
     }
 
     // ================= LaTeX 渲染引擎（子集） =================
@@ -4965,7 +5007,7 @@ public class MainActivity extends Activity {
         // 顺序必须与 S_* 常量一一对应（0..15）
         View[] screens = {subjectScreen, nodeScreen, detailScreen, settingsScreen,
                 searchScreen, feedbackScreen, mineScreen, profileScreen, changelogScreen, aboutScreen,
-                displayScreen, todayScreen, examplesScreen, favScreen, histScreen, favSubScreen,
+                displayScreen, todayScreen, extraScreen, favScreen, histScreen, favSubScreen,
                 dailyScreen, sentScreen};
         View target = screens[s];
         boolean shown = target.getVisibility() == View.VISIBLE && target.getAlpha() > 0.95f
@@ -5114,7 +5156,7 @@ public class MainActivity extends Activity {
     private static int pageDepth(int s) {
         if (s == S_SUBJECT) return 0;
         if (s == S_FAV_SUB || s == S_DETAIL || s == S_DAILY || s == S_SENT) return 2;
-        if (s == S_EXAMPLES) return 3;
+        if (s == S_EXTRA) return 3;
         return 1;
     }
 
@@ -5172,7 +5214,7 @@ public class MainActivity extends Activity {
     /** 当前页的上一级页面（主页返回 -1）。 */
     private int backTarget() {
         if (screen == S_DETAIL) return detailBack;
-        if (screen == S_EXAMPLES) return S_DETAIL;
+        if (screen == S_EXTRA) return S_DETAIL;
         if (screen == S_NODE) return S_SUBJECT;   // 栈空时才到这里（有栈已被 nodeBack 处理）
         if (screen == S_SETTINGS) return S_SUBJECT;
         if (screen == S_SEARCH) return S_SUBJECT;
@@ -5196,7 +5238,7 @@ public class MainActivity extends Activity {
             case S_SUBJECT: return subjectScreen;
             case S_NODE: return nodeScreen;
             case S_DETAIL: return detailScreen;
-            case S_EXAMPLES: return examplesScreen;
+            case S_EXTRA: return extraScreen;
             case S_SETTINGS: return settingsScreen;
             case S_SEARCH: return searchScreen;
             case S_FEEDBACK: return feedbackScreen;
@@ -5299,7 +5341,7 @@ public class MainActivity extends Activity {
         switch (screen) {
             case S_NODE: return nodeScreen;
             case S_DETAIL: return detailScreen;
-            case S_EXAMPLES: return examplesScreen;
+            case S_EXTRA: return extraScreen;
             case S_SETTINGS: return settingsScreen;
             case S_SEARCH: return searchScreen;
             case S_FEEDBACK: return feedbackScreen;

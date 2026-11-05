@@ -54,6 +54,30 @@ def is_leaf(n):
     return "children" not in n
 
 
+def to_extra_block(b):
+    """附加内容块：例题、译文共用一套结构，这里只做公式规范化，文案一个字不改。
+
+    name/unit/mark 都是数据给的（「例题」+「道」+「例」），构建脚本不认识具体内容。
+    """
+    out = {"name": b.get("name", ""), "unit": b.get("unit", "")}
+    if b.get("mark"):
+        out["mark"] = b["mark"]
+    items = []
+    for it in b.get("items", []):
+        lines = []
+        for ln in it.get("lines", []):
+            text = latexify(ln.get("text", ""))
+            if not text:
+                continue
+            lines.append({"tag": ln.get("tag", ""), "text": text,
+                          "tone": ln.get("tone", "body")})
+        if lines:
+            items.append({"lines": lines})
+    if items:
+        out["items"] = items
+    return out
+
+
 def to_node(n):
     """源文件节点 → 构建期节点。分组保留 children；叶子补上 star / sec / ex。
     注意：构建期内部仍用 t / sec 这套字段喂给下面那些旧处理函数（去重、定稿、分数化等），
@@ -66,10 +90,13 @@ def to_node(n):
         star = importance(n["name"])
     out = {"t": latexify(n["name"]), "star": star,
            "sec": [{"h": "", "c": "K", "body": latexify(n.get("body", ""))}]}
-    ex = n.get("ex", [])
-    if ex:
-        out["ex"] = [{"t": latexify(e.get("t", "")), "body": latexify(e.get("body", ""))}
-                     for e in ex if e.get("t") or e.get("body")]
+    # 附加内容块（例题、译文…）：只有一种写法 extra；再出现旧的 ex 说明漏了迁移
+    if n.get("ex"):
+        print("! 仍有旧写法 ex（应改成 extra）：", n.get("name"))
+    extra = [to_extra_block(b) for b in n.get("extra", [])]
+    extra = [b for b in extra if b.get("items")]
+    if extra:
+        out["extra"] = extra
     if n.get("img"):
         out["img"] = n["img"]
     if n.get("daily"):
@@ -1051,8 +1078,8 @@ def to_output_node(n):
                 "children": [to_output_node(x) for x in n["children"]]}
     out = {"id": n.get("id", ""), "d": n.get("d", ""),
            "name": n["t"], "body": n["sec"][0]["body"], "star": n["star"]}
-    if n.get("ex"):
-        out["ex"] = n["ex"]
+    if n.get("extra"):
+        out["extra"] = n["extra"]
     if n.get("img"):
         out["img"] = n["img"]
     if n.get("daily"):

@@ -27,7 +27,7 @@ WSHZKnowledge/
 │   │   ├── politics.py / history.py / geography.py
 │   │   └── ext_bipei60.py / ext_zuowen.py   语文扩展内容（必背 60 篇、作文素材），由 chinese.py 加载
 │   ├── build_authored.py               构建数据：递归 TREE → assets/data/nodes（含去重、分数化、定稿、编号 v3）
-│   ├── check_data.py                   数据体检：编号/标题/正文/加粗/LaTeX/例题（只读，构建后跑一次）
+│   ├── check_data.py                   数据体检：编号/标题/正文/加粗/LaTeX/附加块（只读，构建后跑一次）
 │   ├── apply_review.py                 抽查改写落盘：按「科目+标题」替换 body，并把该条编号日期改成当天
 │   ├── drop_nodes.py                   按标题删除源文件里的条目（人工判定重复后清理用）
 │   ├── gen_thanks.py                   生成感谢名单的静态备份 cloud/thanks.json（发版时自动跑）
@@ -101,20 +101,38 @@ tools/subjects/*.py 正文里的 **片段**
 App 渲染为琥珀金加粗（applyMarkup 处理 **）
 ```
 
-例题链（挂在叶子节点上，可选，不算下级层级）：
+附加内容链（例题、译文共用一套结构，挂在叶子节点上，不算下级层级）：
 
 ```
-tools/subjects/*.py 的叶子节点可带 "ex" 字段（放在 body 同级）：
-  "ex": [{"t": 题干（选择题把 A/B/C/D 选项用 \n 接在题干后面）,
-          "body": 答案与解析}]
-        │  build_authored.py 的 to_node 原样透传（逐个过 latexify）
+tools/subjects/*.py 的叶子节点带 "extra" 字段（放在 body 同级）：
+  "extra": [{
+      "name": "例题", "unit": "道", "mark": "例",     ← 按钮名 / 计数单位 / 列表短标记
+      "items": [
+          {"lines": [
+              {"tag": "题干",       "text": 题干, "tone": "head"},
+              {"tag": "答案与解析", "text": 解析, "tone": "body"}]}
+      ]}]
+        │  build_authored.py 的 to_extra_block 逐行过 latexify，文案一个字不改
         ▼
-assets/data/*.json 的叶子带 "ex" 数组
-        │  App parseNode 解析进 Node.ex
+assets/data/*.json 的叶子带 "extra" 数组
+        │  App parseNode 解析进 Node.extras
         ▼
-叶子列表行标题旁带「（例）」标记；
-详情页底部有「例题 · N 道」按钮，点进例题页逐题展示题干卡片 + 答案与解析卡片。
+列表行标题后带「（mark）」短标记（例/译，来自数据）；
+详情页底部按块数生成按钮（数据给的「name · 组数 unit」）；
+点进通用附加内容页：一组一张卡，卡内每行 = 数据给的 tag + 文本，按 tone 决定字号与颜色。
 ```
+
+**这套结构的关键是「界面不认识内容」**：UI 里没有「例题」「译文」「答案与解析」任何一个字，
+它只知道「块 → 若干组 → 每组若干行，每行有 tag / text / tone」。所以：
+
+- 加一类新内容（比如「赏析」「背景」），只写数据，界面一行不用改；
+- 改按钮名、改标签文案、改分组单位，只改数据，不用发版逻辑；
+- tone 只有三种语义：`head`（主体，大号加粗）、`body`（正文，小一号）、`note`（注释，更小更暗）。
+  具体字号颜色在 `toneTextSize()` / `toneTextColor()` / `toneChipColor()` 一处定义。
+
+**译文**就是这么做的：`name` 写「译文」、`unit` 写「句」、`mark` 写「译」，
+每组的 lines 是「原文 / 译文 / 注释」三行，原文行里的难词用 `^{①}` 标角标（复用现有的上标渲染）。
+原文页的 `body` 里**不放任何角标**，角标只属于译文页那一行原文 —— `check_data.py` 会自动查这一条。
 
 例题内容四条硬规矩：
 - 题目必须是**真实高考真题或地区模拟题**，不自己编造；答案与解析由助手生成，但要尽量正确。
@@ -195,7 +213,35 @@ python gen_all.py                           # 需要全部重生成时跑这个
 不会自动继承 `ForegroundColorSpan` / `StyleSpan`，标亮状态由 `applyMarkup(src, hl)` 显式传进 `InlineSpan`。
 改这块时记得：新增任何自绘 span 都要跟着传 `hl`，否则又会出现「旁边文字亮了、公式没亮」。
 
-### 5. 抽查完善知识点（每批 100 条）
+### 5. 给知识点加附加内容（例题 / 译文 / 以后的新类型）
+
+**只动数据，不动 Java。** 在叶子节点上加 `extra`：
+
+```python
+{"name": "劝学（荀子）", "lvl": 0, "body": """…原文…""",
+ "extra": [{"name": "译文", "unit": "句", "mark": "译", "items": [
+     {"lines": [{"tag": "原文", "text": "君子曰：学不可以已^{①}。", "tone": "head"},
+                {"tag": "译文", "text": "君子说：学习是不可以停止的。", "tone": "body"},
+                {"tag": "注释", "text": "① 已：停止。", "tone": "note"}]},
+     …
+ ]}]}
+```
+
+- `name` 就是按钮文字的前半段（「译文」→ 按钮「译文 · 15 句」）；
+- `unit` 是计数单位（「句」「道」「首」），`mark` 是列表行里的短标记（「译」「例」）；
+- 一组的每一行有 `tag`（行首小标签，可留空）、`text`（正文）、`tone`（`head` / `body` / `note`）。
+- 一个节点可以有多个块（比如同时有例题和译文），详情页会按顺序排出多个按钮。
+
+规则：
+1. **原文正文里不放角标**，角标只写在译文页的原文行里（`^{①}` 复用现有上标渲染）。
+2. 译文按高考翻译的标准写：直译为主、字字落实，判断句、定语后置、名词作动词都要在译文里体现。
+3. 注释只注难懂的字词（通假、活用、特殊句式、古今异义、生僻字读音），不逐字解释。
+4. 写完跑 `python tools/build_authored.py` + `python tools/check_data.py`：
+   后者会校验结构完整性，并对译文块做「原文能否按顺序对上正文」的比对，漏句错位会直接报出来。
+
+---
+
+### 6. 抽查完善知识点（每批 100 条）
 
 不是全库重写，而是**定期随机抽一批、逐条人工打磨**：
 
@@ -441,7 +487,7 @@ enterApp()：buildUi() 建主界面（setContentView 换掉开屏）→ 定首�
 | 9 | S_ABOUT | 关于 | `buildAboutScreen()` |
 | 10 | S_DISPLAY | 调节显示 | `buildDisplayScreen()` |
 | 11 | S_TODAY | 今日新增 | `renderToday()` |
-| 12 | S_EXAMPLES | 例题 | `renderExamples()` |
+| 12 | S_EXTRA | 附加内容（例题 / 译文…） | `openExtra()` |
 | 13 | S_FAV | 我的收藏（第一级：按科目） | `renderFav()` |
 | 14 | S_HIST | 最近浏览 | `renderHist()` |
 | 15 | S_FAV_SUB | 某科目的收藏（第二级） | `renderFavSub()` |
@@ -480,7 +526,10 @@ Node {
   String id, name;            // 编号、标题
   String body;                // 叶子正文（单段，多行用 \n）
   List<Node> children;        // 非空 = 分组节点
-  List<Example> ex;           // 例题，只挂叶子
+  List<ExtraBlock> extras;    // 附加内容块：例题、译文…按钮名与标签全由数据给
+                              //   ExtraBlock { name, unit, mark, items }
+                              //   ExtraItem  { lines }
+                              //   ExtraLine  { tag, text, tone(head/body/note) }
   int star; String img, d;    // 星级、配图、加入日期
   String daily;               // 非空 = 每日一句入口（phil / poem）
   Node parent; Subject subj;  // 父链与所属科目（路径、收藏页都要用）
@@ -655,9 +704,10 @@ Node {
   - **改了缩放必须重建界面**：字号是 `Metrics` 的快照、控件尺寸在创建时量好，
     光改变量不重建，界面看起来完全没变。统一走 `applyDisplayChange(backTo)`：保存 + `recreate()` + 回到指定页。
   - 返回键（「‹ 返回设置」）也要走 `applyDisplayChange`，否则拖完直接返回，设置就白改了。
-- **知识点例题**：含例题的知识点，在列表里标题旁带黄色「（例）」标记；点进知识点后，
-  正文最下面有「例题 · N 道」按钮，点开进入例题页——每道题一张题干卡片（例题序号 + 题干/选项），
-  下面跟一张「答案与解析」卡片。例题页「‹ 返回知识点」回到详情页。
+- **附加内容（例题 / 译文）**：数据里带 `extra` 的知识点，列表标题后跟「（例）」「（译）」这类短标记；
+  点进知识点，正文最下面按块生成按钮（如「例题 · 1 道」「译文 · 15 句」，文字全部来自数据）；
+  点开进入同一个附加内容页：一组一张卡，卡内按行渲染「数据给的标签 + 文本」，
+  页顶副标题显示块名。返回回到详情页。加新类型只写数据，界面不动。
 - **路径面包屑**：顶部按导航栈动态拼，**有几级就几段**（不再固定「首页 › 科目 › 章 › 节」）——
   点「首页」直接回主页，点科目回到该科目顶层，点中间任一段就截断栈跳回那一层；
   最后一段是当前所在层级，灰字不可点。**长按任意「‹ 返回」按钮也能一步回主页**（会提示「已回到首页」）。

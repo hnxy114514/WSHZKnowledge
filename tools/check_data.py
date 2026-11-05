@@ -121,6 +121,15 @@ groups = 0
 leaves = 0
 
 # v3 编号：分组 <科目码>-<序号>…；叶子 <日期YYMMDD>-<科目码>-<序号>…（日期在最前）
+# 正文里的注音是「字（拼音）」，译文页的原文行不带拼音（读音放在注释里），
+# 比对时两边都先剥掉拼音括号，只比字句本身。
+PINYIN_RE = re.compile(r'（[a-zāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü ]+）')
+
+
+def strip_pinyin(t):
+    return PINYIN_RE.sub('', t or '')
+
+
 GROUP_RE = re.compile(r'^[A-Z]{2}(-\d+)+$')
 LEAF_RE = re.compile(r'^(\d{6})-([A-Z]{2})(-\d+)+$')
 
@@ -184,11 +193,49 @@ def walk(nodes, subj, path):
             check_text(where, body)
             check_text(where + '（标题）', name)
 
-            for e in (n.get('ex') or []):
-                if not (e.get('t') or '').strip() and not (e.get('body') or '').strip():
-                    add('例题为空', where)
-                check_text(where + '（例题）', e.get('t') or '')
-                check_text(where + '（例题解析）', e.get('body') or '')
+            # 原文页不许出现圈号角标：角标只属于译文页那一行原文（课本习惯）
+            if re.search(r'\^\{[\u2460-\u2473]', body):
+                add('正文里有圈号角标（应只在译文页的原文行）', where)
+
+            # 附加内容块：例题、译文共用同一套结构，这里只校验结构完整性
+            for b in (n.get('extra') or []):
+                bn = b.get('name') or ''
+                if not bn.strip():
+                    add('附加块缺 name（按钮文案来自这里）', where)
+                items = b.get('items') or []
+                if not items:
+                    add('附加块没有内容', '%s：%s' % (where, bn))
+                for it in items:
+                    lines = it.get('lines') or []
+                    if not lines:
+                        add('附加块有空组', '%s：%s' % (where, bn))
+                    for ln in lines:
+                        if ln.get('tone') not in ('head', 'body', 'note'):
+                            add('附加行 tone 非法', '%s：%s / %r' % (where, bn, ln.get('tone')))
+                        check_text('%s（%s·%s）' % (where, bn, ln.get('tag') or '-'),
+                                   ln.get('text') or '')
+
+                # 译文块：每条原文去掉角标后，必须能在正文里按顺序找到，防止切句漏句/错位
+                if '译文' in bn:
+                    pos = 0
+                    body_cmp = strip_pinyin(body)
+                    for it in items:
+                        lines = it.get('lines') or []
+                        src = ''
+                        for ln in lines:
+                            if ln.get('tag') == '原文':
+                                src = ln.get('text') or ''
+                                break
+                        if not src:
+                            add('译文组缺原文行', '%s：%s' % (where, bn))
+                            continue
+                        plain = strip_pinyin(re.sub(r'\^\{[^}]*\}', '', src).strip())
+                        k = body_cmp.find(plain, pos)
+                        if k < 0:
+                            add('译文原文对不上正文（顺序或字句不符）',
+                                '%s：%s' % (where, plain[:30]))
+                        else:
+                            pos = k + len(plain)
 
 
 for fn in files:
