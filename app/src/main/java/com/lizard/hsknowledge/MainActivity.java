@@ -295,6 +295,7 @@ public class MainActivity extends Activity {
     private LinearLayout bootSplash;      // 启动开屏（数据就绪后淡出移除）
     private FrameLayout bootHost;         // 开屏与主界面共用的容器
     private boolean skipPageAnim = false; // 启动首屏不做淡入（开屏还盖着）
+    private TextView bubbleView;          // 唯一的提示气泡（全局复用，避免叠加）
     private long bootStart = 0;
     private String loadError = null;   // 下一刻进入该页时回到离开时的位置（只有「返回上一级」才置）
 
@@ -1081,7 +1082,7 @@ public class MainActivity extends Activity {
                         return;
                     }
                     prefs.edit().putString("downloaded_tag", "v" + tag).apply();
-                    progressShow("下载完成", "正在打开安装程序…", 100);
+                    toast("下载完成，正在打开安装程序…");
                     runOnUiThread(new Runnable() {
                         public void run() {
                             progressHide();
@@ -1401,52 +1402,69 @@ public class MainActivity extends Activity {
     }
 
     /** 屏幕下方浮出一个小气泡，淡入停留后自动淡出移除，不拦截任何操作。 */
+    /** 全局唯一的提示气泡：底部圆角卡片、白字、淡入淡出。
+     *  toast / 启动问候 / 服务器状态 / 更新结果 全部走这里，界面上只存在一种提示样式。 */
     private void showBubble(final String text) {
+        if (text == null || text.length() == 0) return;
         runOnUiThread(new Runnable() {
             public void run() {
-                if (root == null) return;
-                final FrameLayout box = new FrameLayout(MainActivity.this);
-                box.setClickable(false);
-
-                TextView tv = new TextView(MainActivity.this);
-                tv.setText(text);
-                tv.setTextSize(m.subtitleSize - 1f);
-                tv.setTextColor(C_TEXT);
-                tv.setGravity(Gravity.CENTER);
-                tv.setPadding(dp(12), dp(7), dp(12), dp(7));
-                tv.setBackgroundDrawable(pill(C_CARD));
-
-                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                lp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-                lp.bottomMargin = dp(16);
-                box.addView(tv, lp);
-                root.addView(box, fp());
-
-                android.view.animation.AlphaAnimation in =
-                        new android.view.animation.AlphaAnimation(0f, 1f);
-                in.setDuration(200);
-                box.startAnimation(in);
-
-                new android.os.Handler().postDelayed(new Runnable() {
-                    public void run() {
-                        android.view.animation.AlphaAnimation out =
-                                new android.view.animation.AlphaAnimation(1f, 0f);
-                        out.setDuration(320);
-                        out.setAnimationListener(
-                                new android.view.animation.Animation.AnimationListener() {
-                                    public void onAnimationStart(android.view.animation.Animation a) { }
-                                    public void onAnimationRepeat(android.view.animation.Animation a) { }
-                                    public void onAnimationEnd(android.view.animation.Animation a) {
-                                        root.removeView(box);
-                                    }
-                                });
-                        box.startAnimation(out);
-                    }
-                }, 1800);
+                if (root == null) {
+                    // 界面还没建好（极少见）：退回系统提示，别把消息吞掉
+                    try {
+                        Toast.makeText(getApplicationContext(), text, Toast.LENGTH_SHORT).show();
+                    } catch (Exception ignored) { }
+                    return;
+                }
+                if (bubbleView == null) {
+                    TextView tv = new TextView(MainActivity.this);
+                    tv.setTextSize(m.subtitleSize - 1f);
+                    tv.setTextColor(C_TEXT);
+                    tv.setGravity(Gravity.CENTER);
+                    tv.setPadding(dp(14), dp(8), dp(14), dp(8));
+                    tv.setBackgroundDrawable(pill(C_CARD));
+                    tv.setMaxWidth((int) (getResources().getDisplayMetrics().widthPixels * 0.86f));
+                    tv.setClickable(false);
+                    tv.setFocusable(false);
+                    FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    lp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+                    lp.bottomMargin = dp(18);
+                    tv.setLayoutParams(lp);
+                    bubbleView = tv;
+                    root.addView(tv);
+                }
+                // 已经在弹的：换文字、重新计时，不叠加第二个气泡；
+                // 已经可见的就不要再从透明淡入一次，否则连续提示会闪。
+                boolean visible = bubbleView.getAlpha() > 0.9f;
+                bubbleView.setText(text);
+                bubbleView.animate().cancel();
+                if (!visible) {
+                    bubbleView.setAlpha(0f);
+                    bubbleView.animate().alpha(1f).setDuration(160).start();
+                } else {
+                    bubbleView.setAlpha(1f);
+                }
+                bubbleView.removeCallbacks(bubbleHide);
+                bubbleView.postDelayed(bubbleHide, 1900);
             }
         });
     }
+
+    /** 到点淡出并移除；被新的提示打断时会被 removeCallbacks 取消。 */
+    private final Runnable bubbleHide = new Runnable() {
+        public void run() {
+            if (bubbleView == null) return;
+            bubbleView.animate().cancel();
+            bubbleView.animate().alpha(0f).setDuration(280).withEndAction(new Runnable() {
+                public void run() {
+                    if (bubbleView != null && bubbleView.getParent() instanceof ViewGroup) {
+                        ((ViewGroup) bubbleView.getParent()).removeView(bubbleView);
+                    }
+                    bubbleView = null;
+                }
+            }).start();
+        }
+    };
 
     private void requestInstallPermission() {
         try {
@@ -1768,15 +1786,9 @@ public class MainActivity extends Activity {
         super.onPause();
     }
 
+    /** 所有提示都走同一个气泡（见 showBubble），不再用系统 Toast，避免样式各行其是。 */
     private void toast(final String msg) {
-        runOnUiThread(new Runnable() {
-            public void run() {
-                // 用 application context：Activity 销毁后 Toast 照常能弹，不会 BadTokenException
-                try {
-                    Toast.makeText(getApplicationContext(), msg, Toast.LENGTH_LONG).show();
-                } catch (Exception ignored) { }
-            }
-        });
+        showBubble(msg);
     }
 
     /** Activity 是否还活着。后台线程回来碰 UI 前先查这个，销毁了就别动。 */
@@ -1941,6 +1953,7 @@ public class MainActivity extends Activity {
     // ================= UI =================
     private void buildUi() {
         getWindow().setBackgroundDrawable(new ColorDrawable(C_BG));
+        bubbleView = null;        // 旧 root 连同旧气泡一起被替换，这里只清引用
         root = new FrameLayout(this);
         root.setBackgroundColor(C_BG);
         if (bootHost != null) {
@@ -4869,7 +4882,7 @@ public class MainActivity extends Activity {
                 saveOrderKeys(); markSubjectsDirty();
                 saveSettings();
                 renderSettings();
-                Toast.makeText(MainActivity.this, "已恢复默认", Toast.LENGTH_SHORT).show();
+                toast("已恢复默认");
             }
         });
         LinearLayout.LayoutParams rlp = wrap();
@@ -5940,7 +5953,7 @@ public class MainActivity extends Activity {
         showCard();
     }
 
-    /** 屏幕中央浮出一张卡片，淡入停留后淡出。 */
+    /** 连点五下的彩蛋提示（也走统一气泡）。 */
     private void showCard() {
         showCard(HINT_TEXT);
     }
@@ -5956,36 +5969,9 @@ public class MainActivity extends Activity {
         showCard(pool[new java.util.Random().nextInt(pool.length)]);
     }
 
+    /** 启动问候语：和别的提示用同一种气泡，不再单独做一套居中的卡片。 */
     private void showCard(final String text) {
-        final TextView tv = new TextView(this);
-        tv.setText(text);
-        tv.setTextSize(m.subtitleSize - 0.5f);
-        tv.setTypeface(Typeface.DEFAULT_BOLD);
-        tv.setTextColor(C_HI);
-        tv.setGravity(Gravity.CENTER);
-        tv.setPadding(dp(12), dp(8), dp(12), dp(8));
-        tv.setMaxWidth((int) (getResources().getDisplayMetrics().widthPixels * 0.82f));
-        tv.setBackgroundDrawable(pill(0xFF151515));
-        tv.setAlpha(0f);
-        tv.setScaleX(0.85f);
-        tv.setScaleY(0.85f);
-
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.gravity = Gravity.CENTER;
-        root.addView(tv, lp);
-        tv.bringToFront();
-        tv.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(220).start();
-
-        tv.postDelayed(new Runnable() {
-            public void run() {
-                tv.animate().alpha(0f).setDuration(320).withEndAction(new Runnable() {
-                    public void run() {
-                        try { root.removeView(tv); } catch (Exception ignored) { }
-                    }
-                }).start();
-            }
-        }, 1700);
+        showBubble(text);
     }
 
     /** 先用首字母色块占位，头像下载成功再替换（网络差也不会空白）。 */
