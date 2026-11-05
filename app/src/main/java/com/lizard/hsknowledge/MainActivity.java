@@ -2099,9 +2099,10 @@ public class MainActivity extends Activity {
         dailyBtns.addView(dailyBtn("‹ 上一句", new View.OnClickListener() {
             public void onClick(View v) { stepDaily(-1); }
         }), new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        dailyBtnFav = dailyBtn("☆ 收藏", new View.OnClickListener() {
+        dailyBtnFav = dailyBtn("☆", new View.OnClickListener() {
             public void onClick(View v) { toggleDailyFavCurrent(); }
         });
+        dailyBtnFav.setTextSize(m.subtitleSize + 1.5f);   // 星要显眼，别的页面也是这颗星
         dailyBtns.addView(dailyBtnFav, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         dailyBtns.addView(dailyBtn("下一句 ›", new View.OnClickListener() {
             public void onClick(View v) { stepDaily(1); }
@@ -2853,8 +2854,8 @@ public class MainActivity extends Activity {
     private void paintDailyFav() {
         if (dailyBtnFav == null) return;
         boolean on = isDailyFav(currentDailyText());
-        dailyBtnFav.setText(on ? "★ 已收藏" : "☆ 收藏");
-        dailyBtnFav.setTextColor(on ? C_HI : C_PRIMARY);
+        dailyBtnFav.setText(on ? "★" : "☆");
+        dailyBtnFav.setTextColor(on ? C_HI : C_SUB);
     }
 
     private void toggleDailyFavCurrent() {
@@ -5535,6 +5536,17 @@ public class MainActivity extends Activity {
         "记得按时吃饭、按时睡觉，照顾好自己。",
         "忙里偷闲也是一种能力，休息好了再继续。"
     };
+    /** 使用技巧：界面上看不出来的操作，靠启动时随机出一条，久了能学会。 */
+    private static final String[] TIPS = {
+        "页面顶上的路径每一段都能点，想回哪一层就点哪一段。",
+        "返回键长按不放，可以一步回到首页。",
+        "从屏幕左边缘往右滑也能返回上一页（可在设置里开启）。",
+        "列表页上方那个搜索只搜当前这一层，想搜全部就回首页搜。",
+        "搜索不只看标题，正文里的字也能搜到。",
+        "分组那一行右边也有星星，点一下能把整块收进收藏。",
+        "必背篇目滑到最底下有「译文」，可以一句一句对着看。",
+        "科目顺序能在设置里上下移动，常用的放前面。"
+    };
     private static final String[] SPECIAL_TIPS = {
         "别太累了，我会心疼的，记得歇一歇。",
         "想你了，学习再忙也要记得休息哦。",
@@ -5965,8 +5977,14 @@ public class MainActivity extends Activity {
                 if (u.equalsIgnoreCase(ghLogin)) { special = true; break; }
             }
         }
-        String[] pool = special ? SPECIAL_TIPS : REST_TIPS;
-        showCard(pool[new java.util.Random().nextInt(pool.length)]);
+        String[] care = special ? SPECIAL_TIPS : REST_TIPS;
+        // 技巧占大头，关怀穿插：普通用户 80/20；有一类用户更想看关心的话，按 50/50。
+        int techPct = special ? 50 : 80;
+        java.util.Random r = new java.util.Random();
+        String text = (r.nextInt(100) < techPct)
+                ? TIPS[r.nextInt(TIPS.length)]
+                : care[r.nextInt(care.length)];
+        showCard(text);
     }
 
     /** 启动问候语：和别的提示用同一种气泡，不再单独做一套居中的卡片。 */
