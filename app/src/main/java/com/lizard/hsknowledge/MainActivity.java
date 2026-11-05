@@ -229,6 +229,8 @@ public class MainActivity extends Activity {
     private final List<String> dailyBackup = new ArrayList<String>();
     private boolean dailyRefreshing = false;
     private long dailySeq = 0;              // 每次刷新 +1，用来丢弃「已经取消掉」的在途结果
+    /** 最近一次做过「每日一句」跨天检查的日期（回到前台时判重用）。 */
+    private String dailyCheckedTag = "";
     private final List<Node> shownNodes = new ArrayList<Node>();
     private int detailBack = S_NODE;
     /** 当前详情页的附加内容块（例题、译文…）：有几块就画几个按钮，为空则都不画。 */
@@ -584,6 +586,7 @@ public class MainActivity extends Activity {
                 loadData();
                 loadMarks();
                 loadOrderKeys();
+                loadDailyMem();      // 上次取到的句子（重启后先拿它垫上，不至于一片空白）
                 runOnUiThread(new Runnable() {
                     public void run() { bootFinish(); }
                 });
@@ -1801,6 +1804,14 @@ public class MainActivity extends Activity {
                 public void run() { installApkWithRetry(0); }
             }, 300);
         }
+        // 跨天回到前台（App 在后台挂着过了夜）也要把当天那批刷出来；
+        // checkDailyForToday 自己按 daily_day_* 判重，同一天调多少次都只刷一次。
+        if (root != null && !todayTag().equals(dailyCheckedTag)) {
+            dailyCheckedTag = todayTag();
+            root.post(new Runnable() {
+                public void run() { checkDailyForToday(); }
+            });
+        }
     }
 
     @Override
@@ -2768,29 +2779,35 @@ public class MainActivity extends Activity {
         dailyBackup.clear();
         loadDailyStore();
         dailyTitle.setText("每日一句 · " + n.name);
-        // 句子只存在内存里（本次运行有效），不落盘：真正的来源永远是接口
-        List<String> mem = dailyMem.get(dailyKind);
-        dailyItems.clear();
-        if (mem != null) dailyItems.addAll(mem);
-        dailyIdx = 0;
-        if (dailyRefreshing || (dailyItems.isEmpty() && dailyLoadingKinds.contains(dailyKind)))
-            renderDailyLoading();
-        else renderDailyBody();
-        showScreen(S_DAILY);
+        // 句子来源是接口，但每天取到的那批会落盘（daily_last_*）：
+        // 「今天已经取过」就直接用这批，重启 App 也不会变成空白；跨天了才重新取。
         boolean fresh = todayTag().equals(prefs.getString("daily_day_" + dailyKind, ""));
-        if (dailyItems.isEmpty() || !fresh) refreshDaily(dailyKind, false);
-    }
-
-    /** showScreen 调到：页面已有内容就只重画，没有就先拿缓存/兜底垫上。 */
-    private void renderDaily() {
-        if (dailyItems.isEmpty()) {
+        dailyItems.clear();
+        if (fresh) {
             List<String> mem = dailyMem.get(dailyKind);
             if (mem != null) dailyItems.addAll(mem);
-            dailyIdx = 0;
+        }
+        dailyIdx = 0;
+        if (dailyItems.isEmpty()) refreshDaily(dailyKind, false);   // 跨天或首次：自动取一批
+        showScreen(S_DAILY);                                        // 由 renderDaily 画加载态或正文
+    }
+
+    /** showScreen 调到：页面已有内容就只重画，没有就先拿今天那批（含落盘恢复的）垫上。 */
+    private void renderDaily() {
+        boolean fresh = todayTag().equals(prefs.getString("daily_day_" + dailyKind, ""));
+        if (dailyItems.isEmpty() && fresh) {
+            List<String> mem = dailyMem.get(dailyKind);
+            if (mem != null) {
+                dailyItems.addAll(mem);
+                dailyIdx = 0;
+            }
         }
         if (dailyNode != null) dailyTitle.setText("每日一句 · " + dailyNode.name);
-        if (dailyRefreshing) renderDailyLoading();
-        else renderDailyBody();
+        if (dailyRefreshing || (dailyItems.isEmpty() && dailyLoadingKinds.contains(dailyKind))) {
+            renderDailyLoading();
+        } else {
+            renderDailyBody();
+        }
     }
 
     /** 点「换一批」：先把现在这批收进备份，页面换成加载态；拉到了就换新，失败/取消就还原。 */
@@ -2915,8 +2932,36 @@ public class MainActivity extends Activity {
         }
     }
 
-    private static String joinInts(List<Integer> list) {
+    /** 句子之间用 \u0001 分隔（句子正文里本来就有换行，不能用逗号或换行做分隔符）。 */
+    private static final String DAILY_SEP = "\u0001";
+
+    /** 把「今天这一批」写进 prefs：退出再进来先显示它，不用等网络。
+     *  以前只放内存（dailyMem），一重启就空，用户以为句子被删了。 */
+    private void saveDailyMem(String kind, List<String> list) {
+        if (kind == null || list == null) return;
         StringBuilder sb = new StringBuilder();
+        for (String s : list) {
+            if (s == null || s.length() == 0) continue;
+            if (sb.length() > 0) sb.append(DAILY_SEP);
+            sb.append(s);
+        }
+        prefs.edit().putString("daily_last_" + kind, sb.toString()).apply();
+    }
+
+    /** 启动时把上次那批读回内存（两类都读）。 */
+    private void loadDailyMem() {
+        for (String kind : new String[]{"phil", "poem"}) {
+            String raw = prefs.getString("daily_last_" + kind, "");
+            if (raw.length() == 0) continue;
+            List<String> list = new ArrayList<String>();
+            for (String s : raw.split(DAILY_SEP)) {
+                if (s.length() > 0) list.add(s);
+            }
+            if (!list.isEmpty()) dailyMem.put(kind, list);
+        }
+    }
+
+    private static String joinInts(List<Integer> list) {        StringBuilder sb = new StringBuilder();
         for (int i = 0; i < list.size(); i++) {
             if (i > 0) sb.append(',');
             sb.append(list.get(i));
@@ -3037,10 +3082,28 @@ public class MainActivity extends Activity {
                                 dailyIdx = 0;
                                 if (kind.equals(dailyKind) && screen == S_DAILY) renderDailyBody();
                                 toast("没取到句子，检查一下网络再试");
+                                return;
+                            }
+                            // 自动刷新失败：别把页面卡在「正在拉取」上，
+                            // 有上次那批就先垫上，没有就让人手动去点「换一批」
+                            if (kind.equals(dailyKind) && screen == S_DAILY) {
+                                if (dailyItems.isEmpty()) {
+                                    List<String> mem = dailyMem.get(kind);
+                                    if (mem != null) dailyItems.addAll(mem);
+                                }
+                                dailyIdx = 0;
+                                renderDailyBody();
+                                if (dailyItems.isEmpty()) {
+                                    dailyHint.setText("没连上网络，点下面「换一批」再试试");
+                                } else {
+                                    dailyHint.setText("网络没连上，这是上次那批 · 第 "
+                                            + (dailyIdx + 1) + " / " + dailyItems.size() + " 句");
+                                }
                             }
                             return;
                         }
                         dailyMem.put(kind, new ArrayList<String>(got));
+                        saveDailyMem(kind, got);            // 落盘：下次进来先用这批
                         markDailyDay(kind);
                         if (manual) toast("已换一批 · " + got.size() + " 句");
                         if (dailyRefreshing) dailyRefreshing = false;

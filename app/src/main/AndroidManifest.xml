@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.lizard.hsknowledge"
-    android:versionCode="130"
-    android:versionName="2.12.4">
+    android:versionCode="131"
+    android:versionName="2.12.5">
 
     <uses-sdk
         android:minSdkVersion="23"
