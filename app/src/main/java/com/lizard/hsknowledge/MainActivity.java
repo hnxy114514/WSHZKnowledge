@@ -4993,15 +4993,12 @@ public class MainActivity extends Activity {
         reset.setBackground(clickBg(C_PILL));
         reset.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                fontSizeSp = m.round ? 13f : 14f;
-                listSizeSp = m.round ? 14f : 15f;
-                prefs.edit().clear().apply();
-                orderKeys.clear();
-                for (String k : DEFAULT_ORDER) if (subjectMap.containsKey(k)) orderKeys.add(k);
-                saveOrderKeys(); markSubjectsDirty();
-                saveSettings();
-                renderSettings();
-                toast("已恢复默认");
+                // 误触代价太大（以前一点就直接执行，还连收藏一起清掉），先确认
+                confirmAction("恢复默认设置？",
+                        "字号、缩放、震动、右滑返回和科目顺序回到默认。收藏、浏览记录、每日一句和登录都保留。",
+                        "确认恢复", 0xFFE57373, new Runnable() {
+                            public void run() { resetSettingsToDefault(); }
+                        });
             }
         });
         LinearLayout.LayoutParams rlp = wrap();
@@ -5010,6 +5007,31 @@ public class MainActivity extends Activity {
         if (overDist() > 0) settingsInner.addView(makeScrollSpacer());
         if (keepY >= 0) scrollToY(settingsScroll, keepY);   // 重绘：回到原来的位置
         else scrollToTop(settingsScroll);                   // 首次进入：贴顶
+    }
+
+    /** 「恢复默认设置」：只重置设置类键值，收藏/历史/每日一句/登录这些用户数据一律不动。
+     *  以前是 prefs.edit().clear()，一点就把收藏和登录一起清了（用户反馈「全部东西都没了」）。 */
+    private void resetSettingsToDefault() {
+        prefs.edit()
+                .remove("font_size").remove("list_size").remove("title_size").remove("sub_size")
+                .remove("ui_scale")
+                .remove("swipe_back").remove("haptic")
+                .remove("subject_order")
+                .apply();
+        fontSizeSp = isRound ? 13f : 14f;
+        listSizeSp = isRound ? 14f : 15f;
+        titleSizeSp = 0f;
+        subSizeSp = 0f;
+        uiScale = 1f;
+        swipeBack = true;
+        haptic = true;
+        orderKeys.clear();
+        for (String k : DEFAULT_ORDER) if (subjectMap.containsKey(k)) orderKeys.add(k);
+        saveOrderKeys();
+        markSubjectsDirty();
+        toast("已恢复默认设置");
+        // 字号是建界面时的快照，改完必须就地重建，否则界面还是旧样子
+        applyDisplayChange(S_SETTINGS);
     }
 
     private TextView sectionHeader(String label) {
