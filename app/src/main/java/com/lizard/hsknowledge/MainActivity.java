@@ -292,7 +292,9 @@ public class MainActivity extends Activity {
     private boolean subjectDirty = true;
     private String lastQuery = null;
     private final boolean[] restoreNext = new boolean[SCREEN_COUNT];
-    private LinearLayout bootSplash;      // 启动开屏（数据就绪后被主界面替换）
+    private LinearLayout bootSplash;      // 启动开屏（数据就绪后淡出移除）
+    private FrameLayout bootHost;         // 开屏与主界面共用的容器
+    private boolean skipPageAnim = false; // 启动首屏不做淡入（开屏还盖着）
     private long bootStart = 0;
     private String loadError = null;   // 下一刻进入该页时回到离开时的位置（只有「返回上一级」才置）
 
@@ -517,8 +519,37 @@ public class MainActivity extends Activity {
         tp.topMargin = dp(9);
         box.addView(tip, tp);
 
+        // 开屏放进一个容器里（而不是直接 setContentView(box)）：
+        // 主界面建好后是「加进同一个容器、垫在开屏下面」，等它画完第一帧再撤开屏。
+        // 两次 setContentView 会先移除旧视图，中间必然露一帧窗口底色，看起来就是闪一下。
         bootSplash = box;
-        setContentView(box);
+        bootHost = new FrameLayout(this);
+        bootHost.setBackgroundColor(C_BG);
+        bootHost.addView(box, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        setContentView(bootHost);
+    }
+
+    /** 主界面画完第一帧再撤开屏：先淡出再移除，任何一帧都不会露底。 */
+    private void hideBootSplash() {
+        if (bootHost == null || bootSplash == null) return;
+        final FrameLayout host = bootHost;
+        final View splash = bootSplash;
+        bootSplash = null;
+        bootHost = null;
+        root.getViewTreeObserver().addOnPreDrawListener(
+                new android.view.ViewTreeObserver.OnPreDrawListener() {
+                    public boolean onPreDraw() {
+                        root.getViewTreeObserver().removeOnPreDrawListener(this);
+                        splash.animate().alpha(0f).setDuration(150).start();
+                        host.postDelayed(new Runnable() {
+                            public void run() {
+                                if (splash.getParent() == host) host.removeView(splash);
+                            }
+                        }, 170);
+                        return true;
+                    }
+                });
     }
 
     /** 子线程读数据：assets 里的 JSON 解析不碰任何 View。 */
@@ -549,15 +580,16 @@ public class MainActivity extends Activity {
     /** 建界面、定首屏、挂后台任务。开屏在这里被主界面替换。 */
     private void enterApp() {
         if (isFinishing() || isDestroyed()) return;
-        buildUi();               // 内部会 setContentView(root)，开屏随之替换掉
-        bootSplash = null;
+        buildUi();               // 有开屏容器时，root 是垫在开屏下面加进去的
         boolean tuned = prefs.getBoolean("display_tuned", false);
         if (!tuned) tuningFirstRun = true;
+        skipPageAnim = true;     // 首屏直接显示，不做淡入（开屏还在上面盖着）
         if (!tuned) {
             showScreen(S_DISPLAY);       // 第一次装：先进显示调节，让用户把字号调舒服
         } else {
             showScreen(S_SUBJECT);
         }
+        hideBootSplash();
         if (loadError != null) {
             toast("数据加载失败：" + loadError);
             loadError = null;
@@ -1911,7 +1943,12 @@ public class MainActivity extends Activity {
         getWindow().setBackgroundDrawable(new ColorDrawable(C_BG));
         root = new FrameLayout(this);
         root.setBackgroundColor(C_BG);
-        setContentView(root);
+        if (bootHost != null) {
+            bootHost.addView(root, 0, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        } else {
+            setContentView(root);
+        }
 
         subjectScreen = newScreen();
         nodeScreen = newScreen();
@@ -5045,10 +5082,16 @@ public class MainActivity extends Activity {
         // 动画的起点状态先摆好，但**不在这里启动**：这一页的内容（列表绑定、详情卡片重建）
         // 是在下面才渲染的，渲染期间如果已经可见，会露出「空页面 → 内容突然出现」的闪屏。
         // 所以先设成全透明（alpha 0，用户看不到中间态），等本帧渲染完、下一帧再淡入。
-        boolean animate = !shown;
+        boolean animate = !shown && !skipPageAnim;
+        skipPageAnim = false;
         float dx = 0f, dy = 0f;
         if (shown) {
             // 已经在位（例如右滑返回时上一页已跟手归位），别再动它，免得跳一下
+            target.setTranslationX(0f);
+            target.setTranslationY(0f);
+            target.setAlpha(1f);
+        } else if (!animate) {
+            // 启动首屏：开屏还盖在上面，这里必须直接满不透明，不能再淡入
             target.setTranslationX(0f);
             target.setTranslationY(0f);
             target.setAlpha(1f);
