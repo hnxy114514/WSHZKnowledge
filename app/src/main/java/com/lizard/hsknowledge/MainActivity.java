@@ -3122,12 +3122,9 @@ public class MainActivity extends Activity {
 
     /** 长按科目：把这个科目下的收藏一次取消（先确认，避免误触）。 */
     private void confirmClearSubjectFav(final String name) {
-        new AlertDialog.Builder(this)
-                .setTitle("取消收藏")
-                .setMessage("把「" + name + "」下的收藏全部取消？")
-                .setNegativeButton("再想想", null)
-                .setPositiveButton("取消收藏", new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int w) {
+        confirmAction("取消收藏？", "把「" + name + "」下的收藏全部取消？", "确认取消收藏", 0xFFFFB74D,
+                new Runnable() {
+                    public void run() {
                         for (String id : new ArrayList<String>(favIds)) {
                             Node n = nodeOf(id);
                             if (n != null && n.subj != null && n.subj.name.equals(name)) {
@@ -3140,18 +3137,14 @@ public class MainActivity extends Activity {
                         toast("已取消收藏");
                         renderFav();
                     }
-                })
-                .show();
+                });
     }
 
     /** 长按「每日一句」：把句子的收藏一次取消，没人引用的文本一并清掉。 */
     private void confirmClearDailyFav() {
-        new AlertDialog.Builder(this)
-                .setTitle("取消收藏")
-                .setMessage("把「每日一句」的收藏全部取消？")
-                .setNegativeButton("再想想", null)
-                .setPositiveButton("取消收藏", new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface d, int w) {
+        confirmAction("取消收藏？", "把「每日一句」的收藏全部取消？", "确认取消收藏", 0xFFFFB74D,
+                new Runnable() {
+                    public void run() {
                         loadDailyStore();
                         List<Integer> olds = new ArrayList<Integer>(dailyFav);
                         dailyFav.clear();
@@ -3160,8 +3153,7 @@ public class MainActivity extends Activity {
                         toast("已取消收藏");
                         renderFav();
                     }
-                })
-                .show();
+                });
     }
 
     /** 收藏页第二级：该科目下所有收藏节点，倒序平铺，每行带短路径小字。
@@ -4780,6 +4772,9 @@ public class MainActivity extends Activity {
 
     // ================= 设置页（分类） =================
     private void renderSettings() {
+        // 原地重绘（调科目顺序、切开关）时保住当前滚动位置：以前末尾无条件 scrollToTop，
+        // 点一次 ▲▼ 就被弹回最上面，得重新往下滑到排序那一块才能接着调。
+        int keepY = (settingsInner.getChildCount() > 0) ? settingsScroll.getScrollY() : -1;
         settingsInner.removeAllViews();
         if (overDist() > 0) settingsInner.addView(makeScrollSpacer());
         settingsInner.addView(settingsBackBtn, wrapM());
@@ -5013,7 +5008,8 @@ public class MainActivity extends Activity {
         rlp.topMargin = dp(12);
         settingsInner.addView(reset, rlp);
         if (overDist() > 0) settingsInner.addView(makeScrollSpacer());
-        scrollToTop(settingsScroll);
+        if (keepY >= 0) scrollToY(settingsScroll, keepY);   // 重绘：回到原来的位置
+        else scrollToTop(settingsScroll);                   // 首次进入：贴顶
     }
 
     private TextView sectionHeader(String label) {
@@ -5281,6 +5277,7 @@ public class MainActivity extends Activity {
             }
         } else if (s == S_SETTINGS) {
             renderSettings();
+            scrollToTop(settingsScroll);   // 进这一页从顶部开始；页内改排序/开关由 renderSettings 自己保位
         } else if (s == S_SEARCH) {
             // 关键词没变就不重设数据，返回时列表位置不会跳回顶部
             String q = gSearchBox.getText().toString().trim();
@@ -8262,7 +8259,7 @@ public class MainActivity extends Activity {
     }
 
     private void confirmWithdrawIssue(final JSONObject issue) {
-        confirmIssueAction("撤回这条反馈？",
+        confirmAction("撤回这条反馈？",
                 "撤回后它会关闭，开发者不再处理；需要的话可以再重新提一条。",
                 "确认撤回", 0xFFFFB74D, new Runnable() {
                     public void run() { withdrawIssue(issue); }
@@ -8298,7 +8295,7 @@ public class MainActivity extends Activity {
     }
 
     private void confirmDeleteIssue(final JSONObject issue) {
-        confirmIssueAction("删除 #" + issue.optInt("number") + "？",
+        confirmAction("删除 #" + issue.optInt("number") + "？",
                 "会直接从仓库里删掉这条反馈，删完找不回来。",
                 "确认删除", 0xFFE57373, new Runnable() {
                     public void run() { deleteIssue(issue); }
@@ -8332,7 +8329,7 @@ public class MainActivity extends Activity {
     }
 
     /** 危险操作前先确认一次，避免手滑。 */
-    private void confirmIssueAction(String title, String msg, String okText, int okColor,
+    private void confirmAction(String title, String msg, String okText, int okColor,
                                     final Runnable yes) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
