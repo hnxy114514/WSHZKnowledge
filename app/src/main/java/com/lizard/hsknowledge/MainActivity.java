@@ -155,12 +155,17 @@ public class MainActivity extends Activity {
             for (ExtraBlock b : extras) if (b.mark != null && b.mark.length() > 0) set.add(b.mark);
             return TextUtils.join("/", set);
         }
-        /** 面包屑/收藏页显示的完整路径，由父链现算，不写死层数。 */
+        /** 面包屑/收藏页显示的完整路径，由父链现算，不写死层数。
+         *  节点建好后父子关系不再变，所以算一次存起来：列表滚动时每行都要用，别反复拼。 */
+        private String pathCache;
+
         String path() {
+            if (pathCache != null) return pathCache;
             ArrayList<String> seg = new ArrayList<String>();
             for (Node p = parent; p != null; p = p.parent) seg.add(0, p.name);
             if (subj != null) seg.add(0, subj.name);
-            return TextUtils.join(" › ", seg);
+            pathCache = TextUtils.join(" › ", seg);
+            return pathCache;
         }
     }
     static class Subject { String key, name; List<Node> roots = new ArrayList<Node>(); }
@@ -168,6 +173,8 @@ public class MainActivity extends Activity {
     private final List<Subject> subjects = new ArrayList<Subject>();
     private final Map<String, Subject> subjectMap = new HashMap<String, Subject>();
     private final List<Node> allHits = new ArrayList<Node>();
+    /** 日期 → 当天修改过的叶子，读数据时建一次：「今日新增」直接取，不再每次全表扫。 */
+    private final Map<String, List<Node>> nodesByDate = new LinkedHashMap<String, List<Node>>();
     private final List<Node> searchHits = new ArrayList<Node>();
 
     // ---------- 导航 ----------
@@ -755,8 +762,19 @@ public class MainActivity extends Activity {
 
     private void collectLeaves(List<Node> nodes) {
         for (Node n : nodes) {
-            if (n.isLeaf()) allHits.add(n);
-            else collectLeaves(n.children);
+            if (n.isLeaf()) {
+                allHits.add(n);
+                if (n.d != null && n.d.length() > 0) {
+                    List<Node> bucket = nodesByDate.get(n.d);
+                    if (bucket == null) {
+                        bucket = new ArrayList<Node>();
+                        nodesByDate.put(n.d, bucket);
+                    }
+                    bucket.add(n);
+                }
+            } else {
+                collectLeaves(n.children);
+            }
         }
     }
 
@@ -2311,7 +2329,9 @@ public class MainActivity extends Activity {
      *  · 圆屏首尾各加一段透明占位，首尾内容能滑到屏幕中间；
      *  · 大列表分页：首屏 30 行，滚到还剩约一屏时续载下一批 40 行，每帧只追加 15 行，滑动不顿。 */
     private class SvList {
-        private final int first = 30, page = 40, chunk = 15;
+        // 首屏 12 行（手表一屏约五六行，够铺两屏）、每次续载 24 行、每帧最多插 6 行。
+        // 行是复杂 View（多 span + 卡片），一帧塞太多会掉帧；6 行基本在 16ms 内。
+        private final int first = 12, page = 24, chunk = 6;
         final OverScrollScrollView sc;
         final LinearLayout box;
         private final List<View> heads = new ArrayList<View>();
@@ -6232,12 +6252,11 @@ public class MainActivity extends Activity {
 
         String today = new java.text.SimpleDateFormat("yyMMdd", java.util.Locale.US)
                 .format(new java.util.Date());
+        // 直接查日期索引：不再为了拿「今天有哪些」把一千多个节点扫一遍
+        boolean hasToday = nodesByDate.containsKey(today);
         String newest = "";
-        boolean hasToday = false;
-        for (Node n : allHits) {
-            if (n.d == null || n.d.length() == 0) continue;
-            if (n.d.equals(today)) hasToday = true;
-            if (newest.length() == 0 || n.d.compareTo(newest) > 0) newest = n.d;
+        for (String d : nodesByDate.keySet()) {
+            if (newest.length() == 0 || d.compareTo(newest) > 0) newest = d;
         }
         // 今天有新增就只显示今天的，「看最近一批」这个开关自动失效；
         // 今天没有时才允许退回历史上最近的一批
@@ -6247,10 +6266,8 @@ public class MainActivity extends Activity {
         todayBuiltFor = today;
 
         if (pick.length() > 0) {
-            for (Node n : allHits) {
-                if (n.d == null || !n.d.equals(pick)) continue;
-                todayAll.add(n);
-            }
+            List<Node> bucket = nodesByDate.get(pick);
+            if (bucket != null) todayAll.addAll(bucket);
         }
 
         String newestLabel = (newest.length() == 6)
@@ -6268,6 +6285,9 @@ public class MainActivity extends Activity {
         todayList.fill = new Runnable() {
             public void run() { loadMoreToday(); }
         };
+        // 先垫一批数据再 bind：今日新增的行来自 todayShown，不先填就是空列表
+        // （以前只有滚动触发续载才填，首次进来是空的）
+        loadMoreToday();
         todayList.bind(new RowSource() {
             public int size() { return todayShown.size(); }
             public View make(final int i) {
