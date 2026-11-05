@@ -422,6 +422,11 @@ public class MainActivity extends Activity {
     private boolean swipeFromInput = false;  // 起手点在输入框内
     private View swipeView;                  // 正在被拖动的当前页
     private View swipePrev;                  // 下面露出的上一级页面（预览）
+    private View swipeGhost;                 // 同页换层时顶在上面的快照（跟着手指走）
+    private boolean swipeSame = false;       // 本次拖动是「同一页内退一层」（分组回退）
+    private Node swipePopped = null;         // 已弹出的分组节点（没滑够要放回去）
+    private int swipeOldY = -1;              // 拖动前列表的滚动位置
+    private String swipeQuery = null;        // 拖动前「本级搜索」的关键词（取消时还原）
     private float swipeX, swipeY;
     private List<String> orderKeys = new ArrayList<String>();
     private static final String[] DEFAULT_ORDER = {"chinese", "math", "english", "physics", "chem", "bio", "politics", "history", "geography"};
@@ -5430,13 +5435,18 @@ public class MainActivity extends Activity {
                     // 起手必须在左侧 1/4 内（输入框内更严格，避免拖动光标被当成返回）
                     float zone = swipeFromInput ? dp(18) : swipeZone();
                     if (screen != S_SUBJECT && swipeX <= zone && dx > dp(16) && dx > dy * 1.5f) {
-                        swipeActive = true;
-                        swipeView = currentScreenView();
-                        swipeView.animate().cancel();
-                        preparePrev(swipeView);
+                        View cur = currentScreenView();
+                        if (cur != null) {
+                            cur.animate().cancel();
+                            boolean ok = preparePrev(cur);
+                            swipeActive = true;
+                            // 没拍出预览也照样跟手：松手仍然返回，只是没有拖动预览
+                            if (ok && swipeView == null) swipeView = cur;
+                        }
                     }
                 }
-                if (swipeActive && swipeView != null) {
+                if (swipeActive) {
+                    if (swipeView == null) return true;            // 没有可跟手的页，先把手势吃掉
                     float d = Math.max(0f, dx);
                     float w = Math.max(1f, swipeView.getWidth());
                     swipeView.setTranslationX(d);                  // 当前页跟手右移
@@ -5451,7 +5461,12 @@ public class MainActivity extends Activity {
                     swipeTracking = false;
                     swipeActive = false;
                     float need = swipeFromInput ? dp(80) : dp(46);
-                    if (ev.getX() - swipeX > need) finishSwipe(); else resetSwipe();
+                    boolean far = ev.getX() - swipeX > need;
+                    if (swipeView == null) {
+                        if (far) handleBack();
+                        return true;
+                    }
+                    if (far) finishSwipe(); else resetSwipe();
                     return true;
                 }
                 swipeTracking = false;
@@ -5511,11 +5526,55 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 拖动开始时把上一级页面放到当前页下面，并左移一点做视差预览。 */
-    private void preparePrev(View cur) {
-        int t = backTarget();
-        View prev = (t >= 0) ? screenView(t) : null;
+    /** 右滑要落到哪一页；-1 表示这次返回仍留在本页（分组回退，只换列表内容）。 */
+    private int previewTarget() {
+        if (screen == S_NODE) {
+            if (!navStack.isEmpty()) return -1;             // 还有上级分组：本页内换层
+            if (nodeEntryBack >= 0) return nodeEntryBack;   // 从收藏/搜索等进来：退回那一页
+            return S_SUBJECT;
+        }
+        return backTarget();
+    }
+
+    /** 拖动开始时把上一级页面放到当前页下面，并左移一点做视差预览。
+     *  返回 false 表示这次没什么可露出（不跟手，交给子视图照常处理）。 */
+    private boolean preparePrev(View cur) {
+        swipePrev = null;
+        swipeGhost = null;
+        swipeSame = false;
+        swipePopped = null;
+        swipeOldY = -1;
+        swipeQuery = null;
         float w = (root != null && root.getWidth() > 0) ? root.getWidth() : cur.getWidth();
+        int t = previewTarget();
+        if (t < 0) {
+            // 分组回退：落点还是这一页，只是列表要换成上一级。
+            // 把当前画面拍成快照顶在上面当「被拖走的页」，底下先把上一级渲染好，
+            // 拖的时候看到的就是真正要退回去的那一层，不会先闪一下主页再跳。
+            ImageView ghost = snapshot(cur);
+            if (ghost == null || nodeList == null || nodeList.sc == null) {
+                removeGhost(ghost);
+                return false;
+            }
+            swipeOldY = nodeList.sc.getScrollY();
+            swipeQuery = itemSearchBox.getText().toString();
+            swipePopped = navStack.remove(navStack.size() - 1);
+            curNode = navStack.isEmpty() ? null : navStack.get(navStack.size() - 1);
+            renderNodes();
+            nodeList.enter();
+            cur.animate().cancel();
+            cur.setAlpha(1f);
+            cur.setTranslationX(-w * PREV_PARALLAX);
+            swipePrev = cur;
+            swipeGhost = ghost;
+            swipeSame = true;
+            swipeView = ghost;
+            cur.bringToFront();       // 上一级在下面
+            ghost.bringToFront();     // 快照压在最上面
+            ensureOverlaysOnTop();
+            return true;
+        }
+        View prev = (t >= 0) ? screenView(t) : null;
         if (prev != null && prev != cur) {
             prev.animate().cancel();
             prev.setVisibility(View.VISIBLE);
@@ -5523,27 +5582,74 @@ public class MainActivity extends Activity {
             prev.setTranslationX(-w * PREV_PARALLAX);
             prev.bringToFront();      // 先放下面一层
             swipePrev = prev;
-        } else {
-            swipePrev = null;
         }
         cur.bringToFront();           // 当前页始终在最上层
         ensureOverlaysOnTop();
+        return true;
+    }
+
+    /** 把当前页画成一张位图盖回原处：同页换层时用它当「正在拖走的页」。 */
+    private ImageView snapshot(View v) {
+        int w = v.getWidth(), h = v.getHeight();
+        if (w <= 0 || h <= 0) return null;
+        try {
+            Bitmap bm = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            v.draw(new Canvas(bm));
+            ImageView iv = new ImageView(this);
+            iv.setImageBitmap(bm);
+            iv.setScaleType(ImageView.ScaleType.FIT_XY);
+            root.addView(iv, fp());
+            return iv;
+        } catch (Throwable e) {
+            return null;
+        }
+    }
+
+    private void removeGhost(View ghost) {
+        if (ghost == null) return;
+        if (ghost.getParent() instanceof ViewGroup) {
+            ((ViewGroup) ghost.getParent()).removeView(ghost);
+        }
+        if (ghost instanceof ImageView) ((ImageView) ghost).setImageDrawable(null);
     }
 
     /** 松手过阈值：当前页滑出、预览页归位，随后真正切页。 */
     private void finishSwipe() {
         final View v = swipeView;
         final View prev = swipePrev;
+        final View ghost = swipeGhost;
+        final boolean same = swipeSame;
         swipeView = null;
         swipePrev = null;
+        swipeGhost = null;
+        swipeSame = false;
+        swipePopped = null;
+        swipeQuery = null;
         if (v == null) return;
         swipeBusy = true;
         float w = Math.max(v.getWidth(), dp(80));
         v.animate().translationX(w).alpha(0.85f).setDuration(170)
                 .withEndAction(new Runnable() {
                     public void run() {
+                        if (same) {
+                            // 同页换层：底下已经是退回后的那一层，收掉快照就完事
+                            if (prev != null) {
+                                prev.animate().cancel();
+                                prev.setTranslationX(0f);
+                            }
+                            removeGhost(ghost);
+                            swipeBusy = false;
+                            ensureOverlaysOnTop();
+                            return;
+                        }
                         v.setTranslationX(0f);
                         v.setAlpha(1f);
+                        if (prev != null) {
+                            // 预览页先归位并停掉动画：切页时它已经在位，不会再淡入一下
+                            prev.animate().cancel();
+                            prev.setTranslationX(0f);
+                            prev.setAlpha(1f);
+                        }
                         swipeBusy = false;
                         handleBack();
                     }
@@ -5557,19 +5663,54 @@ public class MainActivity extends Activity {
     private void resetSwipe() {
         final View v = swipeView;
         final View prev = swipePrev;
+        final View ghost = swipeGhost;
+        final boolean same = swipeSame;
+        final Node popped = swipePopped;
+        final int oldY = swipeOldY;
+        final String query = swipeQuery;
         swipeView = null;
         swipePrev = null;
+        swipeGhost = null;
+        swipeSame = false;
+        swipePopped = null;
+        swipeOldY = -1;
+        swipeQuery = null;
         if (v == null) return;
         swipeBusy = true;
         float w = Math.max(v.getWidth(), dp(80));
         v.animate().translationX(0f).alpha(1f).setDuration(160)
                 .withEndAction(new Runnable() {
                     public void run() {
+                        if (same) {
+                            // 没滑够：层级退回去、列表重建成原来那层，再把快照换下来
+                            if (popped != null) {
+                                navStack.add(popped);
+                                curNode = popped;
+                            }
+                            renderNodes();
+                            // 本级搜索的关键词原来被 renderNodes 清掉了，退回时还原
+                            if (query != null && query.length() > 0) itemSearchBox.setText(query);
+                            nodeList.savedY = oldY;
+                            nodeList.restore();
+                            if (prev != null) {
+                                prev.animate().cancel();
+                                prev.setTranslationX(0f);
+                            }
+                            // 行是分帧加的：等第一屏画好再撤快照，否则会闪一下空列表
+                            ghost.postDelayed(new Runnable() {
+                                public void run() {
+                                    removeGhost(ghost);
+                                    swipeBusy = false;
+                                    ensureOverlaysOnTop();
+                                }
+                            }, 70);
+                            return;
+                        }
                         swipeBusy = false;
                         ensureOverlaysOnTop();
                     }
                 }).start();
-        if (prev != null) {
+        if (prev != null && !same) {
             prev.animate().translationX(-w * PREV_PARALLAX).setDuration(160)
                     .withEndAction(new Runnable() {
                         public void run() {
