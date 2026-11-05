@@ -542,12 +542,19 @@ public class MainActivity extends Activity {
                 new android.view.ViewTreeObserver.OnPreDrawListener() {
                     public boolean onPreDraw() {
                         root.getViewTreeObserver().removeOnPreDrawListener(this);
-                        splash.animate().alpha(0f).setDuration(150).start();
+                        // 开屏淡出 + 轻微放大，主界面同时从 0.98 回到 1：两层一起动才有「揭开」的感觉
+                        root.setScaleX(0.98f);
+                        root.setScaleY(0.98f);
+                        root.animate().scaleX(1f).scaleY(1f).setDuration(340)
+                                .setInterpolator(new DecelerateInterpolator(1.4f)).start();
+                        splash.animate().alpha(0f).scaleX(1.06f).scaleY(1.06f)
+                                .setDuration(280)
+                                .setInterpolator(new DecelerateInterpolator(1.4f)).start();
                         host.postDelayed(new Runnable() {
                             public void run() {
                                 if (splash.getParent() == host) host.removeView(splash);
                             }
-                        }, 170);
+                        }, 300);
                         return true;
                     }
                 });
@@ -2017,6 +2024,13 @@ public class MainActivity extends Activity {
         }));
         favTitle = pageTitle("我的收藏");
         favList.addHead(favTitle);
+        TextView favTip = new TextView(this);
+        favTip.setText("长按可取消收藏");
+        favTip.setTextSize(m.subtitleSize - 2.5f);
+        favTip.setTextColor(C_SUB);
+        favTip.setGravity(Gravity.CENTER);
+        favTip.setPadding(0, 0, 0, dp(6));
+        favList.addHead(favTip);
         favScreen.addView(favList.sc, lw());
         root.addView(favScreen, fp());
 
@@ -3058,25 +3072,85 @@ public class MainActivity extends Activity {
             public int size() { return subs.isEmpty() ? (extra > 0 ? 1 : 1) : subs.size() + extra; }
             public View make(final int i) {
                 if (extra > 0 && i == 0) {
-                    return textRow("每日一句  (" + sentCount + ")", C_PRIMARY, new Runnable() {
+                    View row = textRow("每日一句  (" + sentCount + ")", C_PRIMARY, new Runnable() {
                         public void run() {
                             sentMode = "fav";
                             showScreen(S_SENT);
                         }
                     });
+                    row.setOnLongClickListener(new View.OnLongClickListener() {
+                        public boolean onLongClick(View v) {
+                            vibrate();
+                            confirmClearDailyFav();
+                            return true;
+                        }
+                    });
+                    return row;
                 }
                 if (subs.isEmpty()) return textRow("还没有收藏任何内容", C_SUB, null);
                 final int idx = i - extra;
                 final String name = subs.get(idx);
-                return textRow(name + "  (" + counts.get(name) + ")", C_PRIMARY, new Runnable() {
+                View row = textRow(name + "  (" + counts.get(name) + ")", C_PRIMARY, new Runnable() {
                     public void run() {
                         favSubKey = subjectKeyOf(name);
                         favSubTitle.setText(name + " · 我的收藏");
                         showScreen(S_FAV_SUB);
                     }
                 });
+                row.setOnLongClickListener(new View.OnLongClickListener() {
+                    public boolean onLongClick(View v) {
+                        vibrate();
+                        confirmClearSubjectFav(name);
+                        return true;
+                    }
+                });
+                return row;
             }
         });
+    }
+
+    /** 长按科目：把这个科目下的收藏一次取消（先确认，避免误触）。 */
+    private void confirmClearSubjectFav(final String name) {
+        new AlertDialog.Builder(this)
+                .setTitle("取消收藏")
+                .setMessage("把「" + name + "」下的收藏全部取消？")
+                .setNegativeButton("再想想", null)
+                .setPositiveButton("取消收藏", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        for (String id : new ArrayList<String>(favIds)) {
+                            Node n = nodeOf(id);
+                            if (n != null && n.subj != null && n.subj.name.equals(name)) {
+                                favIds.remove(id);
+                                Node p = nodeOf(id);
+                                if (p != null) p.savedY = -1;
+                            }
+                        }
+                        saveFav();
+                        toast("已取消收藏");
+                        renderFav();
+                    }
+                })
+                .show();
+    }
+
+    /** 长按「每日一句」：把句子的收藏一次取消，没人引用的文本一并清掉。 */
+    private void confirmClearDailyFav() {
+        new AlertDialog.Builder(this)
+                .setTitle("取消收藏")
+                .setMessage("把「每日一句」的收藏全部取消？")
+                .setNegativeButton("再想想", null)
+                .setPositiveButton("取消收藏", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        loadDailyStore();
+                        List<Integer> olds = new ArrayList<Integer>(dailyFav);
+                        dailyFav.clear();
+                        for (int no : olds) dropDailyIfUnused(no);
+                        saveDailyStore();
+                        toast("已取消收藏");
+                        renderFav();
+                    }
+                })
+                .show();
     }
 
     /** 收藏页第二级：该科目下所有收藏节点，倒序平铺，每行带短路径小字。 */
@@ -4680,7 +4754,7 @@ public class MainActivity extends Activity {
         settingsInner.addView(displayEntry, wrap());
 
         TextView displayHint = new TextView(this);
-        displayHint.setText("正文字号、列表字号、标题字号、说明小字与整体界面缩放，都在这里用滑块调，带实时预览。");
+        displayHint.setText("调整字号和整体缩放。");
         displayHint.setTextSize(m.subtitleSize - 2f);
         displayHint.setTextColor(C_SUB);
         displayHint.setGravity(Gravity.CENTER);
@@ -4695,7 +4769,7 @@ public class MainActivity extends Activity {
             }
         }), wrap());
         TextView hapticHint = new TextView(this);
-        hapticHint.setText("点击列表、返回、开关等交互时轻微震动一下，作为触感反馈。");
+        hapticHint.setText("点击时轻微震动。");
         hapticHint.setTextSize(m.subtitleSize - 2f);
         hapticHint.setTextColor(C_SUB);
         hapticHint.setGravity(Gravity.CENTER);
@@ -4710,7 +4784,7 @@ public class MainActivity extends Activity {
             }
         }), wrap());
         TextView swipeHint = new TextView(this);
-        swipeHint.setText("从屏幕左侧 1/4 内向右拖动：当前页跟手滑出、露出上一页预览，滑到一半以上松手即返回，不够则弹回。查看大图时不生效，需点「‹ 关闭」。");
+        swipeHint.setText("从左边缘向右滑，返回上一页。");
         swipeHint.setTextSize(m.subtitleSize - 2f);
         swipeHint.setTextColor(C_SUB);
         swipeHint.setGravity(Gravity.CENTER);
@@ -4734,7 +4808,7 @@ public class MainActivity extends Activity {
         settingsInner.addView(upd, wrap());
 
         TextView updHint = new TextView(this);
-        updHint.setText("直连不通会自动换镜像下载；下载时屏幕中央显示进度与下载源，完成后自动打开安装。");
+        updHint.setText("下载并安装新版本。");
         updHint.setTextSize(m.subtitleSize - 2f);
         updHint.setTextColor(C_SUB);
         updHint.setGravity(Gravity.CENTER);
@@ -4755,7 +4829,7 @@ public class MainActivity extends Activity {
         fbLp.topMargin = dp(6);
         settingsInner.addView(fbEntry, fbLp);
         TextView fbHint = new TextView(this);
-        fbHint.setText("反馈会以 Issue 形式提交到项目的 GitHub 仓库，需先在手机浏览器完成一次登录授权。");
+        fbHint.setText("提交问题或建议，需要 GitHub 账号。");
         fbHint.setTextSize(m.subtitleSize - 2f);
         fbHint.setTextColor(C_SUB);
         fbHint.setGravity(Gravity.CENTER);
@@ -4778,7 +4852,7 @@ public class MainActivity extends Activity {
         settingsInner.addView(profEntry, wrap());
 
         TextView orderHint = new TextView(this);
-        orderHint.setText("主页科目顺序（点 ↑↓ 调整，自动保存）");
+        orderHint.setText("主页科目顺序，点 ↑↓ 调整。");
         orderHint.setTextSize(m.subtitleSize - 2f);
         orderHint.setTextColor(C_SUB);
         orderHint.setGravity(Gravity.CENTER);
@@ -4804,7 +4878,7 @@ public class MainActivity extends Activity {
             }
         }), logLp);
         TextView logHint = new TextView(this);
-        logHint.setText("平时不记录；开启后把运行日志存在本机，提交反馈时可附带，方便排查问题。");
+        logHint.setText("开启后在本机记录运行日志，方便排查问题。");
         logHint.setTextSize(m.subtitleSize - 2f);
         logHint.setTextColor(C_SUB);
         logHint.setGravity(Gravity.CENTER);
@@ -4859,7 +4933,7 @@ public class MainActivity extends Activity {
         });
         settingsInner.addView(aboutEntry, wrap());
         TextView aboutHint = new TextView(this);
-        aboutHint.setText("版本信息、更新日志、感谢名单。");
+        aboutHint.setText("版本、更新日志与感谢名单。");
         aboutHint.setTextSize(m.subtitleSize - 2f);
         aboutHint.setTextColor(C_SUB);
         aboutHint.setGravity(Gravity.CENTER);
