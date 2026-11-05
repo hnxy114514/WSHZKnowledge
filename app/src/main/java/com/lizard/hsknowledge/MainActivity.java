@@ -352,6 +352,17 @@ public class MainActivity extends Activity {
         });
     }
 
+    /** 列表顶部的灰色操作提示（收藏页的长按说明等），只有一句、居中。 */
+    private TextView grayTip(String text) {
+        TextView t = new TextView(this);
+        t.setText(text);
+        t.setTextSize(m.subtitleSize - 2.5f);
+        t.setTextColor(C_SUB);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(0, 0, 0, dp(6));
+        return t;
+    }
+
     /** 收藏页第一级点进的科目。 */
     private String favSubKey = "";
     private static final int HIST_MAX = 50;
@@ -2029,13 +2040,7 @@ public class MainActivity extends Activity {
         }));
         favTitle = pageTitle("我的收藏");
         favList.addHead(favTitle);
-        TextView favTip = new TextView(this);
-        favTip.setText("长按可取消收藏");
-        favTip.setTextSize(m.subtitleSize - 2.5f);
-        favTip.setTextColor(C_SUB);
-        favTip.setGravity(Gravity.CENTER);
-        favTip.setPadding(0, 0, 0, dp(6));
-        favList.addHead(favTip);
+        favList.addHead(grayTip("长按可取消收藏"));
         favScreen.addView(favList.sc, lw());
         root.addView(favScreen, fp());
 
@@ -2046,6 +2051,7 @@ public class MainActivity extends Activity {
         }));
         favSubTitle = pageTitle("我的收藏");
         favSubList.addHead(favSubTitle);
+        favSubList.addHead(grayTip("长按可取消这一条"));
         favSubScreen.addView(favSubList.sc, lw());
         root.addView(favSubScreen, fp());
 
@@ -3158,7 +3164,8 @@ public class MainActivity extends Activity {
                 .show();
     }
 
-    /** 收藏页第二级：该科目下所有收藏节点，倒序平铺，每行带短路径小字。 */
+    /** 收藏页第二级：该科目下所有收藏节点，倒序平铺，每行带短路径小字。
+     *  长按任意一行就取消这一条的收藏（和每日一句那边的长按是同一套操作）。 */
     private void renderFavSub() {
         final List<Node> rows = new ArrayList<Node>();
         for (String id : favIds) {
@@ -3169,9 +3176,46 @@ public class MainActivity extends Activity {
         favSubList.bind(new RowSource() {
             public int size() { return rows.size(); }
             public View make(final int i) {
-                return nodeHitRow(rows.get(i), S_FAV_SUB);
+                final Node n = rows.get(i);
+                View row = nodeHitRow(n, S_FAV_SUB);
+                row.setOnLongClickListener(new View.OnLongClickListener() {
+                    public boolean onLongClick(View v) {
+                        vibrate();
+                        if (!clearFavOne(n)) return true;
+                        toast("已取消收藏");
+                        if (favCountInSubject() == 0) {
+                            // 这个科目已经没有收藏了，直接退回收藏首页，不留一个空列表
+                            goBack(S_FAV);
+                        } else {
+                            renderFavSub();
+                            renderFav();
+                        }
+                        return true;
+                    }
+                });
+                return row;
             }
         });
+    }
+
+    /** 当前科目还剩几条收藏（收藏二级页取消后判断要不要退回上一级）。 */
+    private int favCountInSubject() {
+        int c = 0;
+        for (String id : favIds) {
+            Node n = nodeOf(id);
+            if (n != null && n.subj != null && n.subj.key.equals(favSubKey)) c++;
+        }
+        return c;
+    }
+
+    /** 取消某一条收藏（收藏二级页长按用）。返回是否真的取消了。 */
+    private boolean clearFavOne(Node n) {
+        if (n == null) return false;
+        String key = stableKey(n.id);
+        if (key.length() == 0 || !favIds.remove(key)) return false;
+        n.savedY = -1;
+        saveFav();
+        return true;
     }
 
     private String subjectKeyOf(String name) {
