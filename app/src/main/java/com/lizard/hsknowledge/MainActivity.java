@@ -173,6 +173,8 @@ public class MainActivity extends Activity {
     private final List<Subject> subjects = new ArrayList<Subject>();
     private final Map<String, Subject> subjectMap = new HashMap<String, Subject>();
     private final List<Node> allHits = new ArrayList<Node>();
+    /** 所有分组节点（有下级的），供全局搜索按标题命中；点进去就是那一层的列表。 */
+    private final List<Node> allGroups = new ArrayList<Node>();
     /** 日期 → 当天修改过的叶子，读数据时建一次：「今日新增」直接取，不再每次全表扫。 */
     private final Map<String, List<Node>> nodesByDate = new LinkedHashMap<String, List<Node>>();
     private final List<Node> searchHits = new ArrayList<Node>();
@@ -812,8 +814,11 @@ public class MainActivity extends Activity {
         return s;
     }
 
-    /** 收集所有叶子节点，供全局搜索 / 今日新增使用。任意深度都能收全。 */
+    /** 收集所有叶子节点，供全局搜索 / 今日新增使用。任意深度都能收全。
+     *  分组（有下级的节点）也单独收一份：章节标题本身也要能搜到。 */
     private void buildHits() {
+        allHits.clear();
+        allGroups.clear();
         for (Subject s : subjects) {
             collectLeaves(s.roots);
         }
@@ -832,6 +837,7 @@ public class MainActivity extends Activity {
                     bucket.add(n);
                 }
             } else {
+                allGroups.add(n);            // 分组：标题也进搜索
                 collectLeaves(n.children);
             }
         }
@@ -2296,7 +2302,7 @@ public class MainActivity extends Activity {
         // 全局搜索页
         // 全局搜索页
         searchTitle = new TextView(this);
-        searchTitle.setText("搜索全部知识点");
+        searchTitle.setText("搜索知识点与分组");
         searchTitle.setTextSize(m.subtitleSize + 2f);
         searchTitle.setTypeface(Typeface.DEFAULT_BOLD);
         searchTitle.setTextColor(C_PRIMARY);
@@ -3696,8 +3702,9 @@ public class MainActivity extends Activity {
         String q = gSearchBox.getText().toString().trim();
         lastQuery = q;
         searchHits.clear();
+        int groupTotal = 0;
         if (q.length() == 0) {
-            searchTitle.setText("搜索全部知识点");
+            searchTitle.setText("搜索知识点与分组");
             searchList.bind(new RowSource() {
                 public int size() { return 1; }
                 public View make(int i) { return textRow("输入关键词开始搜索", C_SUB, null); }
@@ -3705,21 +3712,34 @@ public class MainActivity extends Activity {
             return;
         }
         String ql = q.toLowerCase();
-        int total = 0;
-        for (Node n : allHits) {
-            String blob = (n.name + " " + (n.isLeaf() ? n.body : "")).toLowerCase();
-            if (!blob.contains(ql)) continue;
-            total++;
+        // 先扫分组：章节标题本身也要能搜到（以前索引里只有叶子，分组永远搜不出来）。
+        // 分组只列它自己，不把它下面的知识点一起铺出来——不然搜「古诗文」会刷出上百条。
+        for (Node n : allGroups) {
+            if (!n.name.toLowerCase().contains(ql)) continue;
+            groupTotal++;
             if (searchHits.size() < HIT_LIMIT) searchHits.add(n);
         }
-        searchTitle.setText(total == 0 ? "没有找到「" + q + "」"
-                : "命中 " + total + " 条 · " + q
+        int leafTotal = 0;
+        for (Node n : allHits) {
+            String blob = (n.name + " " + (n.body == null ? "" : n.body)).toLowerCase();
+            if (!blob.contains(ql)) continue;
+            leafTotal++;
+            if (searchHits.size() < HIT_LIMIT) searchHits.add(n);
+        }
+        int total = groupTotal + leafTotal;
+        String count = total == 0 ? "" : ("命中 " + total + " 条"
+                + (groupTotal > 0 && leafTotal > 0 ? "（分组 " + groupTotal + " · 知识点 " + leafTotal + "）" : "")
+                + " · " + q
                 + (total > HIT_LIMIT ? "（先列出前 " + HIT_LIMIT + " 条）" : ""));
+        searchTitle.setText(total == 0 ? "没有找到「" + q + "」" : count);
         searchList.bind(new RowSource() {
             public int size() { return searchHits.size(); }
             public View make(final int i) {
                 final Node n = searchHits.get(i);
-                return hitRow(n.name, shortPath(n.path()), new Runnable() {
+                boolean grp = !n.isLeaf();
+                // 分组行：小字前面标「分组」，跟知识点区分开
+                String sub = grp ? ("分组 · " + shortPath(n.path())) : shortPath(n.path());
+                return hitRow(n.name, sub, new Runnable() {
                     public void run() { openNodeFrom(n, S_SEARCH); }
                 });
             }

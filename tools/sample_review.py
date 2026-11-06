@@ -72,6 +72,11 @@ def main():
     for b in rec.get('batches', []):
         for it in b['items']:
             done.add((it['subject'], it['title']))
+    # 按章节抽查时改写过的条目也算「已抽过」，避免刚人工写好又被抽一遍
+    for b in rec.get('chapter_batches', []):
+        for it in b['items']:
+            for t in it.get('fixed_titles', []):
+                done.add((it['subject'], t))
 
     pool = collect()
     avail = collections.defaultdict(list)
