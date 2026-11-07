@@ -195,6 +195,8 @@ public class MainActivity extends Activity {
     private Node curNode;
     /** 从收藏/搜索/历史/今日跳进节点树时，退到栈顶该回哪个页面。 */
     private int nodeEntryBack = -1;
+    /** 跳进来时补进导航栈的祖先层数：退到这个深度就直接回入口页，不用一层层退到主页。 */
+    private int nodeEntryDepth = 0;
 
     // ---------- 每日一句 ----------
     // 句子来自一言（hitokoto）接口，不落进 assets：每天首次打开刷新一次，也可手动换一批。
@@ -1276,6 +1278,17 @@ public class MainActivity extends Activity {
     private static volatile String routeApi = null;
     private static volatile String routeRaw = null;
     private boolean routeProbing = false;
+    private long lastReProbe = 0;
+
+    /** 启动时没探到通道（或网络后来才连上）时再探一次；60 秒内最多一次，别把手表刷爆。 */
+    private void reProbeIfNeeded() {
+        long now = System.currentTimeMillis();
+        if (now - lastReProbe < 60000L) return;
+        lastReProbe = now;
+        runOnUiThread(new Runnable() {
+            public void run() { if (alive() && !routeProbing) startRouteProbe(false); }
+        });
+    }
 
     /** App 启动时后台跑一次：并发试直连与各镜像，挑最快能用的记下来。
      *  不弹任何界面；只有真连上了才浮一个气泡说明走的是哪条路。 */
@@ -3359,6 +3372,9 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 vibrate();
                 if (kind == -1) {
+                    // 主动点了面包屑「首页」：脱离外部入口的返回链，之后按返回回主页
+                    nodeEntryBack = -1;
+                    nodeEntryDepth = 0;
                     goBack(S_SUBJECT);
                     return;
                 }
@@ -3368,6 +3384,9 @@ public class MainActivity extends Activity {
                             curSubject = su;
                             navStack.clear();
                             curNode = null;
+                            // 主动点科目名回到顶层，等同于从主页重新进这一科
+                            nodeEntryBack = -1;
+                            nodeEntryDepth = 0;
                             renderNodes();
                             restoreNext[S_NODE] = true;
                             showScreen(S_NODE);
@@ -3595,6 +3614,8 @@ public class MainActivity extends Activity {
         curNode = chain.isEmpty() ? null : chain.get(chain.size() - 1);
         if (n.subj != null) curSubject = n.subj;
         nodeEntryBack = back;
+        // 祖先链是「补」进来的，不是用户一层层点进来的：返回时退到这个深度就回入口页
+        nodeEntryDepth = chain.size();
         renderNodes();
         if (n.isLeaf()) {
             openDetail(n.name, n.body, n.path(), back, n.img, n.extras, n.id);
@@ -3608,6 +3629,7 @@ public class MainActivity extends Activity {
     private void openSubject(Subject su) {
         curSubject = su;
         nodeEntryBack = -1;
+        nodeEntryDepth = 0;
         navStack.clear();
         curNode = null;
         renderNodes();
@@ -3615,24 +3637,28 @@ public class MainActivity extends Activity {
         slideNodeList(1);
     }
 
-    /** 返回上一级：弹栈；栈空就回科目页。 */
+    /** 返回上一级：用户自己点进的层逐层退；退到「从外部入口进来时的深度」就直接回那一页。 */
     private boolean nodeBack() {
-        if (navStack.isEmpty()) {
-            if (nodeEntryBack >= 0) {           // 从收藏/搜索等进来：退到那一页，不回主页
-                int t = nodeEntryBack;
-                nodeEntryBack = -1;
-                goBack(t);
-                return true;
-            }
-            return false;
+        int depth = navStack.size();
+        if (depth > nodeEntryDepth) {
+            navStack.remove(depth - 1);
+            curNode = navStack.isEmpty() ? null : navStack.get(navStack.size() - 1);
+            renderNodes();
+            restoreNext[S_NODE] = true;
+            showScreen(S_NODE);
+            slideNodeList(-1);
+            return true;
         }
-        navStack.remove(navStack.size() - 1);
-        curNode = navStack.isEmpty() ? null : navStack.get(navStack.size() - 1);
-        renderNodes();
-        restoreNext[S_NODE] = true;
-        showScreen(S_NODE);
-        slideNodeList(-1);
-        return true;
+        if (nodeEntryBack >= 0) {           // 从收藏/搜索/今日/历史进来：一次返回就回那一页
+            int t = nodeEntryBack;
+            nodeEntryBack = -1;
+            nodeEntryDepth = 0;
+            navStack.clear();
+            curNode = null;
+            goBack(t);
+            return true;
+        }
+        return false;                       // 正常从主页进的科目顶层：交给 backTarget 回主页
     }
 
     /** 面包屑当前路径字符串（首页 › 科目 › 各级分组）。 */
@@ -5394,6 +5420,8 @@ public class MainActivity extends Activity {
         } else if (s == S_FEEDBACK) {
             updateFeedbackUi();
             scrollToTop(feedbackScroll);
+            // 启动时网络还没就绪、通道没探到：进反馈页再试一次，不用手动去设置里点
+            if (routeApi == null) reProbeIfNeeded();
         } else if (s == S_PROFILE) {
             updateProfileUi();
             scrollToTop(profScroll);
@@ -5675,8 +5703,8 @@ public class MainActivity extends Activity {
     /** 右滑要落到哪一页；-1 表示这次返回仍留在本页（分组回退，只换列表内容）。 */
     private int previewTarget() {
         if (screen == S_NODE) {
-            if (!navStack.isEmpty()) return -1;             // 还有上级分组：本页内换层
-            if (nodeEntryBack >= 0) return nodeEntryBack;   // 从收藏/搜索等进来：退回那一页
+            if (navStack.size() > nodeEntryDepth) return -1;  // 用户自己点进的层：本页内换层
+            if (nodeEntryBack >= 0) return nodeEntryBack;     // 补进来的祖先链退完了：回入口页
             return S_SUBJECT;
         }
         return backTarget();
@@ -7535,7 +7563,7 @@ public class MainActivity extends Activity {
                 } catch (final Exception e) {
                     loginRunning = false;
                     afterLoginEnds();
-                    toast("登录失败：" + e.getMessage());
+                    toast("登录失败：" + netErr(e));
                 }
             }
         }).start();
@@ -7638,7 +7666,7 @@ public class MainActivity extends Activity {
                                 toast("已提交，感谢反馈（issue #" + num + "）");
                             } else {
                                 fbSubmitBtn.setText("提交反馈");
-                                toast("提交失败：" + (msg.length() > 0 ? msg : "未知错误"));
+                                toast("提交失败：" + (msg.length() > 0 ? msg : "未知错误") + " · 草稿已保留");
                                 if (msg.contains("Bad credentials") || msg.contains("Not Found")) {
                                     logoutGitHub();
                                 }
@@ -7650,7 +7678,7 @@ public class MainActivity extends Activity {
                         public void run() {
                             fbSubmitBtn.setEnabled(true);
                             fbSubmitBtn.setText("提交反馈");
-                            toast("提交失败：" + e.getMessage());
+                            toast("提交失败：" + netErr(e) + " · 草稿已保留，可稍后重试");
                         }
                     });
                 }
@@ -7843,20 +7871,64 @@ public class MainActivity extends Activity {
             cn.setRequestProperty("Accept", "application/vnd.github+json");
             cn.setRequestProperty("User-Agent", "HZKnowledge-Android");
             cn.setRequestProperty("Authorization", "token " + ghToken);
-            InputStream is = cn.getInputStream();
+            int code = cn.getResponseCode();
+            InputStream is = (code >= 400) ? cn.getErrorStream() : cn.getInputStream();
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            byte[] b = new byte[4096];
-            int n;
-            while ((n = is.read(b)) > 0) bos.write(b, 0, n);
-            is.close();
-            return new String(bos.toByteArray(), StandardCharsets.UTF_8);
+            if (is != null) {
+                byte[] b = new byte[4096];
+                int n;
+                while ((n = is.read(b)) > 0) bos.write(b, 0, n);
+                is.close();
+            }
+            String s = new String(bos.toByteArray(), StandardCharsets.UTF_8);
+            // 以前 4xx 直接抛异常、错误体被丢掉，界面上只剩「加载失败」四个字
+            if (code >= 400) throw new Exception("HTTP " + code + (s.length() > 0 ? " " + s : ""));
+            return s;
         } finally {
             cn.disconnect();
         }
     }
+
+    /**
+     * 反馈列表/评论这类公开数据：优先走启动时探测出的可用通道，再回退到直连和其它镜像。
+     * 只用于 GET 公开数据；涉及 token 身份判断的 /user 与所有写操作必须直连——
+     * 镜像会忽略 Authorization 头（见 apiAuthedBase 的注释），写请求走镜像会被当成未登录。
+     */
+    private String readIssues(String path) throws Exception {
+        String url = "https://api.github.com/repos/" + REPO + path;
+        List<String> cands = new ArrayList<String>();
+        addNoDup(cands, apiBase());
+        addNoDup(cands, "");
+        for (int i = 0; i < API_MIRRORS.length; i++) addNoDup(cands, API_MIRRORS[i]);
+        Exception last = null;
+        for (String base : cands) {
+            try {
+                return httpGetAuthed(base + url);
+            } catch (Exception e) {
+                last = e;
+            }
+        }
+        reProbeIfNeeded();   // 全都失败：多半是启动时没网，后台再探一次通道
+        throw (last == null) ? new Exception("没连上 GitHub") : last;
+    }
+
+    /** 把网络异常翻成人能看懂的一句话：区分「没连上」「登录过期」「服务器报错」。 */
+    private String netErr(Throwable e) {
+        String s = (e == null || e.getMessage() == null) ? "" : e.getMessage();
+        String low = s.toLowerCase(java.util.Locale.US);
+        if (s.contains("401") || s.contains("403") || low.contains("bad credentials"))
+            return "登录已过期，去个人页重新登录 GitHub";
+        if (low.contains("timeout") || low.contains("timed out")
+                || low.contains("failed to connect") || low.contains("unable to resolve host")
+                || low.contains("enotfound") || low.contains("network")
+                || low.contains("socket") || low.contains("econn") || low.contains("ehost"))
+            return "没连上 GitHub，检查网络后重试";
+        if (s.length() > 70) s = s.substring(0, 70) + "…";
+        return s.length() > 0 ? s : "没连上 GitHub，检查网络后重试";
+    }
     // ================= 我的反馈记录 =================
 
-    /** 我的反馈列表：主行标题 + 状态小字；加载中 / 空 / 失败都只是一行提示，不可点。 */
+    /** 我的反馈列表：主行标题 + 状态小字；加载失败那一行可以点着重试。 */
     private void bindMine() {
         mineList.bind(new RowSource() {
             public int size() { return mineRows.size(); }
@@ -7867,6 +7939,10 @@ public class MainActivity extends Activity {
                     final JSONObject o = mineIssues.get(i);
                     act = new Runnable() {
                         public void run() { openIssueDetail(o); }
+                    };
+                } else if (r[0].contains("加载失败")) {
+                    act = new Runnable() {
+                        public void run() { loadMyIssues(); }
                     };
                 }
                 return pairRow(r[0], r[1], r[2], act);
@@ -7884,10 +7960,10 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             public void run() {
                 try {
-                    String url = apiAuthedBase() + "https://api.github.com/repos/" + REPO + "/issues?state=all&per_page="
+                    String path = "/issues?state=all&per_page="
                             + (all ? "100" : "40")
                             + (!all && login != null && login.length() > 0 ? "&creator=" + login : "");
-                    JSONArray arr = new JSONArray(httpGetAuthed(url));
+                    JSONArray arr = new JSONArray(readIssues(path));
                     final List<JSONObject> items = new ArrayList<JSONObject>();
                     final List<String[]> rows = new ArrayList<String[]>();
                     for (int i = 0; i < arr.length(); i++) {
@@ -7916,7 +7992,7 @@ public class MainActivity extends Activity {
                     runOnUiThread(new Runnable() {
                         public void run() {
                             mineRows.clear();
-                            mineRows.add(new String[]{"加载失败：" + e.getMessage(), "", "#FFE57373"});
+                            mineRows.add(new String[]{"加载失败 · 点这里重试", netErr(e), "#FFE57373"});
                             bindMine();
                         }
                     });
@@ -7971,9 +8047,8 @@ public class MainActivity extends Activity {
             public void run() {
                 String reply = null;
                 try {
-                    String u = apiAuthedBase() + "https://api.github.com/repos/" + REPO
-                            + "/issues/" + number + "/comments?per_page=30";
-                    JSONArray arr = new JSONArray(httpGetAuthed(u));
+                    String path = "/issues/" + number + "/comments?per_page=30";
+                    JSONArray arr = new JSONArray(readIssues(path));
                     for (int i = 0; i < arr.length(); i++) {
                         String b = arr.getJSONObject(i).optString("body", "");
                         if (b.length() > 0) reply = b;
