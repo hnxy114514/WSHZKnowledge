@@ -58,6 +58,15 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.view.animation.DecelerateInterpolator;
 import android.view.ViewGroup;
+import android.webkit.CookieManager;
+import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
+import android.webkit.WebSettings;
+import android.webkit.WebStorage;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -185,8 +194,9 @@ public class MainActivity extends Activity {
     private static final int S_SUBJECT = 0, S_NODE = 1, S_DETAIL = 2, S_SETTINGS = 3,
             S_SEARCH = 4, S_FEEDBACK = 5, S_MYFEEDBACK = 6, S_PROFILE = 7,
             S_CHANGELOG = 8, S_ABOUT = 9, S_DISPLAY = 10, S_TODAY = 11,
-            S_EXTRA = 12, S_FAV = 13, S_HIST = 14, S_FAV_SUB = 15, S_DAILY = 16, S_SENT = 17;
-    private static final int SCREEN_COUNT = 18;
+            S_EXTRA = 12, S_FAV = 13, S_HIST = 14, S_FAV_SUB = 15, S_DAILY = 16, S_SENT = 17,
+            S_AI_WEB = 18;
+    private static final int SCREEN_COUNT = 19;
     private int screen = S_SUBJECT;
     private Subject curSubject;
     /** 从科目根走到当前所在的分组节点；空 = 正在看某科目的顶层节点。 */
@@ -197,6 +207,25 @@ public class MainActivity extends Activity {
     private int nodeEntryBack = -1;
     /** 跳进来时补进导航栈的祖先层数：退到这个深度就直接回入口页，不用一层层退到主页。 */
     private int nodeEntryDepth = 0;
+
+    // ---------- 问 AI（DeepSeek 网页版） ----------
+    // 这一页只是把 DeepSeek 网页装进来：登录、密钥、模型、对话记录全由网页自己管，
+    // App 不存任何密钥、不读聊天内容、不写日志。网页按钮在圆屏上太小、边角会被裁，
+    // 所以顶部另放一条 App 自己的工具条（返回 / 刷新 / 重新登录）。
+    private LinearLayout aiWebScreen, aiWebBar, aiWebErrorBox;
+    private FrameLayout aiWebHost;
+    private WebView aiWebView;
+    private ProgressBar aiWebProgress;
+    private TextView aiWebErrorTxt, aiWebErrorBtn;
+    /** 从哪个页面点进来的：返回时原路退回，而不是一律回主页。 */
+    private int aiWebBack = S_SUBJECT;
+    /** 网页只加载一次；反复进出不打断正在进行的对话。 */
+    private boolean aiWebLoaded = false;
+    private static final String AI_WEB_URL = "https://chat.deepseek.com/";
+    /** 默认 UA 会被网页挡成 429，必须用正常浏览器 UA（这条实测能拿到 200）。 */
+    private static final String AI_WEB_UA =
+            "Mozilla/5.0 (Linux; Android 11; OWW231) AppleWebKit/537.36 (KHTML, like Gecko) "
+                    + "Chrome/120.0.0.0 Mobile Safari/537.36";
 
     // ---------- 每日一句 ----------
     // 句子来自一言（hitokoto）接口，不落进 assets：每天首次打开刷新一次，也可手动换一批。
@@ -1831,11 +1860,19 @@ public class MainActivity extends Activity {
                 public void run() { checkDailyForToday(); }
             });
         }
+        if (aiWebView != null) {
+            try { aiWebView.resumeTimers(); aiWebView.onResume(); }
+            catch (Throwable ignored) { }
+        }
     }
 
     @Override
     protected void onPause() {
         foreground = false;
+        if (aiWebView != null) {
+            try { aiWebView.onPause(); aiWebView.pauseTimers(); }
+            catch (Throwable ignored) { }
+        }
         super.onPause();
     }
 
@@ -2198,6 +2235,11 @@ public class MainActivity extends Activity {
         histScreen.addView(histList.sc, lw());
         root.addView(histScreen, fp());
 
+        // 问 AI（DeepSeek 网页版）：独立一屏，不读知识点数据
+        aiWebScreen = newScreen();
+        buildAiWebScreen();
+        root.addView(aiWebScreen, fp());
+
         // 主页
         subjectList = new SvList();
         subjectScreen.addView(subjectList.sc, lw());
@@ -2364,6 +2406,327 @@ public class MainActivity extends Activity {
         searchList.addHead(searchTitle);
         searchList.addHead(searchBar);
         searchScreen.addView(searchList.sc, lw());
+    }
+
+    // ================= 问 AI（DeepSeek 网页版） =================
+    // 网页是 DeepSeek 的，代码不在我们手里：能做的只有「把网页装进来 + 贴一层优化」。
+    // 优化只做三件小事：藏掉下载 APP 入口、放大输入框和按钮、给圆屏底部留安全区。
+    // 登录表单本身不改结构，登录态由网页自己的 Cookie 保持，App 不存密钥、不写日志。
+    private static final String AI_WEB_JS = "(function(){"
+            + "if(window.__hzWatch){try{window.__hzWatch.run();}catch(e){}return;}"
+            + "var re=/下载\\s*(APP|App|app|客户端)|获取\\s*(APP|App)|APP\\s*下载|手机\\s*APP|Download\\s*(the\\s*)?App|Get\\s*the\\s*app/i;"
+            + "function isDl(el){"
+            + "var t=((el.innerText||el.textContent||'')+'').trim();"
+            + "if(!t||t.length>24)return false;"
+            + "return re.test(t);"
+            + "}"
+            + "function hideDl(){"
+            + "var all=document.querySelectorAll('a,button,[role=\"button\"]');"
+            + "for(var i=0;i<all.length;i++){"
+            + "var el=all[i],href=(el.getAttribute&&el.getAttribute('href'))||'';"
+            + "var hit=isDl(el)||/\\.apk($|\\?)|play\\.google\\.com|apps\\.apple\\.com/i.test(href);"
+            + "if(!hit)continue;"
+            + "var box=el,up=0;"
+            + "while(box&&up<3&&box.parentElement&&((box.parentElement.innerText||'')+'').trim().length<=40){box=box.parentElement;up++;}"
+            + "try{(box||el).style.setProperty('display','none','important');}catch(e){}"
+            + "}"
+            + "}"
+            + "function tune(){"
+            + "var f=document.querySelectorAll('textarea,input[type=\"text\"],input[type=\"password\"],input[type=\"tel\"],input[type=\"email\"],input:not([type]),[contenteditable=\"true\"]');"
+            + "for(var j=0;j<f.length;j++){var x=f[j];try{"
+            + "x.style.setProperty('font-size','16px','important');"
+            + "x.style.setProperty('min-height','44px','important');"
+            + "x.style.setProperty('padding','10px 12px','important');"
+            + "x.style.setProperty('line-height','1.5','important');"
+            + "}catch(e){} }"
+            + "var b=document.querySelectorAll('button,[role=\"button\"]');"
+            + "for(var k=0;k<b.length;k++){var q=b[k];"
+            + "var bt=((q.innerText||q.textContent||'')+'').trim();if(!bt)continue;try{"
+            + "q.style.setProperty('min-height','42px','important');"
+            + "q.style.setProperty('min-width','42px','important');"
+            + "q.style.setProperty('font-size','15px','important');"
+            + "}catch(e){} }"
+            + "try{document.body.style.setProperty('padding-bottom','72px','important');"
+            + "document.body.style.setProperty('max-width','100%','important');"
+            + "document.body.style.setProperty('overflow-x','hidden','important');}catch(e){}"
+            + "}"
+            + "function run(){try{hideDl();tune();}catch(e){} }"
+            + "window.__hzWatch={run:run};run();"
+            + "var timer=null;"
+            + "try{var mo=new MutationObserver(function(){if(timer)clearTimeout(timer);timer=setTimeout(run,260);});"
+            + "mo.observe(document.documentElement||document.body,{childList:true,subtree:true});}catch(e){}"
+            + "})()";
+
+    /** 工具条按钮：三个平分一行，点击区做大到 42dp，圆屏上才点得准。 */
+    private TextView aiBarBtn(String text, final View.OnClickListener onClick) {
+        TextView b = new TextView(this);
+        b.setText(text);
+        b.setTextSize(m.backSize);
+        b.setTypeface(Typeface.DEFAULT_BOLD);
+        b.setTextColor(C_PRIMARY);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(6), dp(9), dp(6), dp(9));
+        b.setMinHeight(dp(42));
+        b.setBackground(clickBg(C_PILL));
+        b.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                if (onClick != null) onClick.onClick(v);
+            }
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        lp.leftMargin = dp(2);
+        lp.rightMargin = dp(2);
+        b.setLayoutParams(lp);
+        return b;
+    }
+
+    private void buildAiWebScreen() {
+        // 调字号/缩放会就地重建整棵 View 树：旧网页先销毁，别留一个没人引用的 WebView。
+        if (aiWebView != null) {
+            try { aiWebView.destroy(); } catch (Throwable ignored) { }
+            aiWebView = null;
+        }
+        aiWebLoaded = false;
+        aiWebScreen.removeAllViews();
+
+        aiWebBar = new LinearLayout(this);
+        aiWebBar.setOrientation(LinearLayout.HORIZONTAL);
+        aiWebBar.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams barLp = wrap();
+        barLp.bottomMargin = dp(4);
+        aiWebScreen.addView(aiWebBar, barLp);
+        aiWebBar.addView(aiBarBtn("‹ 返回", new View.OnClickListener() {
+            public void onClick(View v) { goBack(aiWebBack); }
+        }));
+        aiWebBar.addView(aiBarBtn("刷新", new View.OnClickListener() {
+            public void onClick(View v) {
+                if (aiWebView == null) { toast("这台设备没有 WebView 组件"); return; }
+                aiWebHideError();
+                aiWebView.reload();
+            }
+        }));
+        aiWebBar.addView(aiBarBtn("重新登录", new View.OnClickListener() {
+            public void onClick(View v) { aiWebRelogin(true); }
+        }));
+
+        aiWebProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        aiWebProgress.setMax(100);
+        aiWebProgress.setVisibility(View.GONE);
+        try { aiWebProgress.setProgressTintList(ColorStateList.valueOf(C_PRIMARY)); }
+        catch (Throwable ignored) { }
+        aiWebScreen.addView(aiWebProgress,
+                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(3)));
+
+        aiWebHost = new FrameLayout(this);
+        aiWebHost.setBackgroundColor(C_BG);
+        aiWebScreen.addView(aiWebHost,
+                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        aiWebErrorBox = new LinearLayout(this);
+        aiWebErrorBox.setOrientation(LinearLayout.VERTICAL);
+        aiWebErrorBox.setGravity(Gravity.CENTER);
+        aiWebErrorBox.setBackgroundColor(C_BG);
+        aiWebErrorBox.setPadding(dp(14), dp(12), dp(14), dp(12));
+        aiWebErrorTxt = new TextView(this);
+        aiWebErrorTxt.setTextSize(m.subtitleSize - 1f);
+        aiWebErrorTxt.setTextColor(C_TEXT);
+        aiWebErrorTxt.setGravity(Gravity.CENTER);
+        aiWebErrorTxt.setLineSpacing(dp(3), 1.3f);
+        aiWebErrorBox.addView(aiWebErrorTxt, wrap());
+        aiWebErrorBtn = aiBarBtn("重试", new View.OnClickListener() {
+            public void onClick(View v) { aiWebHideError(); aiWebLoad(); }
+        });
+        LinearLayout.LayoutParams ebLp = wrap();
+        ebLp.topMargin = dp(10);
+        aiWebErrorBox.addView(aiWebErrorBtn, ebLp);
+        aiWebErrorBox.setVisibility(View.GONE);
+
+        try {
+            WebView wv = new WebView(this);
+            aiWebView = wv;
+            aiWebHost.addView(wv, 0, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+            aiWebHost.addView(aiWebErrorBox, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+            configureAiWebView(wv);
+        } catch (Throwable t) {
+            // 系统没装 WebView 组件时，new WebView 会直接抛异常
+            aiWebView = null;
+            if (aiWebErrorBox.getParent() == null) {
+                aiWebHost.addView(aiWebErrorBox, new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+            }
+            aiWebShowError("这台设备没有 WebView 组件，无法使用 DeepSeek 网页版。\n"
+                    + "一般手表都自带；如果没有，需要装上系统的 WebView。", false);
+        }
+    }
+
+    private void configureAiWebView(WebView wv) {
+        WebSettings s = wv.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setDatabaseEnabled(true);
+        s.setUserAgentString(AI_WEB_UA);
+        s.setCacheMode(WebSettings.LOAD_DEFAULT);
+        s.setUseWideViewPort(false);
+        s.setLoadWithOverviewMode(false);
+        s.setSupportZoom(true);
+        s.setBuiltInZoomControls(true);
+        s.setDisplayZoomControls(false);
+        s.setJavaScriptCanOpenWindowsAutomatically(false);
+        s.setAllowFileAccess(false);
+        s.setAllowContentAccess(false);
+        s.setGeolocationEnabled(false);
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+        s.setMediaPlaybackRequiresUserGesture(true);
+        wv.setBackgroundColor(C_BG);
+        wv.setHorizontalScrollBarEnabled(false);
+        wv.setVerticalScrollBarEnabled(false);
+        wv.setOverScrollMode(View.OVER_SCROLL_NEVER);
+
+        CookieManager cm = CookieManager.getInstance();
+        cm.setAcceptCookie(true);
+        cm.setAcceptThirdPartyCookies(wv, true);
+
+        wv.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
+                String u = req.getUrl().toString();
+                if (u.startsWith("https://chat.deepseek.com")
+                        || u.startsWith("https://deepseek.com")
+                        || u.startsWith("https://www.deepseek.com")) return false;
+                if (isAppDownloadUrl(u)) {
+                    toast("已拦下下载 APP 的入口");
+                    return true;
+                }
+                try {
+                    Intent it = new Intent(Intent.ACTION_VIEW, Uri.parse(u));
+                    it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(it);
+                } catch (Exception e) {
+                    toast("这个链接在手表上打不开");
+                }
+                return true;
+            }
+
+            @Override
+            public void onPageStarted(WebView v, String url, Bitmap favicon) {
+                aiWebProgress.setVisibility(View.VISIBLE);
+            }
+
+            @Override
+            public void onPageFinished(WebView v, String url) {
+                aiWebProgress.setVisibility(View.GONE);
+                aiWebInject(v);
+            }
+
+            @Override
+            public void onReceivedError(WebView v, WebResourceRequest req, WebResourceError err) {
+                if (!req.isForMainFrame()) return;
+                aiWebShowError("网页没加载出来。可能是网络不通，也可能网页拒绝了手表访问。\n"
+                        + "点「重试」再试一次；一直不行就换个网络。", true);
+            }
+
+            @Override
+            public void onReceivedHttpError(WebView v, WebResourceRequest req,
+                                            WebResourceResponse resp) {
+                if (!req.isForMainFrame()) return;
+                int code = resp.getStatusCode();
+                if (code == 429 || code == 403) {
+                    aiWebShowError("网页暂时拒绝了这次访问（" + code + "）。\n"
+                            + "等一会儿点「重试」，或换个网络再试。", true);
+                } else if (code >= 400) {
+                    aiWebShowError("网页返回了错误（" + code + "）。点「重试」再试一次。", true);
+                }
+            }
+        });
+
+        wv.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onProgressChanged(WebView v, int p) {
+                aiWebProgress.setProgress(p);
+                if (p >= 100) aiWebProgress.setVisibility(View.GONE);
+            }
+        });
+    }
+
+    /** 下载 APP 的链接直接拦掉，不让手表跳到应用商店去。 */
+    private boolean isAppDownloadUrl(String u) {
+        String s = u.toLowerCase(Locale.ROOT);
+        if (s.contains(".apk") || s.contains("play.google.com") || s.contains("apps.apple.com"))
+            return true;
+        return s.contains("download") && s.contains("app");
+    }
+
+    /** 只注入优化脚本，不碰网页自己的业务逻辑；SPA 每次重绘都会重跑一遍。 */
+    private void aiWebInject(WebView v) {
+        try { v.evaluateJavascript(AI_WEB_JS, null); }
+        catch (Throwable ignored) { }
+    }
+
+    private void aiWebLoad() {
+        if (aiWebView == null) {
+            aiWebShowError("这台设备没有 WebView 组件，无法使用 DeepSeek 网页版。\n"
+                    + "一般手表都自带；如果没有，需要装上系统的 WebView。", false);
+            return;
+        }
+        aiWebLoaded = true;
+        aiWebHideError();
+        aiWebProgress.setProgress(0);
+        aiWebProgress.setVisibility(View.VISIBLE);
+        aiWebView.loadUrl(AI_WEB_URL);
+    }
+
+    private void aiWebShowError(String msg, boolean retryable) {
+        if (aiWebErrorBox == null) return;
+        aiWebErrorTxt.setText(msg);
+        aiWebErrorBtn.setVisibility(retryable ? View.VISIBLE : View.GONE);
+        aiWebErrorBox.setVisibility(View.VISIBLE);
+        aiWebErrorBox.bringToFront();
+        if (aiWebProgress != null) aiWebProgress.setVisibility(View.GONE);
+    }
+
+    private void aiWebHideError() {
+        if (aiWebErrorBox != null) aiWebErrorBox.setVisibility(View.GONE);
+    }
+
+    private void aiWebRelogin(final boolean reloadNow) {
+        confirmAction("重新登录？",
+                "会清掉本机保存的网页登录状态，下次打开要重新登录。收藏、浏览记录和知识点都不受影响。",
+                "清除并重新登录", 0xFFFFB74D, new Runnable() {
+                    public void run() { aiWebClearLogin(reloadNow); }
+                });
+    }
+
+    private void aiWebClearLogin(boolean reloadNow) {
+        try {
+            CookieManager cm = CookieManager.getInstance();
+            cm.removeAllCookies(null);
+            cm.flush();
+        } catch (Throwable ignored) { }
+        try { WebStorage.getInstance().deleteAllData(); } catch (Throwable ignored) { }
+        if (aiWebView != null) {
+            try {
+                aiWebView.clearCache(true);
+                aiWebView.clearFormData();
+                aiWebView.clearHistory();
+            } catch (Throwable ignored) { }
+        }
+        if (reloadNow && aiWebView != null) aiWebLoad();
+        else aiWebLoaded = false;
+        toast("已清除网页登录状态");
+    }
+
+    /** 系统有没有 WebView 组件。API 26 起能直接问；更早的按「默认有」，真没有会在 new WebView 时被兜住。 */
+    private boolean aiHasWebView() {
+        try {
+            if (Build.VERSION.SDK_INT >= 26) return WebView.getCurrentWebViewPackage() != null;
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     private LinearLayout newScreen() {
@@ -4989,6 +5352,56 @@ public class MainActivity extends Activity {
         fbHint.setPadding(dp(4), dp(3), dp(4), dp(2));
         settingsInner.addView(fbHint, wrap());
 
+        settingsInner.addView(sectionHeader("问 AI"), wrap());
+        TextView aiEntry = new TextView(this);
+        aiEntry.setText("打开 DeepSeek 网页版");
+        aiEntry.setTextSize(m.backSize);
+        aiEntry.setTypeface(Typeface.DEFAULT_BOLD);
+        aiEntry.setTextColor(C_PRIMARY);
+        aiEntry.setGravity(Gravity.CENTER);
+        aiEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
+        aiEntry.setBackground(clickBg(C_PILL));
+        aiEntry.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                aiWebBack = S_SETTINGS;
+                showScreen(S_AI_WEB);
+            }
+        });
+        settingsInner.addView(aiEntry, wrap());
+        TextView aiHint = new TextView(this);
+        aiHint.setText("在应用内打开 DeepSeek 网页。登录、模型和对话都由网页自己管理，这里不保存密钥。");
+        aiHint.setTextSize(m.subtitleSize - 2f);
+        aiHint.setTextColor(C_SUB);
+        aiHint.setGravity(Gravity.CENTER);
+        aiHint.setPadding(dp(4), dp(3), dp(4), dp(2));
+        settingsInner.addView(aiHint, wrap());
+
+        // WebView 是这套方案的硬前提，必须在设置里显著标出来
+        TextView aiWarn = new TextView(this);
+        aiWarn.setText("注意：没有 WebView 组件就无法使用 DeepSeek 网页版（默认手表已带 WebView）。\n"
+                + "本机检测：" + (aiHasWebView() ? "已检测到 WebView" : "未检测到 WebView 组件"));
+        aiWarn.setTextSize(m.subtitleSize - 2f);
+        aiWarn.setTypeface(Typeface.DEFAULT_BOLD);
+        aiWarn.setTextColor(0xFFFFB74D);
+        aiWarn.setGravity(Gravity.CENTER);
+        aiWarn.setLineSpacing(dp(2), 1.3f);
+        aiWarn.setPadding(dp(6), dp(6), dp(6), dp(4));
+        settingsInner.addView(aiWarn, wrap());
+
+        TextView aiRelogin = new TextView(this);
+        aiRelogin.setText("清除网页登录态（重新登录）");
+        aiRelogin.setTextSize(m.backSize - 1f);
+        aiRelogin.setTextColor(C_SUB);
+        aiRelogin.setGravity(Gravity.CENTER);
+        aiRelogin.setPadding(dp(10), dp(10), dp(10), dp(10));
+        aiRelogin.setBackground(clickBg(C_PILL));
+        aiRelogin.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { aiWebRelogin(false); }
+        });
+        LinearLayout.LayoutParams aiRlLp = wrap();
+        aiRlLp.topMargin = dp(6);
+        settingsInner.addView(aiRelogin, aiRlLp);
+
         settingsInner.addView(sectionHeader("其他"), wrap());
         TextView profEntry = new TextView(this);
         profEntry.setText("个人主页");
@@ -5329,7 +5742,7 @@ public class MainActivity extends Activity {
         View[] screens = {subjectScreen, nodeScreen, detailScreen, settingsScreen,
                 searchScreen, feedbackScreen, mineScreen, profileScreen, changelogScreen, aboutScreen,
                 displayScreen, todayScreen, extraScreen, favScreen, histScreen, favSubScreen,
-                dailyScreen, sentScreen};
+                dailyScreen, sentScreen, aiWebScreen};
         View target = screens[s];
         boolean shown = target.getVisibility() == View.VISIBLE && target.getAlpha() > 0.95f
                 && Math.abs(target.getTranslationX()) < dp(4);
@@ -5372,7 +5785,7 @@ public class MainActivity extends Activity {
             if (subjectDirty) {
                 final List<String> keys = new ArrayList<String>(orderKeys);
                 subjectList.bind(new RowSource() {
-                    public int size() { return keys.size() + 5; }
+                    public int size() { return keys.size() + 6; }
                     public View make(final int i) {
                         Runnable toSearch = new Runnable() {
                             public void run() { showScreen(S_SEARCH); }
@@ -5386,6 +5799,12 @@ public class MainActivity extends Activity {
                         Runnable toToday = new Runnable() {
                             public void run() { showScreen(S_TODAY); }
                         };
+                        Runnable toAi = new Runnable() {
+                            public void run() {
+                                aiWebBack = S_SUBJECT;
+                                showScreen(S_AI_WEB);
+                            }
+                        };
                         Runnable toSettings = new Runnable() {
                             public void run() { showScreen(S_SETTINGS); }
                         };
@@ -5393,7 +5812,8 @@ public class MainActivity extends Activity {
                         if (i == 1) return textRow("我的收藏", C_PRIMARY, toFav);
                         if (i == keys.size() + 2) return textRow("最近浏览", C_PRIMARY, toHist);
                         if (i == keys.size() + 3) return textRow("新增知识点（今日）", C_PRIMARY, toToday);
-                        if (i == keys.size() + 4) return textRow("设置", C_PRIMARY, toSettings);
+                        if (i == keys.size() + 4) return textRow("问 AI", C_PRIMARY, toAi);
+                        if (i == keys.size() + 5) return textRow("设置", C_PRIMARY, toSettings);
                         final String k = keys.get(i - 2);
                         Subject su = subjectMap.get(k);
                         return textRow(su == null ? k : su.name, C_PRIMARY, new Runnable() {
@@ -5451,6 +5871,9 @@ public class MainActivity extends Activity {
             renderSent();
         } else if (s == S_HIST) {
             renderHist();
+        } else if (s == S_AI_WEB) {
+            // 只加载一次：反复进出不打断网页里正在进行的对话
+            if (!aiWebLoaded) aiWebLoad();
         }
 
         // 只有「返回上一级」才回到离开时的位置；正向点进页面一律回到默认位置（跳过顶部占位贴顶）。
@@ -5519,6 +5942,10 @@ public class MainActivity extends Activity {
         log("APP", "onDestroy");
         dismissCodeDialog();
         dismissUpdateDialog();
+        if (aiWebView != null) {
+            try { aiWebView.destroy(); } catch (Throwable ignored) { }
+            aiWebView = null;
+        }
         super.onDestroy();
     }
 
@@ -5535,6 +5962,11 @@ public class MainActivity extends Activity {
         if (screen == S_DISPLAY && tuningFirstRun) {
             // 第一次必须点「完成，开始使用」才算确认，返回键不放行
             toast("先点下面的「完成，开始使用」");
+            return;
+        }
+        // 网页里自己有历史（登录后跳转等）：先退网页上一页，退完了才轮到退出这一屏
+        if (screen == S_AI_WEB && aiWebView != null && aiWebView.canGoBack()) {
+            aiWebView.goBack();
             return;
         }
         if (screen == S_NODE && nodeBack()) return;   // 还有上级分组就先退一层
@@ -5560,6 +5992,7 @@ public class MainActivity extends Activity {
         if (screen == S_FAV_SUB) return S_FAV;
         if (screen == S_DAILY) return dailyBack;
         if (screen == S_SENT) return "hist".equals(sentMode) ? S_HIST : S_FAV;
+        if (screen == S_AI_WEB) return aiWebBack;
         return -1;
     }
 
@@ -5583,6 +6016,7 @@ public class MainActivity extends Activity {
             case S_FAV_SUB: return favSubScreen;
             case S_DAILY: return dailyScreen;
             case S_SENT: return sentScreen;
+            case S_AI_WEB: return aiWebScreen;
             default: return null;
         }
     }
@@ -5594,7 +6028,9 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
-        if (swipeBack && fullscreenView == null && !sliderTouching) {
+        // 网页里横向滑动、拖输入法光标都很常见，这一屏不接管手势，
+        // 退出走顶部「‹ 返回」或实体返回键，避免点着点着就被甩回上一页。
+        if (swipeBack && fullscreenView == null && !sliderTouching && screen != S_AI_WEB) {
             int action = ev.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN) {
                 swipeX = ev.getX();
@@ -5696,6 +6132,7 @@ public class MainActivity extends Activity {
             case S_FAV_SUB: return favSubScreen;
             case S_DAILY: return dailyScreen;
             case S_SENT: return sentScreen;
+            case S_AI_WEB: return aiWebScreen;
             default: return subjectScreen;
         }
     }
