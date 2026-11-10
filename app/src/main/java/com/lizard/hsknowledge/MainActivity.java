@@ -3769,6 +3769,7 @@ public class MainActivity extends Activity {
         ScrollView sv = new OverScrollScrollView(this);
         sv.setVerticalScrollBarEnabled(false);
         sv.addView(list, wrap());
+        tuneDialogScroll(sv, list);   // 滚动时整块重绘，否则窗口只刷脏区、留下残影
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, m.round ? dp(150) : dp(240));
         slp.topMargin = dp(4);
