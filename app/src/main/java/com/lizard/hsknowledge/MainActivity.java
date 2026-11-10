@@ -48,6 +48,7 @@ import android.text.style.RelativeSizeSpan;
 import android.text.style.StyleSpan;
 import android.text.style.SubscriptSpan;
 import android.text.style.SuperscriptSpan;
+import android.util.Base64;
 import android.util.TypedValue;
 import android.view.ActionMode;
 import android.view.GestureDetector;
@@ -240,6 +241,31 @@ public class MainActivity extends Activity {
     private ScrollView aiHubScroll, aiApiScroll, aiWebCfgScroll;
     /** 当前用的模式：web = DeepSeek 网页版，api = 自行配置；存在 prefs 的 ai_mode。 */
     private String aiMode = "web";
+
+    // ---- API AI（自行配置）：接口地址 / 密钥 / 模型 / 对话参数 ----
+    // 和网页版相反：这一模式必须在本机存密钥，所以单独放一个 prefs 文件，并在备份规则里排除，
+    // 存的是异或 + Base64 的混淆串（不是加密，只为不让明文躺在备份/日志里）。
+    private static final String API_SECRET_PREF = "ai_api_secret";
+    private static final String API_SECRET_KEY = "k";
+    /** 预设：0 = DeepSeek 官方，1 = OpenAI 官方，2 = 自定义。 */
+    private static final String[] API_PRESETS = {"DeepSeek 官方", "OpenAI 官方", "自定义"};
+    private static final String[] API_PRESET_BASE = {
+            "https://api.deepseek.com", "https://api.openai.com/v1", ""};
+    private static final String[] API_PRESET_MODEL = {"deepseek-chat", "gpt-4o-mini", ""};
+    private static final float[] API_TEMPS = {0.2f, 0.7f, 1.0f, 1.3f};
+    private static final int[] API_CTX = {4, 8, 16};
+    private static final int[] API_MAX = {256, 512, 1024, 2048};
+    private static final String[] API_THINK = {"关闭", "标准", "深度"};
+
+    private int aiApiPreset = 0;
+    private String aiApiEndpoint = API_PRESET_BASE[0];   // 不带尾斜杠
+    private String aiApiModel = API_PRESET_MODEL[0];
+    private String aiApiSecret = "";                    // 明文只在内存，落盘走 seal()
+    private int aiApiTempIdx = 1, aiApiCtxIdx = 1, aiApiMaxIdx = 1, aiApiThinkIdx = 0;
+    /** 拉取到的模型列表（只在内存，重进页面会重拉）。 */
+    private final List<String> aiApiModels = new ArrayList<String>();
+    /** 正在拉模型 / 测连接的提示；null = 空闲。 */
+    private String aiApiBusy = null;
     /** 从哪个页面点进来的：返回时原路退回，而不是一律回主页。 */
     private int aiWebBack = S_SUBJECT;
     /** 两个设置子页从哪进来的：设置 → 问 AI 子页，或主页「问 AI」直接进来。 */
@@ -565,6 +591,7 @@ public class MainActivity extends Activity {
         swipeBack = prefs.getBoolean("swipe_back", true);
         haptic = prefs.getBoolean("haptic", true);
         aiMode = prefs.getString("ai_mode", "web");
+        loadApiConfig();
         aiWebHideDl = prefs.getBoolean("ai_web_hide_dl", true);
         aiWebZoomMode = prefs.getInt("ai_web_zoom", 0);
         aiWebCrop = prefs.getBoolean("ai_web_crop", true);
@@ -3145,6 +3172,11 @@ public class MainActivity extends Activity {
         }), wrap());
         aiHubInner.addView(aiHint("当前：" + (api ? "API AI（自行配置）" : "DeepSeek 网页版")
                 + "。关 = 网页版，开 = 自行配置；切换后主页「问 AI」走对应模式。"), wrap());
+        if (api) {
+            aiHubInner.addView(aiHint(aiApiReady()
+                    ? ("接口：" + aiApiModel + "，可以测连接")
+                    : ("还没配好：" + aiApiMissing())), wrap());
+        }
 
         aiHubInner.addView(aiSettingBtn("API AI 设置", new View.OnClickListener() {
             public void onClick(View v) { aiCfgBack = S_AI_HUB; showScreen(S_AI_API_CFG); }
@@ -3179,13 +3211,819 @@ public class MainActivity extends Activity {
             public void onClick(View v) { goBack(aiCfgBack); }
         }), wrapM());
         aiApiInner.addView(pageTitle("API AI 设置"), wrap());
-        aiApiInner.addView(sectionHeader("自行配置模式"), wrap());
-        aiApiInner.addView(aiHint("用 OpenAI 兼容接口，地址和密钥由你自己填，模型通过接口拉取并用来测试密钥是否正确。"), wrap());
-        aiApiInner.addView(aiHint("当前状态：正在接入。本版请先用 DeepSeek 网页版。"), wrap());
-        aiApiInner.addView(aiHint("接入后这里可填地址、密钥、测试连接并拉取模型；对话页里可切模型、调思考强度、上下文轮数、最大回复长度和温度。"), wrap());
+
+        // 状态摘要：一眼看清「能不能用、还差什么」
+        TextView sum = new TextView(this);
+        sum.setText(aiApiSummary());
+        sum.setTextSize(m.subtitleSize - 2f);
+        sum.setTextColor(aiApiReady() ? C_PRIMARY : C_SUB);
+        sum.setGravity(Gravity.CENTER);
+        sum.setLineSpacing(dp(2), 1.2f);
+        sum.setPadding(dp(6), dp(7), dp(6), dp(7));
+        sum.setBackgroundDrawable(pill(C_CARD));
+        aiApiInner.addView(sum, wrapM());
+
+        if (aiApiBusy != null) aiApiInner.addView(aiHint(aiApiBusy), wrap());
+
+        aiApiInner.addView(sectionHeader("服务商"), wrap());
+        aiApiInner.addView(apiPresetRow(), gap());
+        aiApiInner.addView(aiHint("预设会填好地址和常见模型；自己搭的转发接口选「自定义」。"), wrap());
+
+        aiApiInner.addView(sectionHeader("接口"), wrap());
+        aiApiInner.addView(apiValueRow("地址", aiApiEndpoint.length() == 0 ? "未填" : aiApiEndpoint,
+                new View.OnClickListener() {
+                    public void onClick(View v) { editApiEndpoint(); }
+                }), gap());
+        aiApiInner.addView(apiValueRow("密钥", apiKeyMask(), new View.OnClickListener() {
+            public void onClick(View v) { editApiSecret(); }
+        }), gap());
+        aiApiInner.addView(apiValueRow("模型", aiApiModel.length() == 0 ? "未填" : aiApiModel,
+                new View.OnClickListener() {
+                    public void onClick(View v) { pickApiModel(); }
+                }), gap());
+
+        aiApiInner.addView(aiSettingBtn("拉取模型列表", new View.OnClickListener() {
+            public void onClick(View v) { aiApiFetchModels(); }
+        }), gap());
+        aiApiInner.addView(aiSettingBtn("测试连接", new View.OnClickListener() {
+            public void onClick(View v) { aiApiTest(); }
+        }), gap());
+
+        aiApiInner.addView(sectionHeader("对话参数"), wrap());
+        aiApiInner.addView(apiValueRow("温度", String.valueOf(API_TEMPS[aiApiTempIdx]),
+                new View.OnClickListener() {
+                    public void onClick(View v) {
+                        aiApiTempIdx = (aiApiTempIdx + 1) % API_TEMPS.length;
+                        saveApiConfig();
+                        renderAiApi();
+                    }
+                }), gap());
+        aiApiInner.addView(apiValueRow("上下文轮数", API_CTX[aiApiCtxIdx] + " 轮",
+                new View.OnClickListener() {
+                    public void onClick(View v) {
+                        aiApiCtxIdx = (aiApiCtxIdx + 1) % API_CTX.length;
+                        saveApiConfig();
+                        renderAiApi();
+                    }
+                }), gap());
+        aiApiInner.addView(apiValueRow("最大回复长度", API_MAX[aiApiMaxIdx] + " 字",
+                new View.OnClickListener() {
+                    public void onClick(View v) {
+                        aiApiMaxIdx = (aiApiMaxIdx + 1) % API_MAX.length;
+                        saveApiConfig();
+                        renderAiApi();
+                    }
+                }), gap());
+        aiApiInner.addView(apiValueRow("思考强度", API_THINK[aiApiThinkIdx],
+                new View.OnClickListener() {
+                    public void onClick(View v) {
+                        aiApiThinkIdx = (aiApiThinkIdx + 1) % API_THINK.length;
+                        saveApiConfig();
+                        renderAiApi();
+                    }
+                }), gap());
+        aiApiInner.addView(aiHint("温度越高越发散；思考强度只对支持的模型生效，其余模型忽略。"), wrap());
+
+        aiApiInner.addView(sectionHeader("关于密钥"), wrap());
+        aiApiInner.addView(aiHint("密钥只存在这台手表上：单独存放、不进系统备份、不上传、不写日志。"
+                + "换设备要重新填。手表键盘难打，可以从别处复制后点「粘贴」。"), wrap());
+        aiApiInner.addView(aiHint("接口只允许 https：明文 http 会让密钥在网络里裸奔。"
+                + "自建转发要填完整路径，比如 https://你的域名/v1。"), wrap());
+
+        TextView clear = new TextView(this);
+        clear.setText("清除密钥");
+        clear.setTextSize(m.subtitleSize - 1f);
+        clear.setGravity(Gravity.CENTER);
+        clear.setTextColor(0xFFFFB74D);
+        clear.setPadding(dp(8), dp(9), dp(8), dp(9));
+        clear.setBackgroundDrawable(pill(C_PILL));
+        clear.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                confirmAction("清除密钥？", "只删本机保存的这一串，地址、模型和对话参数保留。", "清除",
+                        0xFFFFB74D, new Runnable() {
+                            public void run() {
+                                saveApiSecret("");
+                                toast("密钥已清除");
+                                renderAiApi();
+                            }
+                        });
+            }
+        });
+        LinearLayout.LayoutParams clp = wrap();
+        clp.topMargin = dp(6);
+        aiApiInner.addView(clear, clp);
+
         padInner(aiApiInner);
         if (keepY >= 0) scrollToY(aiApiScroll, keepY);
         else scrollToTop(aiApiScroll);
+    }
+
+    /** 行间距 4dp 的布局参数，省得每处都写一遍。 */
+    private LinearLayout.LayoutParams gap() {
+        LinearLayout.LayoutParams lp = wrap();
+        lp.bottomMargin = dp(4);
+        return lp;
+    }
+
+    // ---- 配置读写 ----
+
+    private void loadApiConfig() {
+        aiApiPreset = prefs.getInt("api_preset", 0);
+        if (aiApiPreset < 0 || aiApiPreset >= API_PRESETS.length) aiApiPreset = 0;
+        aiApiEndpoint = prefs.getString("api_endpoint", API_PRESET_BASE[aiApiPreset]);
+        aiApiModel = prefs.getString("api_model", API_PRESET_MODEL[aiApiPreset]);
+        aiApiTempIdx = clampIdx(prefs.getInt("api_temp", 1), API_TEMPS.length);
+        aiApiCtxIdx = clampIdx(prefs.getInt("api_ctx", 1), API_CTX.length);
+        aiApiMaxIdx = clampIdx(prefs.getInt("api_max", 1), API_MAX.length);
+        aiApiThinkIdx = clampIdx(prefs.getInt("api_think", 0), API_THINK.length);
+        aiApiSecret = apiUnseal(secretPrefs().getString(API_SECRET_KEY, ""));
+    }
+
+    private static int clampIdx(int v, int len) {
+        return (v < 0 || v >= len) ? 0 : v;
+    }
+
+    private SharedPreferences secretPrefs() {
+        return getSharedPreferences(API_SECRET_PREF, Context.MODE_PRIVATE);
+    }
+
+    private void saveApiConfig() {
+        prefs.edit()
+                .putInt("api_preset", aiApiPreset)
+                .putString("api_endpoint", aiApiEndpoint)
+                .putString("api_model", aiApiModel)
+                .putInt("api_temp", aiApiTempIdx)
+                .putInt("api_ctx", aiApiCtxIdx)
+                .putInt("api_max", aiApiMaxIdx)
+                .putInt("api_think", aiApiThinkIdx)
+                .apply();
+    }
+
+    private void saveApiSecret(String key) {
+        aiApiSecret = key == null ? "" : key.trim();
+        secretPrefs().edit().putString(API_SECRET_KEY, apiSeal(aiApiSecret)).apply();
+    }
+
+    /** 落盘前套一层异或 + Base64：只为不让明文躺在备份文件里，不当作加密用。 */
+    private static String apiSeal(String s) {
+        if (s == null || s.length() == 0) return "";
+        byte[] b = s.getBytes(StandardCharsets.UTF_8);
+        for (int i = 0; i < b.length; i++) b[i] ^= (byte) (0x5A + (i * 31) % 128);
+        return Base64.encodeToString(b, Base64.NO_WRAP);
+    }
+
+    private static String apiUnseal(String s) {
+        if (s == null || s.length() == 0) return "";
+        try {
+            byte[] b = Base64.decode(s, Base64.NO_WRAP);
+            for (int i = 0; i < b.length; i++) b[i] ^= (byte) (0x5A + (i * 31) % 128);
+            return new String(b, StandardCharsets.UTF_8);
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    private boolean aiApiReady() {
+        return aiApiEndpoint.trim().length() > 0 && aiApiSecret.length() > 0
+                && aiApiModel.trim().length() > 0;
+    }
+
+    private String aiApiMissing() {
+        if (aiApiEndpoint.trim().length() == 0) return "先填接口地址";
+        if (aiApiSecret.length() == 0) return "先填密钥";
+        if (aiApiModel.trim().length() == 0) return "先填模型名";
+        return "";
+    }
+
+    private String aiApiSummary() {
+        String s = API_PRESETS[aiApiPreset] + " · "
+                + (aiApiModel.trim().length() == 0 ? "未选模型" : aiApiModel);
+        if (aiApiEndpoint.trim().length() == 0) return s + "\n地址未填";
+        if (aiApiSecret.length() == 0) return s + "\n密钥未填，填完才能测";
+        if (aiApiModel.trim().length() == 0) return s + "\n模型未填";
+        return s + "\n配置完整，可以测连接";
+    }
+
+    private String apiKeyMask() {
+        int n = aiApiSecret.length();
+        if (n == 0) return "未填";
+        if (n <= 10) return "已填 ·••••";
+        return aiApiSecret.substring(0, 3) + "••••"
+                + aiApiSecret.substring(n - 4);
+    }
+
+    // ---- 页面上的行与交互 ----
+
+    /** 三选一的服务商条：选中项用主色底，一眼看清当前是哪个。 */
+    private View apiPresetRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        for (int i = 0; i < API_PRESETS.length; i++) {
+            final int idx = i;
+            boolean on = idx == aiApiPreset;
+            TextView b = new TextView(this);
+            b.setText(API_PRESETS[i]);
+            b.setTextSize(Math.max(9f, m.subtitleSize - 2f));
+            b.setGravity(Gravity.CENTER);
+            b.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            b.setTextColor(on ? C_PRIMARY : C_SUB);
+            b.setPadding(dp(3), dp(9), dp(3), dp(9));
+            b.setBackgroundDrawable(pill(on ? 0xFF14384A : C_PILL));
+            b.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    vibrate();
+                    applyApiPreset(idx);
+                }
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            lp.leftMargin = dp(2);
+            lp.rightMargin = dp(2);
+            row.addView(b, lp);
+        }
+        return row;
+    }
+
+    private void applyApiPreset(int idx) {
+        aiApiPreset = idx;
+        String base = API_PRESET_BASE[idx];
+        if (base.length() > 0) {
+            aiApiEndpoint = base;
+            aiApiModel = API_PRESET_MODEL[idx];
+        }
+        aiApiModels.clear();
+        saveApiConfig();
+        renderAiApi();
+        toast(base.length() > 0 ? ("已切到" + API_PRESETS[idx] + "，填密钥就能测") : "自定义：自己填地址和模型");
+    }
+
+    /** 一行「标签 —— 值」，点整行触发编辑；值太长时保留头尾、中间省略。 */
+    private View apiValueRow(String label, String value, View.OnClickListener onClick) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(10), dp(8), dp(10), dp(8));
+        row.setBackgroundDrawable(pill(C_CARD));
+        row.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                if (onClick != null) onClick.onClick(v);
+            }
+        });
+
+        TextView name = new TextView(this);
+        name.setText(label);
+        name.setTextSize(m.backSize);
+        name.setTextColor(C_SUB);
+        name.setSingleLine(true);
+
+        TextView val = new TextView(this);
+        val.setText(value);
+        val.setTextSize(m.subtitleSize - 1f);
+        val.setTextColor(C_PRIMARY);
+        val.setGravity(Gravity.END);
+        val.setSingleLine(true);
+        val.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        vlp.leftMargin = dp(8);
+        val.setLayoutParams(vlp);
+
+        row.addView(name);
+        row.addView(val);
+        return row;
+    }
+
+    private void editApiEndpoint() {
+        apiInputDialog("接口地址", "https://api.deepseek.com", aiApiEndpoint, false,
+                new ApiTextSink() {
+                    public void onText(String v) {
+                        String s = v == null ? "" : v.trim();
+                        while (s.endsWith("/")) s = s.substring(0, s.length() - 1);
+                        if (s.length() == 0) {
+                            toast("地址不能为空");
+                            return;
+                        }
+                        if (!s.startsWith("https://") || s.length() < 14) {
+                            toast("要 https:// 开头的完整地址");
+                            return;
+                        }
+                        aiApiEndpoint = s;
+                        aiApiPreset = guessApiPreset(s);
+                        aiApiModels.clear();
+                        saveApiConfig();
+                        renderAiApi();
+                    }
+                });
+    }
+
+    private int guessApiPreset(String base) {
+        for (int i = 0; i < API_PRESET_BASE.length; i++) {
+            if (API_PRESET_BASE[i].length() > 0 && API_PRESET_BASE[i].equals(base)) return i;
+        }
+        return API_PRESET_BASE.length - 1;
+    }
+
+    private void editApiSecret() {
+        apiInputDialog("API 密钥", "粘贴或输入密钥", aiApiSecret, true, new ApiTextSink() {
+            public void onText(String v) {
+                String s = v == null ? "" : v.trim();
+                if (s.length() == 0) {
+                    toast("没填内容，密钥没变");
+                    return;
+                }
+                if (s.indexOf(' ') >= 0) {
+                    toast("密钥里不该有空格，检查是否复制多了");
+                    return;
+                }
+                saveApiSecret(s);
+                renderAiApi();
+                toast(s.length() < 16 ? "已保存，但这个长度不像正常密钥" : "密钥已保存");
+            }
+        });
+    }
+
+    private void pickApiModel() {
+        if (aiApiModels.isEmpty()) {
+            // 还没拉过：直接给输入框，省得用户先点一次拉取
+            apiInputDialog("模型名", "如 deepseek-chat", aiApiModel, false, new ApiTextSink() {
+                public void onText(String v) {
+                    String s = v == null ? "" : v.trim();
+                    if (s.length() == 0) {
+                        toast("模型名不能为空");
+                        return;
+                    }
+                    aiApiModel = s;
+                    saveApiConfig();
+                    renderAiApi();
+                }
+            });
+            return;
+        }
+        showApiModelPicker();
+    }
+
+    /** 拉取到的模型列表：模型多的服务商有几十个，所以放进滚动区。 */
+    private void showApiModelPicker() {
+        if (aiApiModels.isEmpty()) return;
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(12), dp(10), dp(12), dp(8));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xFF151515);
+        bg.setCornerRadius(dp(16));
+        box.setBackgroundDrawable(bg);
+
+        final AlertDialog d = new AlertDialog.Builder(this).setView(box).create();
+
+        TextView t = new TextView(this);
+        t.setText("选模型（" + aiApiModels.size() + " 个）");
+        t.setTextSize(m.subtitleSize);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setTextColor(Color.WHITE);
+        t.setGravity(Gravity.CENTER);
+        box.addView(t, wrap());
+
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        for (int i = 0; i < aiApiModels.size(); i++) {
+            final String id = aiApiModels.get(i);
+            TextView b = new TextView(this);
+            b.setText(id);
+            b.setTextSize(m.subtitleSize - 1f);
+            b.setTypeface(id.equals(aiApiModel) ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            b.setTextColor(id.equals(aiApiModel) ? C_PRIMARY : C_TEXT);
+            b.setGravity(Gravity.CENTER);
+            b.setSingleLine(true);
+            b.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+            b.setPadding(dp(8), dp(9), dp(8), dp(9));
+            b.setBackgroundDrawable(pill(C_PILL));
+            b.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    vibrate();
+                    try { d.dismiss(); } catch (Throwable ignored) { }
+                    aiApiModel = id;
+                    saveApiConfig();
+                    renderAiApi();
+                }
+            });
+            LinearLayout.LayoutParams lp = wrap();
+            lp.bottomMargin = dp(4);
+            list.addView(b, lp);
+        }
+
+        ScrollView sv = new OverScrollScrollView(this);
+        sv.setVerticalScrollBarEnabled(false);
+        sv.addView(list, wrap());
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, m.round ? dp(150) : dp(240));
+        slp.topMargin = dp(4);
+        box.addView(sv, slp);
+
+        TextView no = new TextView(this);
+        no.setText("取消");
+        no.setTextSize(m.subtitleSize - 1f);
+        no.setGravity(Gravity.CENTER);
+        no.setTextColor(C_SUB);
+        no.setPadding(dp(8), dp(9), dp(8), dp(4));
+        no.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                try { d.dismiss(); } catch (Throwable ignored) { }
+            }
+        });
+        box.addView(no, wrap());
+
+        tuneDialogWindow(d);
+        d.show();
+        sizeDialog(d, 0.9f);
+    }
+
+    // ---- 通用小输入弹窗：一行输入 + 粘贴 + 保存 ----
+
+    private interface ApiTextSink {
+        void onText(String text);
+    }
+
+    private void apiInputDialog(String title, String hint, String initial, boolean secret,
+                                final ApiTextSink sink) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(13), dp(12), dp(13), dp(8));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xFF151515);
+        bg.setCornerRadius(dp(16));
+        box.setBackgroundDrawable(bg);
+
+        TextView t = new TextView(this);
+        t.setText(title);
+        t.setTextSize(m.subtitleSize);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setTextColor(Color.WHITE);
+        t.setGravity(Gravity.CENTER);
+        box.addView(t, wrap());
+
+        final EditText ed = new EditText(this);
+        ed.setText(initial == null ? "" : initial);
+        ed.setHint(hint);
+        ed.setSingleLine(true);
+        ed.setTextSize(m.subtitleSize - 1f);
+        ed.setTextColor(Color.WHITE);
+        ed.setHintTextColor(C_SUB);
+        ed.setBackgroundDrawable(pill(C_PILL));
+        ed.setPadding(dp(10), dp(8), dp(10), dp(8));
+        // 密码型不显示明文；地址/模型名用 URI 类型，避免首字母自动大写把地址写坏
+        ed.setInputType(secret
+                ? (android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD)
+                : (android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_URI));
+        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        elp.topMargin = dp(6);
+        box.addView(ed, elp);
+
+        LinearLayout util = new LinearLayout(this);
+        util.setOrientation(LinearLayout.HORIZONTAL);
+        TextView paste = new TextView(this);
+        paste.setText("粘贴");
+        paste.setTextSize(m.subtitleSize - 2f);
+        paste.setGravity(Gravity.CENTER);
+        paste.setTextColor(C_SUB);
+        paste.setPadding(dp(6), dp(7), dp(6), dp(7));
+        paste.setBackgroundDrawable(pill(C_PILL));
+        util.addView(paste, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        if (secret) {
+            TextView wipe = new TextView(this);
+            wipe.setText("清空");
+            wipe.setTextSize(m.subtitleSize - 2f);
+            wipe.setGravity(Gravity.CENTER);
+            wipe.setTextColor(0xFFFFB74D);
+            wipe.setPadding(dp(6), dp(7), dp(6), dp(7));
+            wipe.setBackgroundDrawable(pill(C_PILL));
+            LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            wlp.leftMargin = dp(4);
+            util.addView(wipe, wlp);
+            wipe.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    vibrate();
+                    ed.setText("");
+                }
+            });
+        }
+        LinearLayout.LayoutParams ulp = wrap();
+        ulp.topMargin = dp(4);
+        box.addView(util, ulp);
+
+        final AlertDialog d = new AlertDialog.Builder(this).setView(box).create();
+
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        TextView save = new TextView(this);
+        save.setText("保存");
+        save.setTextSize(m.backSize);
+        save.setTypeface(Typeface.DEFAULT_BOLD);
+        save.setGravity(Gravity.CENTER);
+        save.setTextColor(C_PRIMARY);
+        save.setPadding(dp(10), dp(11), dp(10), dp(11));
+        save.setBackgroundDrawable(pill(0xFF14384A));
+        bar.addView(save, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 2f));
+
+        TextView cancel = new TextView(this);
+        cancel.setText("取消");
+        cancel.setTextSize(m.subtitleSize - 1f);
+        cancel.setGravity(Gravity.CENTER);
+        cancel.setTextColor(C_SUB);
+        cancel.setPadding(dp(8), dp(11), dp(8), dp(11));
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        clp.leftMargin = dp(6);
+        bar.addView(cancel, clp);
+        LinearLayout.LayoutParams blp = wrap();
+        blp.topMargin = dp(6);
+        box.addView(bar, blp);
+
+        paste.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                String s = clipboardText();
+                if (s.length() == 0) {
+                    toast("剪贴板是空的");
+                    return;
+                }
+                ed.setText(s);
+                ed.setSelection(ed.getText().length());
+                toast("已粘贴");
+            }
+        });
+        save.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                String v2 = ed.getText().toString();
+                try { d.dismiss(); } catch (Throwable ignored) { }
+                sink.onText(v2);
+            }
+        });
+        cancel.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                try { d.dismiss(); } catch (Throwable ignored) { }
+            }
+        });
+
+        tuneDialogInput(d);   // 键盘弹出时弹窗不跳，内容不被顶走
+        d.show();
+        sizeDialog(d, 0.86f);
+    }
+
+    /** 读剪贴板第一项；没有就是空串。 */
+    private String clipboardText() {
+        try {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm == null || !cm.hasPrimaryClip() || cm.getPrimaryClip() == null) return "";
+            CharSequence cs = cm.getPrimaryClip().getItemAt(0).coerceToText(this);
+            return cs == null ? "" : cs.toString().trim();
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    // ---- 网络：拉模型 / 测连接 ----
+
+    private String apiUrl(String path) {
+        String b = aiApiEndpoint == null ? "" : aiApiEndpoint.trim();
+        while (b.endsWith("/")) b = b.substring(0, b.length() - 1);
+        if (!path.startsWith("/")) path = "/" + path;
+        return b + path;
+    }
+
+    /** 一次接口调用的结果：HTTP 码 + 正文 + 网络层错误 + 耗时。 */
+    private static class ApiRes {
+        int code = 0;
+        String body = "";
+        String err = null;
+        long ms = 0;
+        boolean ok() { return err == null && code >= 200 && code < 300; }
+    }
+
+    /** 同步调用，必须在子线程跑；返回后自己 runOnUiThread 处理。 */
+    private ApiRes apiCall(String method, String path, JSONObject payload) {
+        ApiRes r = new ApiRes();
+        long t0 = System.currentTimeMillis();
+        HttpURLConnection c = null;
+        try {
+            c = (HttpURLConnection) new URL(apiUrl(path)).openConnection();
+            c.setRequestMethod(method);
+            c.setConnectTimeout(15000);
+            c.setReadTimeout(30000);
+            // 不跟随跳转：跟到别的域会把 Authorization 一起带过去
+            c.setInstanceFollowRedirects(false);
+            c.setRequestProperty("Authorization", "Bearer " + aiApiSecret);
+            c.setRequestProperty("Accept", "application/json");
+            c.setRequestProperty("User-Agent", "HZKnowledge-Android");
+            if (payload != null) {
+                byte[] data = payload.toString().getBytes(StandardCharsets.UTF_8);
+                c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                c.setDoOutput(true);
+                c.setFixedLengthStreamingMode(data.length);
+                OutputStream os = c.getOutputStream();
+                os.write(data);
+                os.flush();
+                os.close();
+            }
+            r.code = c.getResponseCode();
+            InputStream is;
+            try {
+                is = (r.code >= 200 && r.code < 300) ? c.getInputStream() : c.getErrorStream();
+            } catch (Throwable t) {
+                is = c.getErrorStream();
+            }
+            r.body = readAllText(is);
+        } catch (java.net.SocketTimeoutException e) {
+            r.err = "连接超时：检查网络和接口地址";
+        } catch (java.net.UnknownHostException e) {
+            r.err = "域名解析不了：地址可能写错";
+        } catch (javax.net.ssl.SSLException e) {
+            r.err = "安全连接失败：地址不是 https 或证书有问题";
+        } catch (Throwable e) {
+            r.err = "连不上：" + (e == null || e.getClass() == null
+                    ? "未知原因" : e.getClass().getSimpleName());
+        } finally {
+            if (c != null) {
+                try { c.disconnect(); } catch (Throwable ignored) { }
+            }
+            r.ms = System.currentTimeMillis() - t0;
+        }
+        return r;
+    }
+
+    private String readAllText(InputStream is) {
+        if (is == null) return "";
+        try {
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] b = new byte[8192];
+            int n;
+            while ((n = is.read(b)) > 0) bos.write(b, 0, n);
+            is.close();
+            String s = new String(bos.toByteArray(), StandardCharsets.UTF_8);
+            // 只留前 4000 字：错误正文一般很短，成功正文前面就是有用的部分
+            return s.length() > 4000 ? s.substring(0, 4000) : s;
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /** 把接口失败翻成人话，并带上服务端自己说的原因（截断）。 */
+    private String apiErrText(ApiRes r) {
+        if (r.err != null) return r.err;
+        String detail = apiServerMsg(r.body);
+        if (r.code == 400) return "请求被拒绝（400）" + detail;
+        if (r.code == 401) return "密钥不对（401）" + detail;
+        if (r.code == 402) return "余额不足（402）" + detail;
+        if (r.code == 403) return "没有权限（403）" + detail;
+        if (r.code == 404) return "地址不对（404）：有的服务要带 /v1" + detail;
+        if (r.code == 429) return "请求太频繁或额度用尽（429）" + detail;
+        if (r.code >= 500) return "服务端故障（" + r.code + "），稍后再试" + detail;
+        if (r.code == 0) return "没拿到响应" + detail;
+        return "接口返回 " + r.code + detail;
+    }
+
+    private String apiServerMsg(String body) {
+        if (body == null || body.trim().length() == 0) return "";
+        try {
+            JSONObject o = new JSONObject(body);
+            JSONObject e = o.optJSONObject("error");
+            String m = e == null ? o.optString("message", "") : e.optString("message", "");
+            if (m.length() == 0) m = o.optString("detail", "");
+            m = firstLine(m == null ? "" : m.trim(), 40);
+            return m.length() == 0 ? "" : "：" + m;
+        } catch (Throwable t) {
+            String s = firstLine(body.trim(), 40);
+            return s.length() == 0 ? "" : "：" + s;
+        }
+    }
+
+    private void aiApiFetchModels() {
+        if (aiApiBusy != null) return;
+        if (aiApiEndpoint.trim().length() == 0) {
+            toast("先填接口地址");
+            return;
+        }
+        if (aiApiSecret.length() == 0) {
+            toast("先填密钥");
+            return;
+        }
+        aiApiBusy = "正在拉取模型列表…";
+        renderAiApi();
+        final String base = aiApiEndpoint;
+        final String key = aiApiSecret;
+        new Thread(new Runnable() {
+            public void run() {
+                final ApiRes r = apiCall("GET", "/models", null);
+                final List<String> ids = new ArrayList<String>();
+                if (r.ok()) {
+                    try {
+                        JSONArray arr = new JSONObject(r.body).optJSONArray("data");
+                        if (arr != null) {
+                            for (int i = 0; i < arr.length(); i++) {
+                                JSONObject o = arr.optJSONObject(i);
+                                String id = o == null ? "" : o.optString("id", "");
+                                if (id.length() > 0 && !ids.contains(id)) ids.add(id);
+                            }
+                        }
+                    } catch (Throwable ignored) { }
+                }
+                final boolean keep = base.equals(aiApiEndpoint) && key.equals(aiApiSecret);
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        aiApiBusy = null;
+                        if (!alive()) return;
+                        if (screen == S_AI_API_CFG) renderAiApi();
+                        if (!keep) { toast("配置已改，重新拉一次"); return; }
+                        if (!r.ok()) { toast(apiErrText(r)); return; }
+                        if (ids.isEmpty()) { toast("接口没返回模型，手动填模型名"); return; }
+                        aiApiModels.clear();
+                        aiApiModels.addAll(ids);
+                        // 还没选过模型：直接把第一个填上，省得再点一次
+                        if (aiApiModel.trim().length() == 0) {
+                            aiApiModel = ids.get(0);
+                            saveApiConfig();
+                            if (screen == S_AI_API_CFG) renderAiApi();
+                        }
+                        showApiModelPicker();
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private void aiApiTest() {
+        if (aiApiBusy != null) return;
+        if (!aiApiReady()) {
+            toast(aiApiMissing());
+            return;
+        }
+        aiApiBusy = "正在测试连接…（最长 30 秒）";
+        renderAiApi();
+        final String base = aiApiEndpoint;
+        final String key = aiApiSecret;
+        final String model = aiApiModel;
+        new Thread(new Runnable() {
+            public void run() {
+                ApiRes r;
+                JSONObject p = new JSONObject();
+                try {
+                    p.put("model", model);
+                    JSONArray msgs = new JSONArray();
+                    JSONObject m1 = new JSONObject();
+                    m1.put("role", "user");
+                    m1.put("content", "只回复两个字：收到");
+                    msgs.put(m1);
+                    p.put("messages", msgs);
+                    p.put("max_tokens", 16);
+                    p.put("temperature", 0);
+                    p.put("stream", false);
+                    r = apiCall("POST", "/chat/completions", p);
+                } catch (Throwable t) {
+                    r = new ApiRes();
+                    r.err = "请求拼装失败";
+                }
+                final ApiRes res = r;
+                final boolean keep = base.equals(aiApiEndpoint) && key.equals(aiApiSecret);
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        aiApiBusy = null;
+                        if (!alive()) return;
+                        if (screen == S_AI_API_CFG) renderAiApi();
+                        if (!keep) { toast("配置已改，重新测一次"); return; }
+                        if (!res.ok()) { toast(apiErrText(res)); return; }
+                        String reply = apiReplyText(res.body);
+                        long ms = res.ms;
+                        String took = (ms / 100) / 10f + " 秒";
+                        toast("连接正常（" + took + "）" + (reply.length() == 0 ? "" : "：" + reply));
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private String apiReplyText(String body) {
+        try {
+            JSONArray ch = new JSONObject(body).optJSONArray("choices");
+            if (ch == null || ch.length() == 0) return "";
+            JSONObject c0 = ch.optJSONObject(0);
+            JSONObject msg = c0 == null ? null : c0.optJSONObject("message");
+            if (msg == null) return "";
+            String s = msg.optString("content", "");
+            if (s == null || s.trim().length() == 0) s = msg.optString("reasoning_content", "");
+            return firstLine(s == null ? "" : s.trim(), 24);
+        } catch (Throwable t) {
+            return "";
+        }
     }
 
     private void buildAiWebCfgScreen() {
@@ -3260,7 +4098,8 @@ public class MainActivity extends Activity {
         if ("api".equals(aiMode)) {
             aiCfgBack = S_SUBJECT;
             showScreen(S_AI_API_CFG);
-            toast("自行配置模式的对话还在接入，本版请先用 DeepSeek 网页版");
+            if (!aiApiReady()) toast(aiApiMissing());
+            else toast("配置已就绪；对话页下一版接入");
         } else {
             aiWebBack = S_SUBJECT;
             showScreen(S_AI_WEB);

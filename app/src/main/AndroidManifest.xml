@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.lizard.hsknowledge"
-    android:versionCode="145"
-    android:versionName="3.0.8">
+    android:versionCode="146"
+    android:versionName="3.0.9">
 
     <uses-sdk
         android:minSdkVersion="23"
@@ -17,6 +17,8 @@
         android:icon="@mipmap/ic_launcher"
         android:theme="@style/AppTheme"
         android:allowBackup="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:hardwareAccelerated="true">
 
         <activity

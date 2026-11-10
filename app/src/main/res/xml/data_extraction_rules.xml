@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API 密钥既不进云备份，也不进换机迁移（Android 12 起用这个文件）。
+     API 密钥属于「只留在本设备」的东西，换机重填一次更安全。 -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="ai_api_secret.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="ai_api_secret.xml" />
+    </device-transfer>
+</data-extraction-rules>

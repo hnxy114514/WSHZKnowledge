@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API 密钥不进自动备份（Android 11 及更早用这个文件）。
+     别的设置照旧备份：换机后字号、排序、收藏都还在，只有密钥要重填。 -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="ai_api_secret.xml" />
+</full-backup-content>
