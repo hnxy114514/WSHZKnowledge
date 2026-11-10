@@ -18,6 +18,7 @@ import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.BitmapShader;
 import android.graphics.Path;
+import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
@@ -7125,6 +7126,64 @@ public class MainActivity extends Activity {
     }
 
     /** 测量一组元素，返回 {宽, 基线上高度, 基线下高度}。 */
+    /** 墨迹上沿：基线以上多少像素。
+     *  文本节点必须用 getTextBounds 量真实字高，不能用 FontMetrics.ascent——后者是整行字体的
+     *  上沿（西文约 0.9em），而 x、a 这类字母只有 0.5em 高，用字体上沿画根号横线，
+     *  横线就会飘在字母上方老远，看着跟字母没关系（v3.2.0 真机反馈就是这个）。 */
+    private static float inkTop(Inl t, Paint p, float size) {
+        if (t == null) return size * 0.5f;
+        if (t.type == 0) {
+            p.setTextSize(size);
+            String str = t.s == null ? "" : t.s;
+            if (str.trim().length() == 0) return size * 0.5f;   // 空白没有墨迹，给个常规高度
+            Rect r = new Rect();
+            p.getTextBounds(str, 0, str.length(), r);
+            float h = -r.top;
+            return h <= 1f ? size * 0.5f : h;
+        }
+        if (t.type == 1) return inkTop(t.kids.get(0), p, size * SUB_SCALE) + size * 0.34f;
+        if (t.type == 2) return Math.max(size * 0.34f,
+                inkTop(t.kids.get(0), p, size * SUB_SCALE) - size * 0.20f);
+        if (t.type == 3) {
+            float s2 = size * FRAC_SCALE;
+            return s2 * 0.30f + s2 * 0.14f + inkTop(t.kids.get(0), p, s2);
+        }
+        if (t.type == 4) return inkTop(t.kids.get(0), p, size) + size * 0.14f;
+        if (t.type == 6) return inkTop(t.kids.get(0), p, size) + size * 0.30f;
+        float m = size * 0.5f;
+        for (Inl k : t.kids) m = Math.max(m, inkTop(k, p, size));
+        return m;
+    }
+
+    /** 墨迹下沿：基线以下多少像素。分式的分子要按这个贴到横线上方，
+     *  用字体 descent 会把分子顶得太高、分母又被推得太低，中间空一大截。 */
+    private static float inkBottom(Inl t, Paint p, float size) {
+        if (t == null) return 0f;
+        if (t.type == 0) {
+            p.setTextSize(size);
+            String str = t.s == null ? "" : t.s;
+            if (str.trim().length() == 0) return 0f;
+            Rect r = new Rect();
+            p.getTextBounds(str, 0, str.length(), r);
+            return Math.max(0f, r.bottom);
+        }
+        if (t.type == 1) return Math.max(0f, inkBottom(t.kids.get(0), p, size * SUB_SCALE) - size * 0.34f);
+        if (t.type == 2) return inkBottom(t.kids.get(0), p, size * SUB_SCALE) + size * 0.20f;
+        if (t.type == 3) {
+            float s2 = size * FRAC_SCALE;
+            float gap = s2 * 0.14f, barUp = s2 * 0.30f;
+            float d = inkTop(t.kids.get(1), p, s2) + inkBottom(t.kids.get(1), p, s2) + gap - barUp;
+            return Math.max(d, s2 * 0.18f);
+        }
+        if (t.type == 4) {
+            return Math.max(inkBottom(t.kids.get(0), p, size), size * 0.06f) + size * 0.08f;
+        }
+        if (t.type == 6) return inkBottom(t.kids.get(0), p, size);
+        float m = 0f;
+        for (Inl k : t.kids) m = Math.max(m, inkBottom(k, p, size));
+        return m;
+    }
+
     private static float[] measList(Inl grp, Paint p, float size) {
         if (grp.type == 0) {
             p.setTextSize(size);
@@ -7151,16 +7210,18 @@ public class MainActivity extends Activity {
             float[] b = measList(grp.kids.get(1), p, s2);
             float gap = s2 * 0.14f, barUp = s2 * 0.30f;
             float w = Math.max(a[0], b[0]) + s2 * 0.26f;
-            float asc = barUp + gap + a[1] + a[2];
-            float desc = Math.max(b[1] + b[2] + gap - barUp, s2 * 0.18f);
+            float asc = barUp + gap + inkBottom(grp.kids.get(0), p, s2)
+                    + inkTop(grp.kids.get(0), p, s2);
+            float desc = Math.max(inkTop(grp.kids.get(1), p, s2)
+                    + inkBottom(grp.kids.get(1), p, s2) + gap - barUp, s2 * 0.18f);
             return new float[]{w, asc, desc};
         }
         if (grp.type == 4) {
             float[] in = measList(grp.kids.get(0), p, size);
-            float hook = size * 0.42f;
-            float w = hook + in[0] + size * 0.12f;
-            float asc = in[1] + size * 0.18f;
-            float desc = Math.max(in[2], size * 0.06f) + size * 0.10f;
+            float hook = size * 0.40f;
+            float w = hook + in[0] + size * 0.06f;
+            float asc = inkTop(grp.kids.get(0), p, size) + size * 0.14f;
+            float desc = Math.max(in[2], size * 0.06f) + size * 0.08f;
             return new float[]{w, asc, desc};
         }
         if (grp.type == 6) {
@@ -7225,7 +7286,9 @@ public class MainActivity extends Activity {
             float cx = x + w / 2f;
             float gap = s2 * 0.14f, barUp = s2 * 0.30f;
             float barY = base - barUp;
-            drawCentered(c, p, t.kids.get(0), cx, barY - gap - a[2], s2, color);
+            // 分子贴横线上方、分母贴下方，用墨迹下沿/上沿定位；用字体 descent 会留出很大一段空白
+            drawCentered(c, p, t.kids.get(0), cx,
+                    barY - gap - inkBottom(t.kids.get(0), p, s2), s2, color);
             Paint.Style oldStyle = p.getStyle();
             p.setStyle(Paint.Style.STROKE);
             p.setStrokeWidth(Math.max(1.2f, s2 * 0.07f));
@@ -7233,21 +7296,27 @@ public class MainActivity extends Activity {
             float half = Math.max(a[0], b[0]) / 2f + s2 * 0.10f;
             c.drawLine(cx - half, barY, cx + half, barY, p);
             p.setStyle(oldStyle);
-            drawCentered(c, p, t.kids.get(1), cx, barY + gap + b[1], s2, color);
+            drawCentered(c, p, t.kids.get(1), cx,
+                    barY + gap + inkTop(t.kids.get(1), p, s2), s2, color);
         } else if (t.type == 4) {
-            float[] in = measList(t.kids.get(0), p, size);
-            float hook = size * 0.42f;
+            Inl kid = t.kids.get(0);
+            float[] in = measList(kid, p, size);
+            float ink = inkTop(kid, p, size);                // 被开方数的真实墨迹上沿
+            float hook = size * 0.40f;
             float innerX = x + hook;
-            drawList(c, p, t.kids.get(0), innerX, base, size, color);
+            drawList(c, p, kid, innerX, base, size, color);
             // 根号一笔画完：顶部短横 → 向左下撇到最低点 → 从最低点回笔升到顶部 → 长横线盖住被开方数。
             // 关键是不能省掉「回笔」那一笔，少了它就只剩「一捺加一横」，根本不像根号。
-            float top = base - in[1] - size * 0.12f;
-            float bot = base + Math.max(in[2], size * 0.06f) + size * 0.08f;
-            float x0 = x;                                   // 短横左端
-            float xs = x + hook * 0.30f;                    // 短横右端，撇从这开始
-            float xl = x + hook * 0.10f;                    // 最低点
-            float xr = x + hook * 0.62f;                    // 回笔升回顶部，长横线从这起
-            float right = innerX + in[0] + size * 0.10f;    // 长横线右端
+            // 顶边按墨迹算（见 inkTop），横线才贴着字母，不会飘在半空。
+            float top = base - ink - size * 0.10f;
+            float bot = base + Math.max(in[2], size * 0.06f) + size * 0.06f;
+            // 形状按标准根号摆：短横在左上角，最低点是整个字形的最左端，
+            // 从最低点斜升到横线起点（斜率别太陡，否则看着像一根竖线）。
+            float x0 = x + hook * 0.10f;                    // 短横左端
+            float xs = x + hook * 0.34f;                    // 短横右端，撇从这开始
+            float xl = x;                                   // 最低点：字形最左端
+            float xr = x + hook * 0.78f;                    // 回笔升回顶部，长横线从这起
+            float right = innerX + in[0] + size * 0.04f;    // 长横线右端，只留一点点余量
             Path rad = new Path();
             rad.moveTo(x0, top);
             rad.lineTo(xs, top);

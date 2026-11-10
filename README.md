@@ -718,6 +718,9 @@ Node {
       - 流式：`POST /chat/completions` 带 `stream:true`，按行读 SSE（`data:` / `[DONE]`），
         `delta.content` 追到当前气泡，`delta.reasoning_content` 显示成灰色的「思考：…」，
         80ms 节流刷新；网关不支持流式、直接回整段 JSON 时也能解析。
+      - **度量按墨迹、不按字体行高**：`inkTop()` / `inkBottom()` 用 `getTextBounds` 拿真实字高。
+        `FontMetrics.ascent` 是整行字体上沿（约 0.9em），而 x、a 这类字母只有 0.5em 高；
+        拿行高当依据，根号横线会飘在字母上方很远、分式分子分母会上下各空一大截（v3.2.0 真机现象）。
       - **公式与知识点同一套渲染**：AI 回复过 `applyMarkup()`（和知识点详情页同一个入口），
         所以 `\frac{}{}`、`\sqrt{}`、`\sqrt[n]{}`、`^{}`、`_{}`、`**重点**` 都会被真正画成
         分数、根式、上下标，而不是原样显示源码。用户自己发的消息保持纯文本（免得一个下划线被当成下标）。
