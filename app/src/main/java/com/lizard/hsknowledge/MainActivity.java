@@ -5564,40 +5564,26 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 每个滚动容器当前挂着的「定位监听器」：替换式单一目标，多次调用只留最新一个。 */
-    private final java.util.Map<ScrollView, android.view.ViewTreeObserver.OnGlobalLayoutListener> scrollLoc =
-            new java.util.HashMap<ScrollView, android.view.ViewTreeObserver.OnGlobalLayoutListener>();
-
-    /** 滚到指定位置。关键：在「布局完成后、绘制前」(OnGlobalLayoutListener) 就位，第一帧绘制前位置已对，
-     *  不会再出现「先露顶部占位、再跳到内容」的闪。内容分帧渲染时高度没铺够，scrollTo 会被钳制，
-     *  所以布局完成时再定一次；到位即移除——不会每帧跑、也不会残留。替换式：同一容器多次调用只留最新目标。
-     *  注册与移除都固定持有「注册时」的 ViewTreeObserver 引用，避免 detach/可见性切换导致观察者实例变化、
-     *  移除删不干净（那会让旧监听器永远每帧滚动，拖垮主线程）。 */
+    /** 滚到指定位置。内容分帧渲染时可能还没铺够高，scrollTo 会被钳制到半路，
+     *  所以没到位就下一帧再定一次（最多 5 次）；期间用户自己滑过（位置已超过目标）就不再动。
+     *  重要：绝不用 OnPreDraw / OnGlobalLayout 这类「每帧 / 每布局」监听器来定位——
+     *  在圆形手表上会启动即崩溃（v3.4.2、v3.4.4 两次翻车都是这个根子：圆屏 overDist≠0 才走这条
+     *  注册监听器的路径，方屏 overDist=0 直接返回不注册，所以只有圆屏崩）。post 延迟到当前帧绘制
+     *  之后执行，稳定、不崩，圆屏方屏通用。 */
     private void scrollToY(final ScrollView sc, final int y) {
         if (sc == null) return;
         final int target = Math.max(0, y);
-        sc.scrollTo(0, target);                       // 先同步设一次：内容已量好就直接到位（不闪）
-        if (Math.abs(sc.getScrollY() - target) <= dp(2)) return;  // 已到位则不必挂监听，零残留
-        final android.view.ViewTreeObserver vto = sc.getViewTreeObserver();  // 注册时固定持有
-        final android.view.ViewTreeObserver.OnGlobalLayoutListener old = scrollLoc.remove(sc);
-        if (old != null) vto.removeOnGlobalLayoutListener(old);
-        final android.view.ViewTreeObserver.OnGlobalLayoutListener l =
-                new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
-                    int tries = 0;
-                    public void onGlobalLayout() {
-                        sc.scrollTo(0, target);
-                        final View child = sc.getChildAt(0);
-                        final int range = (child == null ? 0 : child.getHeight()) - sc.getHeight();
-                        // 到位、内容本就不够高（钳到底）、或试够次数就收手
-                        if (Math.abs(sc.getScrollY() - target) <= dp(2)
-                                || range < target || tries++ >= 8) {
-                            scrollLoc.remove(sc);
-                            vto.removeOnGlobalLayoutListener(this);
-                        }
-                    }
-                };
-        scrollLoc.put(sc, l);
-        vto.addOnGlobalLayoutListener(l);
+        final int[] tries = new int[]{0};
+        final Runnable r = new Runnable() {
+            public void run() {
+                sc.scrollTo(0, target);
+                View child = sc.getChildAt(0);
+                int range = (child == null ? 0 : child.getHeight()) - sc.getHeight();
+                // 内容还没铺够时 scrollTo 会被钳制，这时不能算完成，等下一批行 / 下一帧再补
+                if (tries[0]++ < 5 && target > 0 && sc.getScrollY() < target && range >= target) sc.post(this);
+            }
+        };
+        sc.post(r);
     }
 
     /** 行数据源：只告诉列表「一共几行、第几行长什么样」，行由列表按需造，不一次全建。 */
