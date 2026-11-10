@@ -722,8 +722,15 @@ Node {
     `width=device-width, initial-scale=1, user-scalable=no`，登录框、人机验证弹窗、侧边栏
     都会超出屏幕被裁掉，UI 也挤成一团；系统双指缩放和 `setInitialScale()` 都会被这句覆盖，改不动。
     做法是**纯 Android View 变换、零注入**：把 WebView 控件按更宽的尺寸排版（让网页以为有
-    360dp 宽），`setPivotX(0)/setPivotY(0)` 后用 `setScaleX/Y` 整体缩回手表屏幕，
+    320dp 宽），`setPivotX(0)/setPivotY(0)` 后用 `setScaleX/Y` 整体缩回手表屏幕，
     触摸坐标由系统自动逆变换。`setUseWideViewPort` 保持 `false`，别再叠一层 WebView 内部缩放。
+  - **圆屏安全区（复用既有的 `roundSafe`）**：网页页不能用列表页的左右缩进
+    （`newScreen()` 的 `sidePad`），否则容器比缩放后的网页窄，右边被裁、输入框被截断；
+    这一页把缩进清零。四角再给网页容器四边加 `m.roundSafe + dp(2)` 的 padding
+    （圆屏 = 短边 × 0.146，方屏为 0），网页、错误层、工具条、小箭头一起内缩，
+    左上角和右上角的按钮才落在圆弧内点得到。缩放尺寸一律按「安全区内的可用宽高」算：
+    `LayoutParams = (availW/k, availH/k)`、`scale = k`，视觉尺寸恰好等于可用区，不会再溢出。
+    内容矩形四角要满足 `a²+b² ≤ R²` 才都在圆内，改数值后照这条验一遍。
     缩放按屏幕宽度自动算，屏幕越窄缩得越多；「DeepSeek 网页版设置」里可切「自动 / 更小 /
     原样」，切档就地生效、不重载网页。侧边栏关闭按钮被裁到屏幕外也是同一个原因，
     显示缩放属于零注入，不碰网页 DOM，所以「关掉下载入口开关后完全不注入」这条仍然成立。

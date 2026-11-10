@@ -237,9 +237,10 @@ public class MainActivity extends Activity {
     /** 网页显示缩放档位：0 自动 / 1 更小 / 2 原样，存在 prefs 的 ai_web_zoom。
      *  纯 View 层缩放，不往网页注入任何脚本。 */
     private int aiWebZoomMode = 0;
-    /** 让网页按这个 CSS 宽度排版，再整体缩回手表屏幕（手表原生 CSS 宽度往往只有 200dp 出头）。 */
-    private static final float AI_WEB_TARGET_CSS_W = 360f;
-    private static final float AI_WEB_MIN_SCALE = 0.55f;
+    /** 让网页按这个 CSS 宽度排版，再整体缩回手表屏幕的圆形安全区。320dp 是常见移动端最小宽度，
+     *  再大就要缩得更小、字看不清；太小网页又会把元素挤在一起。 */
+    private static final float AI_WEB_TARGET_CSS_W = 320f;
+    private static final float AI_WEB_MIN_SCALE = 0.40f;
     private static final String AI_WEB_URL = "https://chat.deepseek.com/";
     /** 默认 UA 会被网页挡成 429，必须用正常浏览器 UA（这条实测能拿到 200）。 */
     private static final String AI_WEB_UA =
@@ -2541,11 +2542,17 @@ public class MainActivity extends Activity {
         aiBarHideTask = null;
         aiWebLoaded = false;
         aiWebScreen.removeAllViews();
+        // 列表页的左右缩进不能带到网页页：WebView 是按可用宽度缩放的，容器比它窄就会
+        // 把右边裁掉一截、输入框被截断。这里整屏给网页，安全边距统一由 aiWebHost 承担。
+        aiWebScreen.setPadding(0, 0, 0, 0);
 
-        // 网页区铺满整屏；工具条、进度条、小箭头都是盖在它上面的浮层，不占布局位置。
-        // 以前常驻一条工具条，占了很大一块屏幕，现在几秒后自动收起，只留一个极小的箭头。
+        // 圆屏四角是物理裁掉的：网页、工具条、小箭头若铺满整屏矩形，左上角和右上角的
+        // 按钮就落在圆弧外点不到。用既有的 roundSafe（短边×0.146）给容器四边留安全区，
+        // 所有子 View 一起内缩；方屏 roundSafe=0，保持原样。工具条等仍是盖在网页上的浮层。
         aiWebHost = new FrameLayout(this);
         aiWebHost.setBackgroundColor(C_BG);
+        int safe = aiWebSafePad();
+        aiWebHost.setPadding(safe, safe, safe, safe);
         aiWebScreen.addView(aiWebHost,
                 new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
@@ -2683,8 +2690,15 @@ public class MainActivity extends Activity {
     // minimum-scale=1, user-scalable=no」：系统双指缩放和 setInitialScale 都会被它覆盖，
     // 而手表圆屏的 CSS 宽度往往只有 200dp 出头，网页按这个窄视口排版 → UI 挤成一团，
     // 登录框 / 人机验证弹窗 / 侧边栏都超出屏幕，左右被裁、按钮点不到。
-    // 做法：把 WebView 控件按更宽的尺寸排版（网页以为屏幕有 360dp），再用 Android 的
+    // 做法：把 WebView 控件按更宽的尺寸排版（网页以为屏幕有 320dp），再用 Android 的
     // View 缩放整体缩回手表屏幕。触摸坐标由系统自动逆变换，网页侧不用改、也不用注入脚本。
+    // 尺寸一律基于「安全区内的可用宽高」，否则缩放后的网页比容器宽，右边又会被裁。
+    /** 圆屏四角安全边距：复用既有的 Metrics.roundSafe（短边×0.146），再加 2dp 余量；方屏为 0。 */
+    private int aiWebSafePad() {
+        if (m == null || !m.round) return 0;
+        return m.roundSafe + dp(2);
+    }
+
     private String aiWebZoomLabel() {
         return aiWebZoomMode == 1 ? "更小" : (aiWebZoomMode == 2 ? "原样" : "自动");
     }
@@ -2693,10 +2707,10 @@ public class MainActivity extends Activity {
         if (aiWebZoomMode == 2) return 1f;
         float dens = getResources().getDisplayMetrics().density;
         if (dens <= 0f) dens = 1f;
-        float cssW = getResources().getDisplayMetrics().widthPixels / dens;
-        float k = Math.min(1f, cssW / AI_WEB_TARGET_CSS_W);
+        int availW = getResources().getDisplayMetrics().widthPixels - 2 * aiWebSafePad();
+        float k = Math.min(1f, (availW / dens) / AI_WEB_TARGET_CSS_W);
         if (k < AI_WEB_MIN_SCALE) k = AI_WEB_MIN_SCALE;
-        if (aiWebZoomMode == 1) k = Math.max(0.45f, k * 0.85f);
+        if (aiWebZoomMode == 1) k = Math.max(0.35f, k * 0.85f);
         return k;
     }
 
@@ -2708,9 +2722,10 @@ public class MainActivity extends Activity {
         wv.setScaleY(k);
         if (k >= 1f) return new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
-        int sw = getResources().getDisplayMetrics().widthPixels;
-        int sh = getResources().getDisplayMetrics().heightPixels;
-        return new FrameLayout.LayoutParams((int) (sw / k), (int) (sh / k));
+        int safe = aiWebSafePad();
+        int availW = getResources().getDisplayMetrics().widthPixels - 2 * safe;
+        int availH = getResources().getDisplayMetrics().heightPixels - 2 * safe;
+        return new FrameLayout.LayoutParams((int) (availW / k), (int) (availH / k));
     }
 
     /** 切档位时就地更新，不重载网页、不打断登录和正在进行的对话。 */
