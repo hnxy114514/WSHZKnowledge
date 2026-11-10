@@ -320,6 +320,8 @@ public class MainActivity extends Activity {
         boolean truncated = false;
         /** 双击折叠：只对已答完的回答生效。 */
         boolean folded = false;
+        /** 上一次点击的时间，用来判双击。 */
+        long lastTapAt = 0L;
         ChatMsg(String r) { role = r; }
     }
     /** 从哪个页面点进来的：返回时原路退回，而不是一律回主页。 */
@@ -4432,28 +4434,48 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 给正文挂一个触摸监听：点到带下划线的知识点就跳过去，点别处不拦（滚动、双击折叠照常）。 */
-    private void attachKbLinks(final TextView body) {
-        if (!(body.getText() instanceof Spanned)) return;
-        boolean has = ((Spanned) body.getText()).getSpans(0, body.getText().length(), KbMark.class).length > 0;
-        if (!has) return;
-        body.setOnTouchListener(new View.OnTouchListener() {
-            public boolean onTouch(View v, MotionEvent ev) {
-                if (ev.getAction() != MotionEvent.ACTION_UP) return false;
-                CharSequence cs = body.getText();
-                Layout lay = body.getLayout();
-                if (!(cs instanceof Spanned) || lay == null) return false;
-                int x = (int) ev.getX() - body.getTotalPaddingLeft() + body.getScrollX();
-                int y = (int) ev.getY() - body.getTotalPaddingTop() + body.getScrollY();
-                int line = lay.getLineForVertical(Math.max(0, y));
-                int off = lay.getOffsetForHorizontal(line, Math.max(0, x));
-                KbMark[] marks = ((Spanned) cs).getSpans(off, off, KbMark.class);
-                if (marks.length == 0) return false;
-                vibrate();
-                openKnowledgeByKeyword(marks[0].keyword);
-                return true;
-            }
-        });
+    /** 正文里有没有知识点标记。 */
+    private static boolean hasKbMarks(CharSequence cs) {
+        return cs instanceof Spanned
+                && ((Spanned) cs).getSpans(0, cs.length(), KbMark.class).length > 0;
+    }
+
+    /** 触点落在知识点链接上就跳过去；返回 true 表示已处理。 */
+    private boolean tryOpenKb(TextView body, float x, float y) {
+        CharSequence cs = body.getText();
+        Layout lay = body.getLayout();
+        if (!(cs instanceof Spanned) || lay == null) return false;
+        int px = (int) x - body.getTotalPaddingLeft() + body.getScrollX();
+        int py = (int) y - body.getTotalPaddingTop() + body.getScrollY();
+        int line = lay.getLineForVertical(Math.max(0, py));
+        int off = lay.getOffsetForHorizontal(line, Math.max(0, px));
+        KbMark[] marks = ((Spanned) cs).getSpans(off, off, KbMark.class);
+        if (marks.length == 0) return false;
+        vibrate();
+        openKnowledgeByKeyword(marks[0].keyword);
+        return true;
+    }
+
+    /** 气泡上的点击：320ms 内两下算双击，切换折叠。 */
+    private void onBubbleTap(ChatMsg msg) {
+        long now = SystemClock.uptimeMillis();
+        if (now - msg.lastTapAt < 320L) {
+            msg.lastTapAt = 0L;
+            vibrate();
+            msg.folded = !msg.folded;
+            renderAiChat();
+        } else {
+            msg.lastTapAt = now;
+        }
+    }
+
+    /** 相邻的知识点标记之间补一个顿号：模型常写成【知识:A】【知识:B】，
+     *  渲染后两串下划线会粘成一坨，看着像一长条。 */
+    private static String spaceOutMarks(String s) {
+        if (s == null || s.indexOf("【知识") < 0) return s;
+        String out = s;
+        while (out.contains("】【知识")) out = out.replace("】【知识", "】、【知识");
+        return out;
     }
 
     /** 按关键词在本软件里定位知识点：先找同名，再找名称包含，最后搜正文。 */
@@ -4521,6 +4543,7 @@ public class MainActivity extends Activity {
         if (msg.err != null) text = msg.err;
         else if (msg.content.length() == 0) text = msg.streaming ? "…" : "（空回复）";
         else text = msg.content;
+        if (!user) text = spaceOutMarks(text);
         // AI 的回复走知识点同一套渲染：\frac / \sqrt / ^{} / **重点** 都会被画出来；
         // 用户自己打的字保持原样，免得一个下划线就被当成下标。
         if (user) {
@@ -4538,42 +4561,55 @@ public class MainActivity extends Activity {
         box.addView(body, wrap());
         if (msg.streaming) chatStreamTv = body;
 
-        // 回答里的知识点链接：点一下跳到那个知识点
-        if (!user && !msg.streaming && msg.err == null) attachKbLinks(body);
-
-        // 长按复制去掉了；改成双击折叠/展开，只对已经答完、而且内容够长的回答生效
+        // 正文统一挂一个触摸处理：点链接跳转、双击折叠。
+        // 关键：DOWN 必须 return true 先占住手势，否则上层（ScrollView/父布局）会拿走整串事件，
+        // UP 永远到不了这里——上一版就是因此「点了没反应」。
+        final boolean hasLinks = !user && !msg.streaming && msg.err == null
+                && hasKbMarks(body.getText());
         final boolean canFold = !user && !msg.streaming && msg.err == null
                 && msg.content.length() > 100;
-        if (canFold) {
-            if (msg.folded) {
-                body.setMaxLines(4);
-                body.setEllipsize(TextUtils.TruncateAt.END);
-            }
-            final long[] lastTap = new long[]{0L};
-            box.setClickable(true);
-            box.setOnClickListener(new View.OnClickListener() {
-                public void onClick(View v) {
-                    long now = SystemClock.uptimeMillis();
-                    if (now - lastTap[0] < 320L) {      // 两次点击够快才算双击
-                        lastTap[0] = 0L;
-                        vibrate();
-                        msg.folded = !msg.folded;
-                        renderAiChat();
-                    } else {
-                        lastTap[0] = now;
+        if (canFold && msg.folded) {
+            body.setMaxLines(4);
+            body.setEllipsize(TextUtils.TruncateAt.END);
+        }
+        if (hasLinks || canFold) {
+            body.setOnTouchListener(new View.OnTouchListener() {
+                float downX, downY;
+                boolean moved;
+                public boolean onTouch(View v, MotionEvent ev) {
+                    switch (ev.getActionMasked()) {
+                        case MotionEvent.ACTION_DOWN:
+                            downX = ev.getX();
+                            downY = ev.getY();
+                            moved = false;
+                            return true;                 // 先占住，UP 时再决定是链接还是双击
+                        case MotionEvent.ACTION_MOVE:
+                            if (Math.abs(ev.getX() - downX) > dp(8)
+                                    || Math.abs(ev.getY() - downY) > dp(8)) moved = true;
+                            return false;                // 拖动交回给外面的滚动容器
+                        case MotionEvent.ACTION_CANCEL:
+                            moved = true;
+                            return false;
+                        case MotionEvent.ACTION_UP:
+                            if (moved) return false;
+                            if (hasLinks && tryOpenKb(body, ev.getX(), ev.getY())) return true;
+                            if (canFold) onBubbleTap(msg);
+                            return true;
+                        default:
+                            return false;
                     }
                 }
             });
-            if (msg.folded) {
-                TextView tip = new TextView(this);
-                tip.setText("双击展开");
-                tip.setTextSize(Math.max(9f, m.subtitleSize - 3f));
-                tip.setTextColor(C_SUB);
-                tip.setGravity(Gravity.CENTER);
-                LinearLayout.LayoutParams tlp = wrap();
-                tlp.topMargin = dp(3);
-                box.addView(tip, tlp);
-            }
+        }
+        if (canFold && msg.folded) {
+            TextView tip = new TextView(this);
+            tip.setText("双击展开");
+            tip.setTextSize(Math.max(9f, m.subtitleSize - 3f));
+            tip.setTextColor(C_SUB);
+            tip.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams tlp = wrap();
+            tlp.topMargin = dp(3);
+            box.addView(tip, tlp);
         }
 
         if (msg.truncated && !user && msg.err == null) {
