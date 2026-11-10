@@ -49,6 +49,7 @@ import android.text.style.RelativeSizeSpan;
 import android.text.style.StyleSpan;
 import android.text.style.SubscriptSpan;
 import android.text.style.SuperscriptSpan;
+import android.text.style.TypefaceSpan;
 import android.text.style.UnderlineSpan;
 import android.util.Base64;
 import android.util.TypedValue;
@@ -3927,7 +3928,9 @@ public class MainActivity extends Activity {
             }
         });
 
+        tuneDialogWindow(d);  // 必须 show() 之前：否则窗口按不透明格式建，滚动会留残影
         tuneDialogInput(d);   // 键盘弹出时弹窗不跳，内容不被顶走
+        tuneEditScroll(ed, box);
         d.show();
         sizeDialog(d, 0.86f);
     }
@@ -4904,6 +4907,7 @@ public class MainActivity extends Activity {
             }
         });
 
+        tuneDialogWindow(d);
         tuneDialogInput(d);
         d.show();
         sizeDialog(d, 0.86f);
@@ -7393,6 +7397,8 @@ public class MainActivity extends Activity {
             "longrightarrow","⟶","longrightarrow","⟶","uparrow","↑","downarrow","↓",
             "nearrow","↗","searrow","↘","mapsto","↦",
             "angle","∠","perp","⊥","parallel","∥","therefore","∴","because","∵",
+            "triangle","△","odot","⊙","square","□","bigcirc","○","arc","⌒",
+            "leqslant","≤","geqslant","≥","backslash","＼","mid","|","nmid","∤",
             "degree","°","prime","′","ldots","…","dots","…","cdots","⋯","vdots","⋮","ddots","⋱",
             "sin","sin","cos","cos","tan","tan","cot","cot","sec","sec","csc","csc",
             "arcsin","arcsin","arccos","arccos","arctan","arctan",
@@ -7415,6 +7421,11 @@ public class MainActivity extends Activity {
         LX_WRAP.put("operatorname", "");
         LX_WRAP.put("mbox", "");
         // 化学式：\ce{H2O} 之类直接输出内部文本，别把 \ce 露在正文里
+        LX_WRAP.put("mathbb", "");
+        LX_WRAP.put("mathcal", "");
+        LX_WRAP.put("mathfrak", "");
+        LX_WRAP.put("mathsf", "");
+        LX_WRAP.put("mathtt", "");
         LX_WRAP.put("ce", "");
         LX_WRAP.put("chem", "");
     }
@@ -7457,6 +7468,7 @@ public class MainActivity extends Activity {
         while (i < n) {
             char c = s.charAt(i);
             if (c == '$') { i++; continue; }
+            if (c == '&') { out.append(' '); i++; continue; }   // cases/矩阵里的列分隔
             if (c != '\\') { out.append(c); i++; continue; }
             int j = i + 1;
             if (j >= n) { out.append(c); i++; continue; }
@@ -7498,6 +7510,13 @@ public class MainActivity extends Activity {
                 i = used[0];
                 continue;
             }
+            if ("binom".equals(cmd) || "dbinom".equals(cmd) || "tbinom".equals(cmd)) {
+                String a = latexToText(readArg(s, k, used));
+                String b = latexToText(readArg(s, used[0], used));
+                out.append("C(").append(a).append(",").append(b).append(")");
+                i = used[0];
+                continue;
+            }
             if ("sqrt".equals(cmd)) {
                 int p = k;
                 String idx = "";
@@ -7536,8 +7555,13 @@ public class MainActivity extends Activity {
             }
             String sym = LX.get(cmd);
             if (sym != null) { out.append(sym); i = k; continue; }
-            // 不认识的命令：只留名字，不留反斜杠——留着反斜杠看起来就像乱码
-            out.append(cmd);
+            // 不认识的命令：把参数内容留下、命令名丢掉（\textbf{x} → x）。
+            // 这样最多丢样式，不会把 LaTeX 源码当正文显示出来。
+            if (k < n && s.charAt(k) == '{') {
+                out.append(latexToText(readArg(s, k, used)));
+                i = used[0];
+                continue;
+            }
             i = k;
         }
         return out.toString();
@@ -8122,6 +8146,42 @@ public class MainActivity extends Activity {
         return fontSafe(humanizeRaw(latexToText(r)));
     }
 
+    /** Markdown 折成「纯文本 + 我们认识的标记」：标题加粗、列表换圆点、代码用等宽、
+     *  链接只留文字、表格去掉竖线。宁可少显示结构，也不要把 # ` | 这些符号甩给用户。 */
+    private static String mdFold(String src) {
+        if (src == null || src.length() == 0) return "";
+        String s = src;
+        // 围栏代码块：去掉 ``` 围栏，保留内容
+        s = s.replaceAll("(?m)^[ \t]*```[^\n]*\n?", "");
+        // 图片 / 链接：只留文字
+        s = s.replaceAll("!\\[([^\\]]*)\\]\\([^)]*\\)", "$1");
+        s = s.replaceAll("\\[([^\\]]*)\\]\\([^)]*\\)", "$1");
+        // 行内代码：用私有标记包住，渲染层套等宽字体
+        s = s.replaceAll("`([^`\n]*)`", "\uE009$1\uE00A");
+        // 分隔线
+        s = s.replaceAll("(?m)^[ \t]*([-*_]){3,}[ \t]*$", "────────");
+        // 表格：只处理「整行以 | 开头并以 | 结尾」的行，把行内竖线换空格。
+        // 不能全局替换 |，否则数学里的绝对值 |x| 会变成 " x "。
+        java.util.regex.Matcher tm = java.util.regex.Pattern
+                .compile("(?m)^[ \t]*\\|(.+)\\|[ \t]*$").matcher(s);
+        StringBuffer tbuf = new StringBuffer();
+        while (tm.find()) {
+            tm.appendReplacement(tbuf, java.util.regex.Matcher.quoteReplacement(
+                    " " + tm.group(1).replace('|', ' ') + " "));
+        }
+        tm.appendTail(tbuf);
+        s = tbuf.toString();
+        // 对齐行（|---|---| 之类）整行删掉
+        s = s.replaceAll("(?m)^[ \t]*[-:| ]{3,}[ \t]*$", "");
+        // 标题：# 开头 → 整行加粗
+        s = s.replaceAll("(?m)^[ \t]{0,3}#{1,6}[ \t]*(.+?)[ \t]*#*[ \t]*$", "**$1**");
+        // 引用：> 开头 → 竖线
+        s = s.replaceAll("(?m)^[ \t]{0,3}>[ \t]?", "│ ");
+        // 删除线
+        s = s.replaceAll("~~([^~\n]*)~~", "$1");
+        return s;
+    }
+
     /** 把内部占位符还原成人能看的写法：兜底显示原文时不能把 \uE000 这种私用字符甩给用户。 */
     private static String humanizeRaw(String s) {
         if (s == null) return "";
@@ -8172,7 +8232,7 @@ public class MainActivity extends Activity {
     /** @param hl 当前是否处在 **重点标亮** 内；公式不会自动继承颜色 span，需显式传递。 */
     private SpannableStringBuilder applyMarkup(String src, boolean hl) {
         SpannableStringBuilder ssb = new SpannableStringBuilder();
-        String txt = latexToText(src);
+        String txt = latexToText(mdFold(src));
         int i = 0, n = txt.length();
         while (i < n) {
             char c = txt.charAt(i);
@@ -8199,6 +8259,22 @@ public class MainActivity extends Activity {
                     int st = ssb.length();
                     ssb.append('\u00A0');
                     ssb.setSpan(new InlineSpan(root, 0, hl, humanizeRaw(block)), st, ssb.length(),
+                            Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    i = e + 1;
+                    continue;
+                }
+                i++;
+                continue;
+            }
+            if (c == '\uE009') {                     // Markdown 行内代码
+                int e = txt.indexOf('\uE00A', i + 1);
+                if (e > i) {
+                    String code = txt.substring(i + 1, e);
+                    int st = ssb.length();
+                    ssb.append(code);
+                    ssb.setSpan(new TypefaceSpan("monospace"), st, ssb.length(),
+                            Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    ssb.setSpan(new ForegroundColorSpan(C_HI), st, ssb.length(),
                             Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                     i = e + 1;
                     continue;
@@ -11909,6 +11985,20 @@ public class MainActivity extends Activity {
         sc.setFadingEdgeLength(0);
         try {
             sc.getViewTreeObserver().addOnScrollChangedListener(
+                    new android.view.ViewTreeObserver.OnScrollChangedListener() {
+                        public void onScrollChanged() {
+                            if (card != null) card.invalidate();
+                        }
+                    });
+        } catch (Exception ignored) { }
+    }
+
+    /** 弹窗里的多行输入框：自己滚动时整块重画，避免窗口只刷脏区、留下上一帧的字。 */
+    private void tuneEditScroll(final EditText ed, final View card) {
+        if (ed == null) return;
+        try {
+            ed.setOverScrollMode(View.OVER_SCROLL_NEVER);
+            ed.getViewTreeObserver().addOnScrollChangedListener(
                     new android.view.ViewTreeObserver.OnScrollChangedListener() {
                         public void onScrollChanged() {
                             if (card != null) card.invalidate();
