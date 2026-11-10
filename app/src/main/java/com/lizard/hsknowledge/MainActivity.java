@@ -49,6 +49,7 @@ import android.text.style.RelativeSizeSpan;
 import android.text.style.StyleSpan;
 import android.text.style.SubscriptSpan;
 import android.text.style.SuperscriptSpan;
+import android.text.style.UnderlineSpan;
 import android.util.Base64;
 import android.util.TypedValue;
 import android.view.ActionMode;
@@ -292,6 +293,8 @@ public class MainActivity extends Activity {
             + "3. 上下标写成 a^{2}、a_{n}；希腊字母写成 \\alpha \\beta \\gamma \\theta \\pi\n"
             + "4. 一行只写一个公式，不要用 aligned、array、矩阵等环境，也不要贴图片\n"
             + "5. 乘号写 \\times，除号写 \\div，不等号写 \\ne \\le \\ge\n"
+            + "回答里如果涉及本软件里的知识点，用 【知识:关键词】 标注（关键词取知识点标题里的 2-8 个字，"
+            + "一次最多标 3 处），应用会把它显示成可点开跳转的下划线；这条只在 API 模式生效。\n"
             + "列表用「•」开头，不要用 - 或 * 做项目符号，公式单独成行时前面也不要加任何符号"
             + "（横杠贴在公式前会被看成负号）；可以用 **文字** 强调重点；"
             + "不要用 Markdown 表格、代码块和标题符号。";
@@ -3344,6 +3347,8 @@ public class MainActivity extends Activity {
         aiApiInner.addView(sectionHeader("服务商"), wrap());
         aiApiInner.addView(apiPresetRow(), gap());
         aiApiInner.addView(aiHint("预设会填好地址和常见模型；自己搭的转发接口选「自定义」。"), wrap());
+        aiApiInner.addView(aiHint("这是本软件更适配的方式：对话里回答提到的知识点会带下划线，"
+                + "点一下直接跳到那条知识点（网页版没有这个）。"), wrap());
 
         aiApiInner.addView(sectionHeader("接口"), wrap());
         aiApiInner.addView(apiValueRow("地址", aiApiEndpoint.length() == 0 ? "未填" : aiApiEndpoint,
@@ -4342,7 +4347,8 @@ public class MainActivity extends Activity {
 
         if (chatMsgs.isEmpty()) {
             TextView hint = new TextView(this);
-            hint.setText("点下面一行写问题。\n回答来自你配置的接口，App 只做转发：不存盘、不上传。");
+            hint.setText("点下面一行写问题。\n回答里提到的知识点带下划线，点一下就跳过去。\n"
+                    + "回答来自你配置的接口，App 只做转发：不存盘、不上传。");
             hint.setTextSize(m.subtitleSize - 2f);
             hint.setTextColor(C_SUB);
             hint.setGravity(Gravity.CENTER);
@@ -4398,6 +4404,84 @@ public class MainActivity extends Activity {
         return out.toString();
     }
 
+    /** 回答里的知识点标记（下划线 + 主色），点一下跳过去。 */
+    private static class KbMark {
+        final String keyword;
+        KbMark(String k) { keyword = k; }
+    }
+
+    /** 把【知识:xxx】换成可点击的知识点链接；没有标记就原样返回。 */
+    private void applyKnowledgeLinks(SpannableStringBuilder sb) {
+        String all = sb.toString();
+        int from = 0;
+        while (true) {
+            int start = all.indexOf("【知识", from);
+            if (start < 0) break;
+            int end = all.indexOf("】", start);
+            if (end < 0) break;
+            String inner = all.substring(start + 3, end)
+                    .replace("：", "").replace(":", "").trim();
+            if (inner.length() == 0) { from = end + 1; continue; }
+            sb.replace(start, end + 1, inner);
+            int ks = start, ke = start + inner.length();
+            sb.setSpan(new UnderlineSpan(), ks, ke, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            sb.setSpan(new ForegroundColorSpan(C_PRIMARY), ks, ke, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            sb.setSpan(new KbMark(inner), ks, ke, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            all = sb.toString();
+            from = ke;
+        }
+    }
+
+    /** 给正文挂一个触摸监听：点到带下划线的知识点就跳过去，点别处不拦（滚动、双击折叠照常）。 */
+    private void attachKbLinks(final TextView body) {
+        if (!(body.getText() instanceof Spanned)) return;
+        boolean has = ((Spanned) body.getText()).getSpans(0, body.getText().length(), KbMark.class).length > 0;
+        if (!has) return;
+        body.setOnTouchListener(new View.OnTouchListener() {
+            public boolean onTouch(View v, MotionEvent ev) {
+                if (ev.getAction() != MotionEvent.ACTION_UP) return false;
+                CharSequence cs = body.getText();
+                Layout lay = body.getLayout();
+                if (!(cs instanceof Spanned) || lay == null) return false;
+                int x = (int) ev.getX() - body.getTotalPaddingLeft() + body.getScrollX();
+                int y = (int) ev.getY() - body.getTotalPaddingTop() + body.getScrollY();
+                int line = lay.getLineForVertical(Math.max(0, y));
+                int off = lay.getOffsetForHorizontal(line, Math.max(0, x));
+                KbMark[] marks = ((Spanned) cs).getSpans(off, off, KbMark.class);
+                if (marks.length == 0) return false;
+                vibrate();
+                openKnowledgeByKeyword(marks[0].keyword);
+                return true;
+            }
+        });
+    }
+
+    /** 按关键词在本软件里定位知识点：先找同名，再找名称包含，最后搜正文。 */
+    private void openKnowledgeByKeyword(String kw) {
+        String q = kw == null ? "" : kw.trim();
+        if (q.length() == 0) return;
+        Node best = null;
+        for (Node n : allHits) {
+            if (n.name != null && n.name.equals(q)) { best = n; break; }
+        }
+        if (best == null) {
+            for (Node n : allHits) {
+                if (n.name != null && n.name.contains(q)) { best = n; break; }
+            }
+        }
+        if (best == null) {
+            for (Node n : allHits) {
+                if (n.body != null && n.body.contains(q)) { best = n; break; }
+            }
+        }
+        if (best == null) {
+            toast("没找到「" + q + "」这个知识点");
+            return;
+        }
+        toast("在：" + shortPath(best.path()));
+        openNodeFrom(best, S_AI_CHAT);
+    }
+
     /** 一条消息气泡：用户主色底、AI 卡片底；长按复制，出错时给「重试」。 */
     private View chatBubble(final ChatMsg msg) {
         final boolean user = "user".equals(msg.role);
@@ -4439,12 +4523,23 @@ public class MainActivity extends Activity {
         else text = msg.content;
         // AI 的回复走知识点同一套渲染：\frac / \sqrt / ^{} / **重点** 都会被画出来；
         // 用户自己打的字保持原样，免得一个下划线就被当成下标。
-        body.setText(user ? text : safeMarkup(text));
+        if (user) {
+            body.setText(text);
+        } else {
+            CharSequence sm = safeMarkup(text);
+            SpannableStringBuilder sb = sm instanceof SpannableStringBuilder
+                    ? (SpannableStringBuilder) sm : new SpannableStringBuilder(sm);
+            applyKnowledgeLinks(sb);
+            body.setText(sb);
+        }
         body.setTextSize(m.subtitleSize - 1f);
         body.setTextColor(msg.err != null ? 0xFFFFB74D : C_TEXT);
         body.setLineSpacing(dp(2), 1.25f);
         box.addView(body, wrap());
         if (msg.streaming) chatStreamTv = body;
+
+        // 回答里的知识点链接：点一下跳到那个知识点
+        if (!user && !msg.streaming && msg.err == null) attachKbLinks(body);
 
         // 长按复制去掉了；改成双击折叠/展开，只对已经答完、而且内容够长的回答生效
         final boolean canFold = !user && !msg.streaming && msg.err == null
@@ -5088,7 +5183,7 @@ public class MainActivity extends Activity {
         box.addView(t, wrap());
 
         TextView webTip = new TextView(this);
-        webTip.setText("网页版：直接打开 DeepSeek 网页，登录就能用，不用填任何配置。\n普通用户建议选这个。");
+        webTip.setText("网页版：打开 DeepSeek 网页，登录就能用，不用配置、不用花钱。\n更容易上手，普通用户建议选这个。");
         webTip.setTextSize(m.subtitleSize - 2f);
         webTip.setTextColor(C_TEXT);
         webTip.setLineSpacing(dp(2), 1.25f);
@@ -5096,7 +5191,8 @@ public class MainActivity extends Activity {
         box.addView(webTip, wrap());
 
         TextView apiTip = new TextView(this);
-        apiTip.setText("API 模式：自己填接口地址和密钥，按用量计费，适合已经有 API 的人。");
+        apiTip.setText("API 模式：自己填地址和密钥，按用量花 token 费用。\n"
+                + "和本软件结合更紧：回答里会给出带下划线的知识点，点一下就跳过去。");
         apiTip.setTextSize(m.subtitleSize - 2f);
         apiTip.setTextColor(C_SUB);
         apiTip.setLineSpacing(dp(2), 1.25f);
@@ -7193,7 +7289,8 @@ public class MainActivity extends Activity {
                 }
                 String a = latexToText(readArg(s, p, used));
                 // 根号用占位符保留结构，由 UI 画成带顶部横线的根式
-                if (idx.length() > 0) out.append(idx);
+                // n 次根（立方根等）：把次数写成上标，否则只是一个普通数字贴在根号前
+                if (idx.length() > 0) out.append("^{").append(idx).append('}');
                 out.append('\uE003').append(a).append('\uE004');
                 i = used[0];
                 continue;

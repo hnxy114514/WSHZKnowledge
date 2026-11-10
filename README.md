@@ -740,6 +740,16 @@ Node {
         不会因为一条回复把 App 崩掉；崩溃堆栈无论如何都写 `crash.log`（留最近 8KB）。
       - **没有 WebView 自动改用 API 模式**：启动读配置时 `WebView.getCurrentWebViewPackage()==null`
         就切到 API 模式并落盘，界面铺好后延迟 1.2 秒提示；「问 AI」页的开关会被禁用并说明原因。
+      - **知识点索引（API 模式独有）**：开场白里约定「涉及本软件知识点时用 【知识:关键词】 标注，
+        关键词取标题里的 2–8 个字、一次最多 3 处」；渲染时 `applyKnowledgeLinks()` 把标记换成
+        `UnderlineSpan + ForegroundColorSpan + KbMark`，并把【知识:】外壳删掉只留下划线文字。
+        点击不走 `LinkMovementMethod`（会跟 ScrollView 抢滚动），而是在正文上挂 `OnTouchListener`，
+        用 `Layout.getOffsetForHorizontal()` 算出触点落在哪个 `KbMark` 上；命中才返回 true，
+        没命中继续交给父容器（滚动、双击折叠都照常）。
+        跳转按优先级定位：同名 → 名称包含 → 正文包含；找到后 `openNodeFrom(node, S_AI_CHAT)`，
+        返回键回到对话。找不到只提示「没找到…」，不跳。
+      - **n 次根**：`\sqrt[3]{x}` 的次数输出成 `^{3}`，由渲染器画成上标；否则只是一个普通数字
+        贴在根号前，看着像「3√x」而不是立方根。
       - **行首符号不当负号**：模型爱用「- 」做列表，横杠紧贴公式会被读成一元负号（`- a+b≥2ab`）。
         `fixListMarks()` 在渲染前把「行首 + 后跟空白」的 `-` / `*` 换成「•」，
         `-1 ≤ x`、`a-b` 这类真正的负号和减法不动；开场白里也要求列表用「•」、公式单独成行不加符号。
