@@ -28,6 +28,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.os.Bundle;
@@ -48,8 +49,10 @@ import android.text.style.StyleSpan;
 import android.text.style.SubscriptSpan;
 import android.text.style.SuperscriptSpan;
 import android.util.TypedValue;
+import android.view.ActionMode;
 import android.view.GestureDetector;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.ViewOutlineProvider;
@@ -211,7 +214,7 @@ public class MainActivity extends Activity {
     // ---------- 问 AI（DeepSeek 网页版） ----------
     // 这一页只是把 DeepSeek 网页装进来：登录、密钥、模型、对话记录全由网页自己管，
     // App 不存任何密钥、不读聊天内容、不写日志。网页页不放任何按钮，
-    // 全靠双指手势：轻点两下切裁切版/原版，长按 3 秒退出。
+    // 全靠双指手势：轻点两下切裁切版/原版，长按 2 秒退出；系统返回键照常可用。
     private LinearLayout aiWebScreen, aiWebErrorBox;
     private FrameLayout aiWebHost;
     private WebView aiWebView;
@@ -222,12 +225,15 @@ public class MainActivity extends Activity {
     private Runnable aiGestureHideTask = null, aiGestureLongTask = null;
     /** 裁切版 = 四边留 roundSafe 避开圆屏；原版 = 网页铺满整屏。与缩放档位是两回事。 */
     private boolean aiWebCrop = true;
+    /** 手势提示只在第一次长时间显示，之后每次 1 秒，别老挡着网页。 */
+    private static final long AI_HINT_FIRST_MS = 6000L;
+    private static final long AI_HINT_LATER_MS = 1000L;
     /** 双指手势序列状态（从第二指按下到最后一指抬起，期间事件不传给网页）。 */
     private boolean aiTwoActive = false, aiTwoLongFired = false, aiTwoMoved = false;
     private long aiTwoDownAt = 0L, aiLastTwoTapAt = 0L;
     private float aiTwoStartX = 0f, aiTwoStartY = 0f;
     private static final long AI_TWO_TAP_GAP_MS = 450L;
-    private static final long AI_TWO_LONG_MS = 3000L;
+    private static final long AI_TWO_LONG_MS = 2000L;
     /** 三个设置子页：都用既有的 OverScrollScrollView + roundPadScroll + padInner 圆屏占位。 */
     private LinearLayout aiHubScreen, aiApiScreen, aiWebCfgScreen;
     private LinearLayout aiHubInner, aiApiInner, aiWebCfgInner;
@@ -2590,7 +2596,7 @@ public class MainActivity extends Activity {
         catch (Throwable ignored) { }
 
         aiGestureHint = new TextView(this);
-        aiGestureHint.setText("双指轻点两下：裁切版 / 原版\n双指长按 3 秒：退出");
+        aiGestureHint.setText("双指轻点两下：裁切版 / 原版\n双指长按 2 秒：退出");
         aiGestureHint.setTextSize(m.subtitleSize - 1f);
         aiGestureHint.setTextColor(0xEEFFFFFF);
         aiGestureHint.setGravity(Gravity.CENTER);
@@ -2600,7 +2606,7 @@ public class MainActivity extends Activity {
         aiGestureHint.setVisibility(View.GONE);
 
         try {
-            WebView wv = new WebView(this);
+            WebView wv = new AiWebView(this);
             aiWebView = wv;
             // 顺序就是层级：网页最底 → 错误层 → 进度条 → 手势提示。一次排好，
             // 运行时不再 bringToFront（加载期间反复 requestLayout 会打断网页首次绘制）。
@@ -2634,10 +2640,13 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ---- 双指手势：轻点两下切裁切版/原版，长按 3 秒退出 ----
-    /** 进页面时把操作说明显示几秒再淡出；设置页里也常驻一份说明。 */
+    // ---- 双指手势：轻点两下切裁切版/原版，长按 2 秒退出 ----
+    /** 进页面时把手势说明显示一会儿再淡出：第一次进来要看清楚，之后每次只闪 1 秒。
+     *  设置页里另有一份常驻说明。 */
     private void showAiGestureHint() {
         if (aiGestureHint == null) return;
+        boolean first = !prefs.getBoolean("ai_hint_seen", false);
+        if (first) prefs.edit().putBoolean("ai_hint_seen", true).apply();
         if (aiGestureHideTask != null) aiGestureHandler.removeCallbacks(aiGestureHideTask);
         aiGestureHideTask = null;
         aiGestureHint.animate().cancel();
@@ -2655,7 +2664,8 @@ public class MainActivity extends Activity {
                         }).start();
             }
         };
-        aiGestureHandler.postDelayed(aiGestureHideTask, 4000);
+        aiGestureHandler.postDelayed(aiGestureHideTask,
+                first ? AI_HINT_FIRST_MS : AI_HINT_LATER_MS);
     }
 
     private void hideAiGestureHint() {
@@ -2711,6 +2721,9 @@ public class MainActivity extends Activity {
                 // 单指按下时右滑跟踪已经开过头，双指接管后归位，别留下半截拖动
                 swipeTracking = false;
                 if (swipeActive) resetSwipe();
+                // 第一指按下时网页已经收到 ACTION_DOWN，接管后必须补一个 CANCEL，
+                // 否则网页还等着自己的长按计时到点，弹出「复制 / 全选」气泡——双指长按误触就是它。
+                aiWebCancelChildGesture();
                 scheduleAiTwoLong();
                 return true;
             }
@@ -2747,6 +2760,15 @@ public class MainActivity extends Activity {
                 break;
         }
         return true;
+    }
+
+    /** 给网页补一个 ACTION_CANCEL：告诉它「这一串触摸作废了」，撤掉正在走的长按 / 双击识别。 */
+    private void aiWebCancelChildGesture() {
+        long now = SystemClock.uptimeMillis();
+        MotionEvent cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0);
+        try { super.dispatchTouchEvent(cancel); }
+        catch (Throwable ignored) { }
+        cancel.recycle();
     }
 
     private void scheduleAiTwoLong() {
@@ -2822,6 +2844,31 @@ public class MainActivity extends Activity {
         if (aiWebHost != null) aiWebHost.invalidate();
     }
 
+    /** 问 AI 专供的 WebView：不给网页弹系统的「复制 / 全选 / 自动填充」那一套。
+     *  双指轻点两下、双指长按都要求网页别自己抢长按和双击——网页弹出选择手柄和气泡菜单，
+     *  既挡住手势，也会把登录框里的输入搅乱。全部走 Android 层关掉，不注入脚本、不碰网页 DOM。 */
+    private static class AiWebView extends WebView {
+        AiWebView(Context c) { super(c); }
+
+        // 长按不选词：performLongClick 直接吃掉，Chromium 就不会开始选择
+        @Override
+        public boolean performLongClick() {
+            return true;
+        }
+
+        // 双指/双击选词后 Chromium 会向宿主申请 ActionMode（那条复制工具条）。
+        // 返回 null 等于「不给」，选择手柄和复制/全选菜单都不会出现。
+        @Override
+        public ActionMode startActionMode(ActionMode.Callback cb) {
+            return null;
+        }
+
+        @Override
+        public ActionMode startActionMode(ActionMode.Callback cb, int type) {
+            return null;
+        }
+    }
+
     private void configureAiWebView(WebView wv) {
         WebSettings s = wv.getSettings();
         s.setJavaScriptEnabled(true);
@@ -2849,6 +2896,20 @@ public class MainActivity extends Activity {
         wv.setHorizontalScrollBarEnabled(false);
         wv.setVerticalScrollBarEnabled(false);
         wv.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        // 关掉网页的系统级「复制 / 全选 / 自动填充」：双指轻点两下和双指长按是这一屏唯一的手势，
+        // 网页自己再弹选择框就会打架，输入密码时冒出的自动填充气泡也会挡住键盘。
+        // ① 表单数据与密码一律不存、不提示保存；② 整棵网页声明不参与自动填充；
+        // ③ 关长按、去掉触感反馈；④ AiWebView 拒绝一切 ActionMode（复制/全选工具条）。
+        s.setSaveFormData(false);
+        s.setSavePassword(false);
+        wv.setLongClickable(false);
+        wv.setHapticFeedbackEnabled(false);
+        wv.setOnLongClickListener(new View.OnLongClickListener() {
+            public boolean onLongClick(View v) { return true; }   // 吃掉，不往下传
+        });
+        if (Build.VERSION.SDK_INT >= 26) {
+            wv.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
+        }
         // 网页页没有常驻工具条，滚动不再驱动任何浮层收展。
 
         CookieManager cm = CookieManager.getInstance();
@@ -3159,7 +3220,7 @@ public class MainActivity extends Activity {
             }
         }), wrap());
         aiWebCfgInner.addView(aiHint("默认「自动」：按屏幕宽度把网页整体缩小，登录框、验证码和侧边栏都能完整显示。点一下可切「更小」或「原样」，切换不重载网页。"), wrap());
-        aiWebCfgInner.addView(aiHint("手势：双指轻点两下切「裁切版 / 原版」（四边避开圆屏 / 网页铺满整屏）；双指长按 3 秒退出问 AI。当前：" + (aiWebCrop ? "裁切版" : "原版") + "。网页页已没有返回和刷新按钮。"), wrap());
+        aiWebCfgInner.addView(aiHint("手势：双指轻点两下切「裁切版 / 原版」（四边避开圆屏 / 网页铺满整屏）；双指长按 2 秒退出问 AI。当前：" + (aiWebCrop ? "裁切版" : "原版") + "。网页页没有返回和刷新按钮，系统返回键照常可用；网页里的长按复制、自动填充已关掉。"), wrap());
         aiWebCfgInner.addView(toggleRow("隐藏网页里的下载 APP 入口", aiWebHideDl,
                 new View.OnClickListener() {
             public void onClick(View v) {
@@ -6394,6 +6455,20 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    public boolean dispatchKeyEvent(KeyEvent ev) {
+        // 系统返回键在分发前就拦下来：网页控件持有焦点时按键会先落到 WebView 上，
+        // 有些机型/输入法组合下 onBackPressed 收不到。这里统一走 onBackPressed，
+        // 和实体键、右滑返回是同一条逻辑。
+        if (ev.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+            if (ev.getAction() == KeyEvent.ACTION_DOWN && ev.getRepeatCount() == 0) {
+                onBackPressed();
+            }
+            return true;
+        }
+        return super.dispatchKeyEvent(ev);
+    }
+
+    @Override
     public void onBackPressed() {
         if (fullscreenView != null) { closeFullscreen(); return; }
         if (screen == S_SUBJECT) { super.onBackPressed(); return; }
@@ -6408,11 +6483,9 @@ public class MainActivity extends Activity {
             toast("先点下面的「完成，开始使用」");
             return;
         }
-        // 网页里自己有历史（登录后跳转等）：先退网页上一页，退完了才轮到退出这一屏
-        if (screen == S_AI_WEB && aiWebView != null && aiWebView.canGoBack()) {
-            aiWebView.goBack();
-            return;
-        }
+        // 问 AI 页：返回键一律退出这一屏，不再先退网页自己的历史。
+        // 网页是单页应用，历史记录一直在加，canGoBack() 长期为 true —— 以前按返回只是
+        // 网页内部翻一页，看上去跟没反应一样。要回到网页上一页，用网页自己的界面。
         if (screen == S_NODE && nodeBack()) return;   // 还有上级分组就先退一层
         goBack(backTarget());
     }
