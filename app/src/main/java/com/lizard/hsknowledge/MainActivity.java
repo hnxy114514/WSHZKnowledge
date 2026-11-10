@@ -210,16 +210,24 @@ public class MainActivity extends Activity {
 
     // ---------- 问 AI（DeepSeek 网页版） ----------
     // 这一页只是把 DeepSeek 网页装进来：登录、密钥、模型、对话记录全由网页自己管，
-    // App 不存任何密钥、不读聊天内容、不写日志。网页按钮在圆屏上太小、边角会被裁，
-    // 所以顶部另放一条 App 自己的工具条（返回 / 刷新 / 重新登录）。
-    private LinearLayout aiWebScreen, aiWebBar, aiWebErrorBox;
+    // App 不存任何密钥、不读聊天内容、不写日志。网页页不放任何按钮，
+    // 全靠双指手势：轻点两下切裁切版/原版，长按 3 秒退出。
+    private LinearLayout aiWebScreen, aiWebErrorBox;
     private FrameLayout aiWebHost;
     private WebView aiWebView;
     private ProgressBar aiWebProgress;
-    private TextView aiWebErrorTxt, aiWebErrorBtn, aiWebMiniBar;
-    /** 工具条收起后只留这个极小的箭头，点一下再展开；不常驻占屏幕。 */
-    private final Handler aiBarHandler = new Handler(Looper.getMainLooper());
-    private Runnable aiBarHideTask = null;
+    private TextView aiWebErrorTxt, aiWebErrorBtn, aiGestureHint;
+    /** 手势提示淡出、双指长按计时共用一个主线程 Handler。 */
+    private final Handler aiGestureHandler = new Handler(Looper.getMainLooper());
+    private Runnable aiGestureHideTask = null, aiGestureLongTask = null;
+    /** 裁切版 = 四边留 roundSafe 避开圆屏；原版 = 网页铺满整屏。与缩放档位是两回事。 */
+    private boolean aiWebCrop = true;
+    /** 双指手势序列状态（从第二指按下到最后一指抬起，期间事件不传给网页）。 */
+    private boolean aiTwoActive = false, aiTwoLongFired = false, aiTwoMoved = false;
+    private long aiTwoDownAt = 0L, aiLastTwoTapAt = 0L;
+    private float aiTwoStartX = 0f, aiTwoStartY = 0f;
+    private static final long AI_TWO_TAP_GAP_MS = 450L;
+    private static final long AI_TWO_LONG_MS = 3000L;
     /** 三个设置子页：都用既有的 OverScrollScrollView + roundPadScroll + padInner 圆屏占位。 */
     private LinearLayout aiHubScreen, aiApiScreen, aiWebCfgScreen;
     private LinearLayout aiHubInner, aiApiInner, aiWebCfgInner;
@@ -553,6 +561,7 @@ public class MainActivity extends Activity {
         aiMode = prefs.getString("ai_mode", "web");
         aiWebHideDl = prefs.getBoolean("ai_web_hide_dl", true);
         aiWebZoomMode = prefs.getInt("ai_web_zoom", 0);
+        aiWebCrop = prefs.getBoolean("ai_web_crop", true);
         loadGitHub();         // 只读 prefs，很快
         bootStart = System.currentTimeMillis();
         showBootSplash();     // 先把开屏画出来，绝不留黑屏
@@ -2507,7 +2516,7 @@ public class MainActivity extends Activity {
             + "mo.observe(document.documentElement||document.body,{childList:true,subtree:true});}catch(e){}"
             + "})()";
 
-    /** 工具条按钮：沿用设置页的 clickBg，点击区够大，圆屏上点得准。 */
+    /** 圆屏上点得准的按钮：沿用设置页的 clickBg。现在只给错误层的「重试」用。 */
     private TextView aiBarBtn(String text, final View.OnClickListener onClick) {
         TextView b = new TextView(this);
         b.setText(text);
@@ -2538,17 +2547,16 @@ public class MainActivity extends Activity {
             try { aiWebView.destroy(); } catch (Throwable ignored) { }
             aiWebView = null;
         }
-        if (aiBarHideTask != null) aiBarHandler.removeCallbacks(aiBarHideTask);
-        aiBarHideTask = null;
+        cancelAiGestureTasks();
         aiWebLoaded = false;
         aiWebScreen.removeAllViews();
         // 列表页的左右缩进不能带到网页页：WebView 是按可用宽度缩放的，容器比它窄就会
         // 把右边裁掉一截、输入框被截断。这里整屏给网页，安全边距统一由 aiWebHost 承担。
         aiWebScreen.setPadding(0, 0, 0, 0);
 
-        // 圆屏四角是物理裁掉的：网页、工具条、小箭头若铺满整屏矩形，左上角和右上角的
-        // 按钮就落在圆弧外点不到。用既有的 roundSafe（短边×0.146）给容器四边留安全区，
-        // 所有子 View 一起内缩；方屏 roundSafe=0，保持原样。工具条等仍是盖在网页上的浮层。
+        // 圆屏四角是物理裁掉的：裁切版用既有的 roundSafe（短边×0.146）给容器四边留安全区，
+        // 网页、错误层、进度条、手势提示一起内缩；切到原版时安全区清零，网页铺满整屏。
+        // 方屏 roundSafe=0，两种模式一样。
         aiWebHost = new FrameLayout(this);
         aiWebHost.setBackgroundColor(C_BG);
         int safe = aiWebSafePad();
@@ -2575,58 +2583,35 @@ public class MainActivity extends Activity {
         aiWebErrorBox.addView(aiWebErrorBtn, ebLp);
         aiWebErrorBox.setVisibility(View.GONE);
 
-        aiWebBar = new LinearLayout(this);
-        aiWebBar.setOrientation(LinearLayout.VERTICAL);
-        aiWebBar.setBackgroundColor(0xEE101010);
-        aiWebBar.setPadding(dp(3), dp(3), dp(3), dp(3));
-        LinearLayout btnRow = new LinearLayout(this);
-        btnRow.setOrientation(LinearLayout.HORIZONTAL);
-        btnRow.setGravity(Gravity.CENTER_VERTICAL);
-        btnRow.addView(aiBarBtn("‹ 返回", new View.OnClickListener() {
-            public void onClick(View v) { goBack(aiWebBack); }
-        }));
-        btnRow.addView(aiBarBtn("刷新", new View.OnClickListener() {
-            public void onClick(View v) {
-                if (aiWebView == null) { toast("这台设备没有 WebView 组件"); return; }
-                aiWebHideError();
-                aiWebView.reload();
-            }
-        }));
-        aiWebBar.addView(btnRow, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-
         aiWebProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         aiWebProgress.setMax(100);
         aiWebProgress.setVisibility(View.GONE);
         try { aiWebProgress.setProgressTintList(ColorStateList.valueOf(C_PRIMARY)); }
         catch (Throwable ignored) { }
-        aiWebBar.addView(aiWebProgress, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(3)));
 
-        aiWebMiniBar = new TextView(this);
-        aiWebMiniBar.setText("‹");
-        aiWebMiniBar.setTextSize(m.backSize);
-        aiWebMiniBar.setTypeface(Typeface.DEFAULT_BOLD);
-        aiWebMiniBar.setTextColor(0xAAFFFFFF);
-        aiWebMiniBar.setGravity(Gravity.CENTER);
-        aiWebMiniBar.setBackgroundColor(0x99101010);
-        aiWebMiniBar.setVisibility(View.GONE);
-        aiWebMiniBar.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { aiWebShowBar(true); }
-        });
+        aiGestureHint = new TextView(this);
+        aiGestureHint.setText("双指轻点两下：裁切版 / 原版\n双指长按 3 秒：退出");
+        aiGestureHint.setTextSize(m.subtitleSize - 1f);
+        aiGestureHint.setTextColor(0xEEFFFFFF);
+        aiGestureHint.setGravity(Gravity.CENTER);
+        aiGestureHint.setBackgroundColor(0xDD101010);
+        aiGestureHint.setPadding(dp(12), dp(9), dp(12), dp(9));
+        aiGestureHint.setLineSpacing(dp(2), 1.25f);
+        aiGestureHint.setVisibility(View.GONE);
 
         try {
             WebView wv = new WebView(this);
             aiWebView = wv;
-            // 顺序就是层级：网页最底 → 错误层 → 工具条 → 小箭头最上。一次排好，
+            // 顺序就是层级：网页最底 → 错误层 → 进度条 → 手势提示。一次排好，
             // 运行时不再 bringToFront（加载期间反复 requestLayout 会打断网页首次绘制）。
             aiWebHost.addView(wv, aiWebZoomLayoutParams(wv));
             aiWebHost.addView(aiWebErrorBox, new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
-            aiWebHost.addView(aiWebBar, new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-                    Gravity.TOP));
-            aiWebHost.addView(aiWebMiniBar, new FrameLayout.LayoutParams(dp(26), dp(18), Gravity.TOP));
+            aiWebHost.addView(aiWebProgress, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, dp(3), Gravity.TOP));
+            aiWebHost.addView(aiGestureHint, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.CENTER));
             configureAiWebView(wv);
         } catch (Throwable t) {
             // 系统没装 WebView 组件时，new WebView 会直接抛异常
@@ -2635,54 +2620,155 @@ public class MainActivity extends Activity {
                 aiWebHost.addView(aiWebErrorBox, new FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
             }
-            if (aiWebBar.getParent() == null) {
-                aiWebHost.addView(aiWebBar, new FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-                        Gravity.TOP));
+            if (aiWebProgress.getParent() == null) {
+                aiWebHost.addView(aiWebProgress, new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT, dp(3), Gravity.TOP));
             }
-            if (aiWebMiniBar.getParent() == null) {
-                aiWebHost.addView(aiWebMiniBar, new FrameLayout.LayoutParams(dp(26), dp(18), Gravity.TOP));
+            if (aiGestureHint.getParent() == null) {
+                aiWebHost.addView(aiGestureHint, new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                        Gravity.CENTER));
             }
             aiWebShowError("这台设备没有 WebView 组件，无法使用 DeepSeek 网页版。\n"
                     + "一般手表都自带；如果没有，需要装上系统的 WebView。", false);
         }
     }
 
-    /** 展开顶部工具条；autoHide = true 时 3.5 秒后自动收起。 */
-    private void aiWebShowBar(boolean autoHide) {
-        if (aiWebBar == null) return;
-        if (aiBarHideTask != null) aiBarHandler.removeCallbacks(aiBarHideTask);
-        aiBarHideTask = null;
-        aiWebBar.animate().cancel();
-        aiWebBar.setVisibility(View.VISIBLE);
-        aiWebBar.setAlpha(1f);
-        aiWebBar.setTranslationY(0f);
-        if (aiWebMiniBar != null) aiWebMiniBar.setVisibility(View.GONE);
-        if (autoHide) {
-            aiBarHideTask = new Runnable() {
-                public void run() { aiWebHideBar(); }
-            };
-            aiBarHandler.postDelayed(aiBarHideTask, 3500);
+    // ---- 双指手势：轻点两下切裁切版/原版，长按 3 秒退出 ----
+    /** 进页面时把操作说明显示几秒再淡出；设置页里也常驻一份说明。 */
+    private void showAiGestureHint() {
+        if (aiGestureHint == null) return;
+        if (aiGestureHideTask != null) aiGestureHandler.removeCallbacks(aiGestureHideTask);
+        aiGestureHideTask = null;
+        aiGestureHint.animate().cancel();
+        aiGestureHint.setAlpha(1f);
+        aiGestureHint.setVisibility(View.VISIBLE);
+        aiGestureHideTask = new Runnable() {
+            public void run() {
+                aiGestureHideTask = null;
+                if (aiGestureHint == null) return;
+                aiGestureHint.animate().alpha(0f).setDuration(400)
+                        .withEndAction(new Runnable() {
+                            public void run() {
+                                if (aiGestureHint != null) aiGestureHint.setVisibility(View.GONE);
+                            }
+                        }).start();
+            }
+        };
+        aiGestureHandler.postDelayed(aiGestureHideTask, 4000);
+    }
+
+    private void hideAiGestureHint() {
+        if (aiGestureHideTask != null) {
+            aiGestureHandler.removeCallbacks(aiGestureHideTask);
+            aiGestureHideTask = null;
+        }
+        if (aiGestureHint != null) {
+            aiGestureHint.animate().cancel();
+            aiGestureHint.setVisibility(View.GONE);
         }
     }
 
-    /** 收起工具条，只留一个极小的箭头；网页向下滚时也走这里。 */
-    private void aiWebHideBar() {
-        if (aiWebBar == null) return;
-        if (aiBarHideTask != null) {
-            aiBarHandler.removeCallbacks(aiBarHideTask);
-            aiBarHideTask = null;
+    private void cancelAiGestureTasks() {
+        if (aiGestureHideTask != null) aiGestureHandler.removeCallbacks(aiGestureHideTask);
+        if (aiGestureLongTask != null) aiGestureHandler.removeCallbacks(aiGestureLongTask);
+        aiGestureHideTask = null;
+        aiGestureLongTask = null;
+        aiTwoActive = false;
+        aiLastTwoTapAt = 0L;
+    }
+
+    /** 切换裁切版 / 原版。只改安全区，不动缩放档位——两者是独立的。 */
+    private void toggleAiWebCrop() {
+        aiWebCrop = !aiWebCrop;
+        prefs.edit().putBoolean("ai_web_crop", aiWebCrop).apply();
+        applyAiWebCrop();
+        toast(aiWebCrop ? "裁切版：四边避开圆屏" : "原版：网页铺满屏幕");
+    }
+
+    private void applyAiWebCrop() {
+        if (aiWebHost == null) return;
+        int safe = aiWebSafePad();
+        aiWebHost.setPadding(safe, safe, safe, safe);
+        applyAiWebZoom();          // 可用宽高变了，缩放与网页尺寸一起重算
+        aiWebHost.invalidate();
+    }
+
+    /** 双指序列从第二指按下开始接管，直到最后一指抬起；期间事件不传给网页，
+     *  既避免误触网页按钮，也避开 WebView 自带的双指缩放。返回 true 表示已消费。 */
+    private boolean handleAiTwoFinger(MotionEvent ev) {
+        int action = ev.getActionMasked();
+        int n = ev.getPointerCount();
+        if (!aiTwoActive) {
+            if (n >= 2 && (action == MotionEvent.ACTION_POINTER_DOWN
+                    || action == MotionEvent.ACTION_DOWN)) {
+                aiTwoActive = true;
+                aiTwoDownAt = System.currentTimeMillis();
+                aiTwoLongFired = false;
+                aiTwoMoved = false;
+                aiTwoStartX = ev.getX();
+                aiTwoStartY = ev.getY();
+                // 单指按下时右滑跟踪已经开过头，双指接管后归位，别留下半截拖动
+                swipeTracking = false;
+                if (swipeActive) resetSwipe();
+                scheduleAiTwoLong();
+                return true;
+            }
+            return false;
         }
-        final LinearLayout bar = aiWebBar;
-        bar.animate().cancel();
-        bar.animate().alpha(0f).translationY(-dp(20)).setDuration(180)
-                .withEndAction(new Runnable() {
-                    public void run() {
-                        if (aiWebBar != bar) return;   // 界面重建后旧动画别动新工具条
-                        bar.setVisibility(View.GONE);
-                        if (aiWebMiniBar != null) aiWebMiniBar.setVisibility(View.VISIBLE);
+        switch (action) {
+            case MotionEvent.ACTION_MOVE:
+                if (Math.abs(ev.getX() - aiTwoStartX) > dp(22)
+                        || Math.abs(ev.getY() - aiTwoStartY) > dp(22)) {
+                    aiTwoMoved = true;
+                    cancelAiTwoLong();
+                }
+                break;
+            case MotionEvent.ACTION_POINTER_UP:
+                cancelAiTwoLong();   // 已不是两指，长按不成立
+                break;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                cancelAiTwoLong();
+                long now = System.currentTimeMillis();
+                boolean quick = !aiTwoLongFired && !aiTwoMoved
+                        && (now - aiTwoDownAt) < 900L;
+                if (action == MotionEvent.ACTION_UP && quick) {
+                    if (aiLastTwoTapAt > 0L && now - aiLastTwoTapAt <= AI_TWO_TAP_GAP_MS) {
+                        aiLastTwoTapAt = 0L;
+                        toggleAiWebCrop();
+                    } else {
+                        aiLastTwoTapAt = now;
                     }
-                }).start();
+                } else {
+                    aiLastTwoTapAt = 0L;
+                }
+                aiTwoActive = false;
+                break;
+        }
+        return true;
+    }
+
+    private void scheduleAiTwoLong() {
+        cancelAiTwoLong();
+        aiGestureLongTask = new Runnable() {
+            public void run() {
+                aiGestureLongTask = null;
+                if (!aiTwoActive || aiTwoMoved || aiTwoLongFired) return;
+                aiTwoLongFired = true;
+                aiLastTwoTapAt = 0L;
+                toast("已退出问 AI");
+                goBack(aiWebBack);
+            }
+        };
+        aiGestureHandler.postDelayed(aiGestureLongTask, AI_TWO_LONG_MS);
+    }
+
+    private void cancelAiTwoLong() {
+        if (aiGestureLongTask != null) {
+            aiGestureHandler.removeCallbacks(aiGestureLongTask);
+            aiGestureLongTask = null;
+        }
     }
 
     // ---- 网页显示缩放（纯 View 变换，零注入） ----
@@ -2695,7 +2781,7 @@ public class MainActivity extends Activity {
     // 尺寸一律基于「安全区内的可用宽高」，否则缩放后的网页比容器宽，右边又会被裁。
     /** 圆屏四角安全边距：复用既有的 Metrics.roundSafe（短边×0.146），再加 2dp 余量；方屏为 0。 */
     private int aiWebSafePad() {
-        if (m == null || !m.round) return 0;
+        if (!aiWebCrop || m == null || !m.round) return 0;   // 原版 / 方屏：不加安全区
         return m.roundSafe + dp(2);
     }
 
@@ -2748,8 +2834,10 @@ public class MainActivity extends Activity {
         // 又会把左右裁掉（网页的 viewport 是写死的，改不动）。
         s.setUseWideViewPort(false);
         s.setLoadWithOverviewMode(false);
-        s.setSupportZoom(true);
-        s.setBuiltInZoomControls(true);
+        // 双指手势归 App 全局处理（轻点两下切版、长按退出），关掉 WebView 自带缩放，
+        // 免得和手势抢事件；网页本身也写了 user-scalable=no，缩放本来就没用。
+        s.setSupportZoom(false);
+        s.setBuiltInZoomControls(false);
         s.setDisplayZoomControls(false);
         s.setJavaScriptCanOpenWindowsAutomatically(false);
         s.setAllowFileAccess(false);
@@ -2761,13 +2849,7 @@ public class MainActivity extends Activity {
         wv.setHorizontalScrollBarEnabled(false);
         wv.setVerticalScrollBarEnabled(false);
         wv.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        // 网页往下滑就把工具条收起来，往上滑或回到顶部再展出来：不常驻占屏幕。
-        wv.setOnScrollChangeListener(new View.OnScrollChangeListener() {
-            public void onScrollChange(View v, int sx, int sy, int oldx, int oldy) {
-                if (sy > oldy + 6) aiWebHideBar();
-                else if (sy < oldy - 6) aiWebShowBar(true);
-            }
-        });
+        // 网页页没有常驻工具条，滚动不再驱动任何浮层收展。
 
         CookieManager cm = CookieManager.getInstance();
         cm.setAcceptCookie(true);
@@ -2797,7 +2879,6 @@ public class MainActivity extends Activity {
             @Override
             public void onPageStarted(WebView v, String url, Bitmap favicon) {
                 aiWebProgress.setVisibility(View.VISIBLE);
-                aiWebShowBar(true);
             }
 
             @Override
@@ -2872,7 +2953,6 @@ public class MainActivity extends Activity {
         }
         aiWebLoaded = true;
         aiWebHideError();
-        aiWebShowBar(true);
         aiWebProgress.setProgress(0);
         aiWebProgress.setVisibility(View.VISIBLE);
         // 等这一屏真正完成一次布局再加载：以前在切页淡入（alpha 0）时就 loadUrl，
@@ -2891,7 +2971,7 @@ public class MainActivity extends Activity {
         aiWebErrorBtn.setVisibility(retryable ? View.VISIBLE : View.GONE);
         aiWebErrorBox.setVisibility(View.VISIBLE);
         if (aiWebProgress != null) aiWebProgress.setVisibility(View.GONE);
-        aiWebShowBar(true);   // 出错时也要能点返回，别把用户困在网页里
+        hideAiGestureHint();   // 提示别盖住错误文字；退出靠双指长按，设置页里有说明
     }
 
     private void aiWebHideError() {
@@ -3079,6 +3159,7 @@ public class MainActivity extends Activity {
             }
         }), wrap());
         aiWebCfgInner.addView(aiHint("默认「自动」：按屏幕宽度把网页整体缩小，登录框、验证码和侧边栏都能完整显示。点一下可切「更小」或「原样」，切换不重载网页。"), wrap());
+        aiWebCfgInner.addView(aiHint("手势：双指轻点两下切「裁切版 / 原版」（四边避开圆屏 / 网页铺满整屏）；双指长按 3 秒退出问 AI。当前：" + (aiWebCrop ? "裁切版" : "原版") + "。网页页已没有返回和刷新按钮。"), wrap());
         aiWebCfgInner.addView(toggleRow("隐藏网页里的下载 APP 入口", aiWebHideDl,
                 new View.OnClickListener() {
             public void onClick(View v) {
@@ -6226,7 +6307,7 @@ public class MainActivity extends Activity {
         } else if (s == S_AI_WEB) {
             // 只加载一次：反复进出不打断网页里正在进行的对话
             if (!aiWebLoaded) aiWebLoad();
-            aiWebShowBar(true);
+            showAiGestureHint();
         } else if (s == S_AI_HUB) {
             renderAiHub();
             scrollToTop(aiHubScroll);
@@ -6304,6 +6385,7 @@ public class MainActivity extends Activity {
         log("APP", "onDestroy");
         dismissCodeDialog();
         dismissUpdateDialog();
+        cancelAiGestureTasks();
         if (aiWebView != null) {
             try { aiWebView.destroy(); } catch (Throwable ignored) { }
             aiWebView = null;
@@ -6395,8 +6477,13 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
-        // 网页页也保留右滑返回（工具条会自动收起，得有第二条退路），
-        // 但起手区和所需距离都收紧，免得网页里横滑、拖光标被误判成返回。
+        // 问 AI 页的双指手势优先：从第二指按下到最后一指抬起期间事件全部由这里处理，
+        // 不传给网页，避免误触按钮，也避开 WebView 自带的双指缩放。
+        if (fullscreenView == null && (screen == S_AI_WEB || aiTwoActive)) {
+            if (handleAiTwoFinger(ev)) return true;
+        }
+        // 网页页也保留右滑返回，但起手区和所需距离都收紧，
+        // 免得网页里横滑、拖光标被误判成返回。
         if (swipeBack && fullscreenView == null && !sliderTouching) {
             int action = ev.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN) {
