@@ -296,6 +296,11 @@ public class MainActivity extends Activity {
             + "（横杠贴在公式前会被看成负号）；可以用 **文字** 强调重点；"
             + "不要用 Markdown 表格、代码块和标题符号。";
 
+    /** 本机没有 WebView 组件：自动走 API 模式，网页版不可选。 */
+    private boolean aiNoWebView = false;
+    /** 本次启动刚刚因为缺 WebView 自动切换过，界面出来后提示一句。 */
+    private boolean aiSwitchedByNoWebView = false;
+
     /** 是否在对话里显示思考过程；默认关（手表屏幕小，思考会把正文挤下去）。 */
     private boolean chatShowThink = false;
 
@@ -638,6 +643,13 @@ public class MainActivity extends Activity {
         haptic = prefs.getBoolean("haptic", true);
         aiMode = prefs.getString("ai_mode", "web");
         loadApiConfig();
+        // 没有 WebView 就自动改用 API 模式（网页版在这台设备上根本打不开）
+        aiNoWebView = !aiHasWebView();
+        if (aiNoWebView && !"api".equals(aiMode)) {
+            aiMode = "api";
+            prefs.edit().putString("ai_mode", aiMode).apply();
+            aiSwitchedByNoWebView = true;
+        }
         aiWebHideDl = prefs.getBoolean("ai_web_hide_dl", true);
         aiWebZoomMode = prefs.getInt("ai_web_zoom", 0);
         aiWebCrop = prefs.getBoolean("ai_web_crop", true);
@@ -2036,6 +2048,23 @@ public class MainActivity extends Activity {
         Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
             @Override
             public void uncaughtException(Thread t, Throwable e) {
+                // 崩溃堆栈无论如何都留一份在 crash.log（最多留最近 8KB）：
+                // 日志开关是用户手动开的，崩溃时往往没开，事后就查不到原因了。
+                try {
+                    StringWriter sw = new StringWriter();
+                    e.printStackTrace(new PrintWriter(sw));
+                    String text = "== " + new java.text.SimpleDateFormat("MM-dd HH:mm:ss",
+                            java.util.Locale.US).format(new Date()) + " 线程 " + t.getName()
+                            + "\n" + sw.toString();
+                    java.io.File f = new java.io.File(getFilesDir(), "crash.log");
+                    if (f.exists() && f.length() > 8192) {
+                        String old = readFileQuiet(f);
+                        text = old.substring(Math.max(0, old.length() - 4096)) + "\n" + text;
+                    }
+                    java.io.FileOutputStream fos = new java.io.FileOutputStream(f, false);
+                    fos.write(text.getBytes(StandardCharsets.UTF_8));
+                    fos.close();
+                } catch (Throwable ignored) { }
                 if (logEnabled) {
                     try {
                         StringWriter sw = new StringWriter();
@@ -2046,6 +2075,21 @@ public class MainActivity extends Activity {
                 if (prev != null) prev.uncaughtException(t, e);
             }
         });
+    }
+
+    /** 读整个文件；读不到就当空串。 */
+    private static String readFileQuiet(java.io.File f) {
+        try {
+            java.io.FileInputStream in = new java.io.FileInputStream(f);
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] b = new byte[4096];
+            int n;
+            while ((n = in.read(b)) > 0) bos.write(b, 0, n);
+            in.close();
+            return new String(bos.toByteArray(), StandardCharsets.UTF_8);
+        } catch (Throwable t) {
+            return "";
+        }
     }
 
     /** 读日志末尾最多 maxChars 个字符（给反馈附带用）。 */
@@ -2362,6 +2406,16 @@ public class MainActivity extends Activity {
         aiChatScreen = newScreen();
         buildAiChatScreen();
         root.addView(aiChatScreen, fp());
+
+        // 因为缺 WebView 自动切过模式：界面铺好之后提示一句，别在启动瞬间被开屏盖住
+        if (aiSwitchedByNoWebView) {
+            aiSwitchedByNoWebView = false;
+            root.postDelayed(new Runnable() {
+                public void run() {
+                    if (alive()) toast("本机没有 WebView，已自动改用 API 配置模式");
+                }
+            }, 1200);
+        }
 
         // 主页
         subjectList = new SvList();
@@ -3213,14 +3267,20 @@ public class MainActivity extends Activity {
         boolean api = "api".equals(aiMode);
         aiHubInner.addView(toggleRow("API AI（自行配置）", api, new View.OnClickListener() {
             public void onClick(View v) {
+                if (aiNoWebView) {
+                    toast("本机没有 WebView，只能用 API 模式");
+                    return;
+                }
                 aiMode = "api".equals(aiMode) ? "web" : "api";
                 prefs.edit().putString("ai_mode", aiMode).apply();
                 markSubjectsDirty();
                 renderAiHub();
             }
         }), wrap());
-        aiHubInner.addView(aiHint("当前：" + (api ? "API AI（自行配置）" : "DeepSeek 网页版")
-                + "。关 = 网页版，开 = 自行配置；切换后主页「问 AI」走对应模式。"), wrap());
+        aiHubInner.addView(aiHint(aiNoWebView
+                ? "本机没有 WebView 组件，网页版用不了，已固定为 API 模式。"
+                : ("当前：" + (api ? "API AI（自行配置）" : "DeepSeek 网页版")
+                + "。关 = 网页版，开 = 自行配置；切换后主页「问 AI」走对应模式。")), wrap());
         if (api) {
             aiHubInner.addView(aiHint(aiApiReady()
                     ? ("接口：" + aiApiModel + "，可以测连接")
@@ -4209,44 +4269,61 @@ public class MainActivity extends Activity {
     }
 
     private void buildChatInputBar() {
+        // 底部就两个按钮：发消息（主，平时独占一行）和取消（只在生成中出现）。
+        // 圆屏越靠下越窄，所以底部留出安全距离，并按圆的几何把整条宽度收在圆内，
+        // 这样两个按钮都贴着屏幕下沿、完整可见，也不需要滚动。
         aiChatBar = new LinearLayout(this);
         aiChatBar.setOrientation(LinearLayout.HORIZONTAL);
         aiChatBar.setGravity(Gravity.CENTER_VERTICAL);
-        // 圆屏底部是圆弧：不给安全距离，按钮会落在屏幕外点不到
-        int bp = m.round ? Math.max(dp(4), m.roundSafe) : dp(4);
-        aiChatBar.setPadding(0, dp(4), 0, bp);
+
+        int bottomGap = m.round ? Math.max(dp(6), Math.round(m.roundSafe * 0.9f)) : dp(6);
+        aiChatBar.setPadding(0, dp(2), 0, bottomGap);
+        int barH = dp(38);
 
         aiChatInputBtn = new TextView(this);
-        aiChatInputBtn.setText("说点什么…");
+        aiChatInputBtn.setText("发消息");
         aiChatInputBtn.setTextSize(m.subtitleSize - 1f);
-        aiChatInputBtn.setTextColor(C_SUB);
+        aiChatInputBtn.setTypeface(Typeface.DEFAULT_BOLD);
+        aiChatInputBtn.setTextColor(C_PRIMARY);
         aiChatInputBtn.setGravity(Gravity.CENTER);
-        aiChatInputBtn.setPadding(dp(10), dp(9), dp(10), dp(9));
-        aiChatInputBtn.setBackgroundDrawable(clickBg(C_PILL));
+        aiChatInputBtn.setSingleLine(true);
+        aiChatInputBtn.setBackgroundDrawable(clickBg(0xFF14384A));
         aiChatInputBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { vibrate(); chatAskInput(); }
         });
-        aiChatBar.addView(aiChatInputBtn, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
         aiChatStopBtn = new TextView(this);
-        aiChatStopBtn.setText("停止");
+        aiChatStopBtn.setText("取消");
         aiChatStopBtn.setTextSize(m.subtitleSize - 1f);
-        aiChatStopBtn.setTypeface(Typeface.DEFAULT_BOLD);
-        aiChatStopBtn.setTextColor(0xFFFFB74D);
         aiChatStopBtn.setGravity(Gravity.CENTER);
-        aiChatStopBtn.setPadding(dp(10), dp(9), dp(10), dp(9));
+        aiChatStopBtn.setSingleLine(true);
+        aiChatStopBtn.setTextColor(0xFFFFB74D);
         aiChatStopBtn.setBackgroundDrawable(clickBg(C_PILL));
         aiChatStopBtn.setVisibility(View.GONE);
         aiChatStopBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { chatStop(); }
         });
-        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        slp.leftMargin = dp(4);
+
+        // 比例 2:1（发消息 : 取消）。取消隐藏时，发消息自动吃满整行。
+        aiChatBar.addView(aiChatInputBtn, new LinearLayout.LayoutParams(0, barH, 2f));
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(0, barH, 1f);
+        slp.leftMargin = dp(6);
         aiChatBar.addView(aiChatStopBtn, slp);
 
-        aiChatScreen.addView(aiChatBar, wrap());
+        // 按圆几何限制整条宽度：按钮下沿离屏幕底 bottomGap 时，圆在该高度只剩 2*sqrt(2Rd-d^2) 宽
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        if (m.round) {
+            double r = Math.min(getResources().getDisplayMetrics().widthPixels,
+                    getResources().getDisplayMetrics().heightPixels) / 2.0;
+            double d = bottomGap;                       // 按钮下沿到圆底的距离
+            double half = Math.sqrt(Math.max(1.0, 2 * r * d - d * d));
+            int cap = (int) Math.floor(half * 2) - dp(2);   // 留 2dp 余量
+            int avail = getResources().getDisplayMetrics().widthPixels - 2 * m.sidePad;
+            blp.width = Math.max(dp(120), Math.min(avail, cap));
+            blp.gravity = Gravity.CENTER_HORIZONTAL;
+        }
+        aiChatScreen.addView(aiChatBar, blp);
     }
 
     /** 重画整页：消息不多，整页重建比局部更新更不容易出错。 */
@@ -4282,6 +4359,21 @@ public class MainActivity extends Activity {
         // 上下各加一段屏高 25% 的占位（圆屏），内容才不会贴在圆弧边上
         padInner(aiChatInner);
         scrollChatToBottom(false);
+    }
+
+    /** 带兜底的渲染入口：公式解析或绘制出任何问题（包括嵌套过深导致 StackOverflowError），
+     *  都退回纯文本，绝不让一条回复把整个 App 带崩。 */
+    private CharSequence safeMarkup(String src) {
+        String text = src == null ? "" : src;
+        try {
+            if (text.length() > 12000) {          // 超长回复不做公式排版，省内存也省时间
+                return fixListMarks(text);
+            }
+            return applyMarkup(fixListMarks(text));
+        } catch (Throwable t) {
+            log("CHAT", "公式渲染失败，退回纯文本：" + t);
+            return fixListMarks(text);
+        }
     }
 
     /** 行首的「- 」「* 」项目符号换成「• 」：横杠紧贴公式会被读成负号。
@@ -4346,7 +4438,7 @@ public class MainActivity extends Activity {
         else text = msg.content;
         // AI 的回复走知识点同一套渲染：\frac / \sqrt / ^{} / **重点** 都会被画出来；
         // 用户自己打的字保持原样，免得一个下划线就被当成下标。
-        body.setText(user ? text : applyMarkup(fixListMarks(text)));
+        body.setText(user ? text : safeMarkup(text));
         body.setTextSize(m.subtitleSize - 1f);
         body.setTextColor(msg.err != null ? 0xFFFFB74D : C_TEXT);
         body.setLineSpacing(dp(2), 1.25f);
@@ -4434,8 +4526,8 @@ public class MainActivity extends Activity {
         if (aiChatStopBtn == null) return;
         aiChatStopBtn.setVisibility(chatBusy ? View.VISIBLE : View.GONE);
         if (aiChatInputBtn != null) {
-            aiChatInputBtn.setText(chatBusy ? "等回复…" : "说点什么…");
-            aiChatInputBtn.setTextColor(chatBusy ? C_SUB : C_TEXT);
+            aiChatInputBtn.setText("发消息");
+            aiChatInputBtn.setTextColor(chatBusy ? C_SUB : C_PRIMARY);
         }
     }
 
@@ -4818,7 +4910,7 @@ public class MainActivity extends Activity {
                 if (!alive() || screen != S_AI_CHAT) return;
                 if (chatStreamTv != null) {
                     chatStreamTv.setText(msg.content.length() == 0
-                            ? "…" : applyMarkup(fixListMarks(msg.content) + "▍"));
+                            ? "…" : safeMarkup(msg.content + "▍"));
                 }
                 if (chatStreamReasonTv != null && msg.reasoning.length() > 0) {
                     chatStreamReasonTv.setText("思考：" + msg.reasoning);
@@ -4964,6 +5056,11 @@ public class MainActivity extends Activity {
 
     /** 主页「问 AI」按当前模式分流；实时读 aiMode，切换后不用重绘主页列表也生效。 */
     private void openAiFromHome() {
+        if (aiNoWebView && !"api".equals(aiMode)) {
+            aiMode = "api";
+            prefs.edit().putString("ai_mode", aiMode).apply();
+            toast("本机没有 WebView，已自动改用 API 配置模式");
+        }
         if ("api".equals(aiMode)) {
             aiChatBack = S_SUBJECT;
             aiCfgBack = S_SUBJECT;
@@ -7425,6 +7522,17 @@ public class MainActivity extends Activity {
             float orig = paint.getTextSize();
             int oc = paint.getColor();
             boolean ob = paint.isFakeBoldText();
+            try {
+                return measure(paint, fm, orig, oc, ob);
+            } catch (Throwable t) {
+                // 度量炸了也不能崩：给一个空格宽度，退回普通文字排法
+                paint.setTextSize(orig);
+                clearHi(paint, oc, ob);
+                return Math.max(1, (int) paint.measureText("\u00A0"));
+            }
+        }
+
+        private int measure(Paint paint, Paint.FontMetricsInt fm, float orig, int oc, boolean ob) {
             applyHi(paint);
             float size = sizeOf(orig);
             float[] m = measList(root, paint, size);
@@ -7453,12 +7561,17 @@ public class MainActivity extends Activity {
             float orig = paint.getTextSize();
             int color = paint.getColor();
             boolean ob = paint.isFakeBoldText();
-            applyHi(paint);
-            drawInl(canvas, paint, root, x, baseOf(orig, y), sizeOf(orig), paint.getColor());
-            paint.setTextSize(orig);
-            clearHi(paint, color, ob);
-            paint.setTextAlign(Paint.Align.LEFT);
-            paint.setStyle(Paint.Style.FILL);
+            try {
+                applyHi(paint);
+                drawInl(canvas, paint, root, x, baseOf(orig, y), sizeOf(orig), paint.getColor());
+            } catch (Throwable ignored) {
+                // 绘制阶段出错就这一帧不画公式，别把进程带崩
+            } finally {
+                paint.setTextSize(orig);
+                clearHi(paint, color, ob);
+                paint.setTextAlign(Paint.Align.LEFT);
+                paint.setStyle(Paint.Style.FILL);
+            }
         }
     }
 
