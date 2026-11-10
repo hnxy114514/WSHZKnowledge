@@ -281,6 +281,18 @@ public class MainActivity extends Activity {
     /** 流式刷新节流：80ms 一次，避免一字一刷把主线程刷爆。 */
     private long chatUiAt = 0L;
     private TextView chatStreamTv = null, chatStreamReasonTv = null, chatThinkingTv = null;
+    /** 开场白：除了「简短」，重点是把公式写法固定下来——App 只能画它认识的结构，
+     *  所以要在系统提示里告诉模型怎么写分式、根号、上下标，再交给 applyMarkup 渲染。 */
+    private static final String CHAT_SYSTEM_PROMPT =
+            "你是手表上的知识助手，回答要简短、直接，能分点就分点，不要长篇大论。\n"
+            + "凡是数学公式，必须按下面的写法输出，应用会照着画成分式、根号和上下标：\n"
+            + "1. 公式用 $ 包起来，例如 $\\sin\\alpha+\\sin\\beta=2\\sin\\frac{\\alpha+\\beta}{2}\\cos\\frac{\\alpha-\\beta}{2}$\n"
+            + "2. 分数写成 \\frac{分子}{分母}；根号写成 \\sqrt{被开方数}；n 次根写成 \\sqrt[n]{被开方数}\n"
+            + "3. 上下标写成 a^{2}、a_{n}；希腊字母写成 \\alpha \\beta \\gamma \\theta \\pi\n"
+            + "4. 一行只写一个公式，不要用 aligned、array、矩阵等环境，也不要贴图片\n"
+            + "5. 乘号写 \\times，除号写 \\div，不等号写 \\ne \\le \\ge\n"
+            + "可以用 **文字** 强调重点；不要用 Markdown 表格、代码块和标题符号。";
+
     /** 是否在对话里显示思考过程；默认关（手表屏幕小，思考会把正文挤下去）。 */
     private boolean chatShowThink = false;
 
@@ -291,6 +303,10 @@ public class MainActivity extends Activity {
         String reasoning = "";
         boolean streaming = false;
         String err = null;
+        /** 接口给的结束原因：length = 被 max_tokens 截断。 */
+        String finish = "";
+        /** 被截断了，气泡下给一个「继续」。 */
+        boolean truncated = false;
         ChatMsg(String r) { role = r; }
     }
     /** 从哪个页面点进来的：返回时原路退回，而不是一律回主页。 */
@@ -3324,6 +3340,8 @@ public class MainActivity extends Activity {
                         renderAiApi();
                     }
                 }), gap());
+        aiApiInner.addView(aiHint("最大回复长度太小会把公式表截断（接口按词算，中文更费）；"
+                + "公式多的回答建议 1024 以上。被截断时对话里会出现「继续」。"), wrap());
         aiApiInner.addView(aiHint("温度越高越发散；思考强度是发给接口的参数，只对支持的模型生效。"
                 + "对话页顶部的「思考 开/关」只控制显不显示思考过程，两者互不影响。"), wrap());
 
@@ -4302,7 +4320,9 @@ public class MainActivity extends Activity {
         if (msg.err != null) text = msg.err;
         else if (msg.content.length() == 0) text = msg.streaming ? "…" : "（空回复）";
         else text = msg.content;
-        body.setText(text);
+        // AI 的回复走知识点同一套渲染：\frac / \sqrt / ^{} / **重点** 都会被画出来；
+        // 用户自己打的字保持原样，免得一个下划线就被当成下标。
+        body.setText(user ? text : applyMarkup(text));
         body.setTextSize(m.subtitleSize - 1f);
         body.setTextColor(msg.err != null ? 0xFFFFB74D : C_TEXT);
         body.setLineSpacing(dp(2), 1.25f);
@@ -4318,6 +4338,26 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
+
+        if (msg.truncated && !user && msg.err == null) {
+            TextView more = new TextView(this);
+            more.setText("继续");
+            more.setTextSize(Math.max(9f, m.subtitleSize - 2f));
+            more.setTypeface(Typeface.DEFAULT_BOLD);
+            more.setTextColor(C_PRIMARY);
+            more.setGravity(Gravity.CENTER);
+            more.setPadding(dp(8), dp(6), dp(8), dp(6));
+            more.setBackgroundDrawable(clickBg(C_PILL));
+            more.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    vibrate();
+                    chatContinue();
+                }
+            });
+            LinearLayout.LayoutParams mlp2 = wrap();
+            mlp2.topMargin = dp(5);
+            box.addView(more, mlp2);
+        }
 
         if (msg.err != null && !user) {
             TextView retry = new TextView(this);
@@ -4513,6 +4553,28 @@ public class MainActivity extends Activity {
         startChatStream();
     }
 
+    /** 被长度截断后接着写：上一轮的正文已经在上下文里，让模型从断点往下写。 */
+    private void chatContinue() {
+        if (chatBusy) {
+            toast("还在回复，先点停止");
+            return;
+        }
+        for (int i = chatMsgs.size() - 1; i >= 0; i--) {
+            if ("assistant".equals(chatMsgs.get(i).role)) {
+                chatMsgs.get(i).truncated = false;
+                break;
+            }
+        }
+        ChatMsg u = new ChatMsg("user");
+        u.content = "继续，接着上面断掉的地方往下写，不要重复已经写过的内容。";
+        chatMsgs.add(u);
+        ChatMsg a = new ChatMsg("assistant");
+        a.streaming = true;
+        chatMsgs.add(a);
+        renderAiChat();
+        startChatStream();
+    }
+
     private void chatRetry(ChatMsg failed) {
         if (chatBusy) {
             toast("还在回复，先点停止");
@@ -4533,7 +4595,7 @@ public class MainActivity extends Activity {
         try {
             JSONObject sys = new JSONObject();
             sys.put("role", "system");
-            sys.put("content", "你是手表上的知识助手。回答尽量简短、直接，能分点就分点，不要长篇大论。");
+            sys.put("content", CHAT_SYSTEM_PROMPT);
             arr.put(sys);
         } catch (Throwable ignored) { }
         List<ChatMsg> hist = new ArrayList<ChatMsg>();
@@ -4654,6 +4716,7 @@ public class MainActivity extends Activity {
         try {
             br = new BufferedReader(new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8));
             String line;
+            boolean sawDone = false;
             while (!chatStopFlag && (line = br.readLine()) != null) {
                 String s = line.trim();
                 if (s.length() == 0) continue;
@@ -4665,13 +4728,16 @@ public class MainActivity extends Activity {
                     continue;
                 }
                 String d = s.substring(5).trim();
-                if ("[DONE]".equals(d)) break;
+                if ("[DONE]".equals(d)) { sawDone = true; break; }
                 try {
                     JSONObject o = new JSONObject(d);
                     JSONArray ch = o.optJSONArray("choices");
                     if (ch == null || ch.length() == 0) continue;
                     JSONObject c0 = ch.optJSONObject(0);
                     if (c0 == null) continue;
+                    // 结束原因：length = 被 max_tokens 截断，stop = 正常说完
+                    String fr = jsonStr(c0, "finish_reason");
+                    if (fr.length() > 0) target.finish = fr;
                     JSONObject delta = c0.optJSONObject("delta");
                     if (delta == null) delta = c0.optJSONObject("message");
                     if (delta == null) continue;
@@ -4688,6 +4754,10 @@ public class MainActivity extends Activity {
             if (chatStopFlag && target.content.length() > 0
                     && target.content.indexOf("（已停止）") < 0) {
                 target.content += "\n（已停止）";
+            } else if (!chatStopFlag && target.content.length() > 0) {
+                // 被 max_tokens 截断，或连接没走到 [DONE] 就断了：都标成可继续，
+                // 让用户一眼看出「没写完」，也给一条接着写的路
+                if ("length".equals(target.finish) || !sawDone) target.truncated = true;
             }
             chatDone(target);
         } catch (Throwable t) {
@@ -4708,6 +4778,8 @@ public class MainActivity extends Activity {
                 target.reasoning = jsonStr(msg, "reasoning_content");
                 target.content = jsonStr(msg, "content");
             }
+            String fr = jsonStr(c0, "finish_reason");
+            if ("length".equals(fr)) target.truncated = true;
         } catch (Throwable ignored) { }
         chatDone(target);
     }
@@ -4715,14 +4787,14 @@ public class MainActivity extends Activity {
     /** 流式刷新：80ms 一次，主线程只改文本，不重建列表。 */
     private void chatPush(final ChatMsg msg, boolean force) {
         long now = SystemClock.uptimeMillis();
-        if (!force && now - chatUiAt < 80L) return;
+        if (!force && now - chatUiAt < 150L) return;
         chatUiAt = now;
         runOnUiThread(new Runnable() {
             public void run() {
                 if (!alive() || screen != S_AI_CHAT) return;
                 if (chatStreamTv != null) {
                     chatStreamTv.setText(msg.content.length() == 0
-                            ? "…" : msg.content + "▍");
+                            ? "…" : applyMarkup(msg.content + "▍"));
                 }
                 if (chatStreamReasonTv != null && msg.reasoning.length() > 0) {
                     chatStreamReasonTv.setText("思考：" + msg.reasoning);
@@ -4747,6 +4819,7 @@ public class MainActivity extends Activity {
                 if (!alive()) return;
                 if (chatMsgs.indexOf(msg) < 0) return;   // 已被清空
                 if (screen == S_AI_CHAT) renderAiChat();
+                if (msg.truncated) toast("回复没写完，点「继续」接着写");
             }
         });
     }
@@ -6833,6 +6906,9 @@ public class MainActivity extends Activity {
             if (!Character.isLetter(c1)) {
                 if (c1 == ',' || c1 == ';' || c1 == ':' || c1 == ' ' || c1 == '!') { out.append(' '); }
                 else if (c1 == '\\') { out.append('\n'); }
+                // 反斜杠加括号/中括号只是公式定界符（模型常用 \( \) 这种写法），丢掉，
+                // 别把括号画到正文里
+                else if (c1 == '(' || c1 == ')' || c1 == '[' || c1 == ']') { }
                 else { out.append(c1); }
                 i = j + 1;
                 continue;

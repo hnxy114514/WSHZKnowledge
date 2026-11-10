@@ -718,6 +718,16 @@ Node {
       - 流式：`POST /chat/completions` 带 `stream:true`，按行读 SSE（`data:` / `[DONE]`），
         `delta.content` 追到当前气泡，`delta.reasoning_content` 显示成灰色的「思考：…」，
         80ms 节流刷新；网关不支持流式、直接回整段 JSON 时也能解析。
+      - **公式与知识点同一套渲染**：AI 回复过 `applyMarkup()`（和知识点详情页同一个入口），
+        所以 `\frac{}{}`、`\sqrt{}`、`\sqrt[n]{}`、`^{}`、`_{}`、`**重点**` 都会被真正画成
+        分数、根式、上下标，而不是原样显示源码。用户自己发的消息保持纯文本（免得一个下划线被当成下标）。
+      - **格式要在开场白里约定**：`CHAT_SYSTEM_PROMPT` 明确要求用 `$...$` 包公式、
+        `\frac{分子}{分母}`、`\sqrt{被开方数}`、`a^{2}`、希腊字母写 `\alpha`，
+        一行一个公式、不用 aligned/array 环境。渲染器只认这些结构，不约定就只能显示源码。
+        另外 `latexToText` 兼容 `\( \)`、`\[ \]` 这类定界符（直接丢掉，不留在正文里）。
+      - **截断可见**：读流时记 `finish_reason`，等于 `length` 或没收到 `[DONE]` 就断流，
+        都标 `truncated`，气泡下出现「继续」（把断点前的正文留在上下文里让它接着写），
+        并 toast 提示。最大回复长度建议 1024 以上，设置页里写了一句提醒。
       - **所有文本字段都过 `jsonStr()`**：Android 的 `org.json` 里 `optString` 遇到 JSON null
         会返回字面量 "null"（不是空串、也不吃默认值），流式每块都带 `"content": null` 占位，
         直接拼就会刷出一长串 null。`jsonStr` 先 `has()` 再 `isNull()` 再兜一次 "null" 判断。
