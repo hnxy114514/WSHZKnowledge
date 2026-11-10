@@ -329,6 +329,8 @@ public class MainActivity extends Activity {
         boolean folded = false;
         /** 上一次点击的时间，用来判双击。 */
         long lastTapAt = 0L;
+        /** 这次流里实际收到多少段正文，用来判断「空回复」。 */
+        int chunks = 0;
         /** 正文渲染结果的缓存：进页面、切开关时不用再解析一遍公式。 */
         CharSequence bodySpan;
         String bodyKey;
@@ -5051,7 +5053,23 @@ public class MainActivity extends Activity {
                 chatConn = c;
                 code = c.getResponseCode();
                 if (code == 200) {
-                    chatPump(c, target);
+                    // 重试前先清掉上一轮的内容，免得拼出半截重复
+                    target.content = "";
+                    target.reasoning = "";
+                    target.finish = "";
+                    target.truncated = false;
+                    boolean got = chatPump(c, target);
+                    if (chatStopFlag) { chatDone(target); return; }
+                    if (target.err != null) { chatFail(target, target.err); return; }
+                    if (!got) {
+                        // 空回复：记一笔，然后换更保守的参数再试一次（去掉思考强度/温度）
+                        noteDiag("空回复 level=" + level + " model=" + model
+                                + " finish=" + target.finish + " chunks=" + target.chunks);
+                        if (level < 2) continue;
+                        chatFail(target, "接口这次没返回内容，点「重试」");
+                        return;
+                    }
+                    chatDone(target);
                     return;
                 }
                 errBody = readAllText(c.getErrorStream());
@@ -5077,20 +5095,22 @@ public class MainActivity extends Activity {
         chatFail(target, "没有拿到回复");
     }
 
-    /** 读 SSE：一段一段把 delta 追到当前气泡上；也兼容网关直接回整段 JSON。 */
-    private void chatPump(HttpURLConnection c, ChatMsg target) {
+    /** 读 SSE 并填充 target，返回**是否拿到了正文**；出错时把原因写进 target.err，
+     *  收尾（chatDone/chatFail）交给调用方，好在「空回复」时先重试一次。 */
+    private boolean chatPump(HttpURLConnection c, ChatMsg target) {
         BufferedReader br = null;
         try {
             br = new BufferedReader(new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8));
             String line;
             boolean sawDone = false;
+            int chunks = 0;
             while (!chatStopFlag && (line = br.readLine()) != null) {
                 String s = line.trim();
                 if (s.length() == 0) continue;
                 if (!s.startsWith("data:")) {
                     if (s.startsWith("{")) {   // 不支持流式：整段当普通回复解析
                         chatParseWhole(s, target);
-                        return;
+                        break;
                     }
                     continue;
                 }
@@ -5114,23 +5134,29 @@ public class MainActivity extends Activity {
                     if (think.length() > 0 && target.reasoning.length() < 4000) {
                         target.reasoning += think;
                     }
-                    if (piece.length() > 0) target.content += piece;
+                    if (piece.length() > 0) {
+                        target.content += piece;
+                        chunks++;
+                    }
                     chatPush(target, false);
                 } catch (Throwable ignored) { }
             }
+            target.chunks = chunks;
             if (chatStopFlag && target.content.length() > 0
                     && target.content.indexOf("（已停止）") < 0) {
                 target.content += "\n（已停止）";
             } else if (!chatStopFlag && target.content.length() > 0) {
-                // 被 max_tokens 截断，或连接没走到 [DONE] 就断了：都标成可继续，
-                // 让用户一眼看出「没写完」，也给一条接着写的路
+                // 被 max_tokens 截断，或连接没走到 [DONE] 就断了：都标成可继续
                 if ("length".equals(target.finish) || !sawDone) target.truncated = true;
             }
-            chatDone(target);
+            return target.content.length() > 0;
         } catch (Throwable t) {
-            if (chatStopFlag) chatDone(target);
-            else chatFail(target, "读取回复失败：" + (t == null ? "未知原因"
-                    : t.getClass().getSimpleName()));
+            if (!chatStopFlag) {
+                target.err = "读取回复失败：" + (t == null ? "未知原因"
+                        : t.getClass().getSimpleName());
+            }
+            target.chunks = target.content.length() > 0 ? 1 : 0;
+            return target.content.length() > 0;
         } finally {
             try { if (br != null) br.close(); } catch (Throwable ignored) { }
         }
@@ -5147,8 +5173,8 @@ public class MainActivity extends Activity {
             }
             String fr = jsonStr(c0, "finish_reason");
             if ("length".equals(fr)) target.truncated = true;
+            if (msg != null && target.content.length() > 0) target.chunks = 1;
         } catch (Throwable ignored) { }
-        chatDone(target);
     }
 
     /** 流式刷新：80ms 一次，主线程只改文本，不重建列表。 */
@@ -7987,6 +8013,23 @@ public class MainActivity extends Activity {
         return s.replace('\uE000', ' ').replace('\uE001', '/').replace('\uE002', ' ')
                 .replace('\uE003', '\u221A').replace('\uE004', ' ')
                 .replace('\uE005', ' ').replace('\uE006', ' ');
+    }
+
+    /** 记一条诊断（和公式异常共用 render.log，限 4KB），用来查「空回复」这类现象。 */
+    private void noteDiag(String text) {
+        try {
+            String line = "· " + text + "\n";
+            java.io.File f = new java.io.File(getFilesDir(), "render.log");
+            if (!f.exists() || f.length() > 4096) {
+                java.io.FileOutputStream fos = new java.io.FileOutputStream(f, false);
+                fos.write((line).getBytes(StandardCharsets.UTF_8));
+                fos.close();
+            } else {
+                java.io.FileOutputStream fos = new java.io.FileOutputStream(f, true);
+                fos.write(line.getBytes(StandardCharsets.UTF_8));
+                fos.close();
+            }
+        } catch (Throwable ignored) { }
     }
 
     /** 记一笔公式排版错误（最多留 4KB）：这些错误现在不崩了，但要留下线索。 */
