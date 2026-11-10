@@ -234,6 +234,12 @@ public class MainActivity extends Activity {
     private boolean aiWebLoaded = false;
     /** 是否往网页注入「隐藏下载 APP 入口」脚本；关掉 = 网页完全原样，用于排查和兜底。 */
     private boolean aiWebHideDl = true;
+    /** 网页显示缩放档位：0 自动 / 1 更小 / 2 原样，存在 prefs 的 ai_web_zoom。
+     *  纯 View 层缩放，不往网页注入任何脚本。 */
+    private int aiWebZoomMode = 0;
+    /** 让网页按这个 CSS 宽度排版，再整体缩回手表屏幕（手表原生 CSS 宽度往往只有 200dp 出头）。 */
+    private static final float AI_WEB_TARGET_CSS_W = 360f;
+    private static final float AI_WEB_MIN_SCALE = 0.55f;
     private static final String AI_WEB_URL = "https://chat.deepseek.com/";
     /** 默认 UA 会被网页挡成 429，必须用正常浏览器 UA（这条实测能拿到 200）。 */
     private static final String AI_WEB_UA =
@@ -545,6 +551,7 @@ public class MainActivity extends Activity {
         haptic = prefs.getBoolean("haptic", true);
         aiMode = prefs.getString("ai_mode", "web");
         aiWebHideDl = prefs.getBoolean("ai_web_hide_dl", true);
+        aiWebZoomMode = prefs.getInt("ai_web_zoom", 0);
         loadGitHub();         // 只读 prefs，很快
         bootStart = System.currentTimeMillis();
         showBootSplash();     // 先把开屏画出来，绝不留黑屏
@@ -2606,8 +2613,7 @@ public class MainActivity extends Activity {
             aiWebView = wv;
             // 顺序就是层级：网页最底 → 错误层 → 工具条 → 小箭头最上。一次排好，
             // 运行时不再 bringToFront（加载期间反复 requestLayout 会打断网页首次绘制）。
-            aiWebHost.addView(wv, new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+            aiWebHost.addView(wv, aiWebZoomLayoutParams(wv));
             aiWebHost.addView(aiWebErrorBox, new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
             aiWebHost.addView(aiWebBar, new FrameLayout.LayoutParams(
@@ -2672,6 +2678,49 @@ public class MainActivity extends Activity {
                 }).start();
     }
 
+    // ---- 网页显示缩放（纯 View 变换，零注入） ----
+    // 网页自己写死了 viewport「width=device-width, initial-scale=1, maximum-scale=1,
+    // minimum-scale=1, user-scalable=no」：系统双指缩放和 setInitialScale 都会被它覆盖，
+    // 而手表圆屏的 CSS 宽度往往只有 200dp 出头，网页按这个窄视口排版 → UI 挤成一团，
+    // 登录框 / 人机验证弹窗 / 侧边栏都超出屏幕，左右被裁、按钮点不到。
+    // 做法：把 WebView 控件按更宽的尺寸排版（网页以为屏幕有 360dp），再用 Android 的
+    // View 缩放整体缩回手表屏幕。触摸坐标由系统自动逆变换，网页侧不用改、也不用注入脚本。
+    private String aiWebZoomLabel() {
+        return aiWebZoomMode == 1 ? "更小" : (aiWebZoomMode == 2 ? "原样" : "自动");
+    }
+
+    private float aiWebZoomFactor() {
+        if (aiWebZoomMode == 2) return 1f;
+        float dens = getResources().getDisplayMetrics().density;
+        if (dens <= 0f) dens = 1f;
+        float cssW = getResources().getDisplayMetrics().widthPixels / dens;
+        float k = Math.min(1f, cssW / AI_WEB_TARGET_CSS_W);
+        if (k < AI_WEB_MIN_SCALE) k = AI_WEB_MIN_SCALE;
+        if (aiWebZoomMode == 1) k = Math.max(0.45f, k * 0.85f);
+        return k;
+    }
+
+    private FrameLayout.LayoutParams aiWebZoomLayoutParams(WebView wv) {
+        float k = aiWebZoomFactor();
+        wv.setPivotX(0f);
+        wv.setPivotY(0f);
+        wv.setScaleX(k);
+        wv.setScaleY(k);
+        if (k >= 1f) return new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
+        int sw = getResources().getDisplayMetrics().widthPixels;
+        int sh = getResources().getDisplayMetrics().heightPixels;
+        return new FrameLayout.LayoutParams((int) (sw / k), (int) (sh / k));
+    }
+
+    /** 切档位时就地更新，不重载网页、不打断登录和正在进行的对话。 */
+    private void applyAiWebZoom() {
+        if (aiWebView == null) return;
+        aiWebView.setLayoutParams(aiWebZoomLayoutParams(aiWebView));
+        aiWebView.invalidate();
+        if (aiWebHost != null) aiWebHost.invalidate();
+    }
+
     private void configureAiWebView(WebView wv) {
         WebSettings s = wv.getSettings();
         s.setJavaScriptEnabled(true);
@@ -2679,6 +2728,9 @@ public class MainActivity extends Activity {
         s.setDatabaseEnabled(true);
         s.setUserAgentString(AI_WEB_UA);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
+        // 保持 false：布局宽度就等于 WebView 控件宽度，配合上面的 View 层缩放，
+        // 让网页按较宽视口排版、整体缩回屏幕。改成 true 会再叠一层 WebView 内部缩放，
+        // 又会把左右裁掉（网页的 viewport 是写死的，改不动）。
         s.setUseWideViewPort(false);
         s.setLoadWithOverviewMode(false);
         s.setSupportZoom(true);
@@ -3003,6 +3055,15 @@ public class MainActivity extends Activity {
         aiWebCfgInner.addView(warn, wrap());
 
         aiWebCfgInner.addView(sectionHeader("网页显示"), wrap());
+        aiWebCfgInner.addView(aiSettingBtn("网页缩放：" + aiWebZoomLabel(), new View.OnClickListener() {
+            public void onClick(View v) {
+                aiWebZoomMode = (aiWebZoomMode + 1) % 3;
+                prefs.edit().putInt("ai_web_zoom", aiWebZoomMode).apply();
+                applyAiWebZoom();
+                renderAiWebCfg();
+            }
+        }), wrap());
+        aiWebCfgInner.addView(aiHint("默认「自动」：按屏幕宽度把网页整体缩小，登录框、验证码和侧边栏都能完整显示。点一下可切「更小」或「原样」，切换不重载网页。"), wrap());
         aiWebCfgInner.addView(toggleRow("隐藏网页里的下载 APP 入口", aiWebHideDl,
                 new View.OnClickListener() {
             public void onClick(View v) {
