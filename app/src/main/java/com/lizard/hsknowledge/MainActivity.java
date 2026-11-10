@@ -283,6 +283,12 @@ public class MainActivity extends Activity {
     /** 流式刷新节流：80ms 一次，避免一字一刷把主线程刷爆。 */
     private long chatUiAt = 0L;
     private TextView chatStreamTv = null, chatStreamReasonTv = null, chatThinkingTv = null;
+    /** 对话内容变了才需要重画；页面来回切、切「思考」开关都不该重画。 */
+    private boolean chatDirty = true;
+    /** 每条的正文/折叠提示视图，用来就地更新（折叠、切思考）而不是整页重建。 */
+    private final java.util.Map<ChatMsg, TextView> chatBodies = new java.util.LinkedHashMap<ChatMsg, TextView>();
+    private final java.util.Map<ChatMsg, TextView> chatReasonViews = new java.util.LinkedHashMap<ChatMsg, TextView>();
+    private final java.util.Map<ChatMsg, TextView> chatFoldTips = new java.util.LinkedHashMap<ChatMsg, TextView>();
     /** 开场白：除了「简短」，重点是把公式写法固定下来——App 只能画它认识的结构，
      *  所以要在系统提示里告诉模型怎么写分式、根号、上下标，再交给 applyMarkup 渲染。 */
     private static final String CHAT_SYSTEM_PROMPT =
@@ -323,6 +329,9 @@ public class MainActivity extends Activity {
         boolean folded = false;
         /** 上一次点击的时间，用来判双击。 */
         long lastTapAt = 0L;
+        /** 正文渲染结果的缓存：进页面、切开关时不用再解析一遍公式。 */
+        CharSequence bodySpan;
+        String bodyKey;
         ChatMsg(String r) { role = r; }
     }
     /** 从哪个页面点进来的：返回时原路退回，而不是一律回主页。 */
@@ -4239,7 +4248,10 @@ public class MainActivity extends Activity {
                 vibrate();
                 chatShowThink = !chatShowThink;
                 prefs.edit().putBoolean("chat_show_think", chatShowThink).apply();
-                renderAiChat();
+                // 只翻可见性，不整页重建：重建会把每条公式再解析一遍，手表上能卡半秒以上
+                for (TextView tv : chatReasonViews.values()) {
+                    tv.setVisibility(chatShowThink ? View.VISIBLE : View.GONE);
+                }
                 toast(chatShowThink ? "显示思考过程" : "已隐藏思考过程");
             }
         });
@@ -4335,13 +4347,36 @@ public class MainActivity extends Activity {
         aiChatScreen.addView(aiChatBar, blp);
     }
 
+    /** 进页面时先给个「正在整理」占位，下一帧再真正渲染：
+     *  这样切页动画不会被解析公式卡住，用户也不会觉得点了没反应。 */
+    private void showChatLoadingThenRender() {
+        if (aiChatInner == null) return;
+        aiChatInner.removeAllViews();
+        TextView t = new TextView(this);
+        t.setText("正在整理对话…");
+        t.setTextSize(m.subtitleSize - 2f);
+        t.setTextColor(C_SUB);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(dp(8), dp(20), dp(8), dp(20));
+        aiChatInner.addView(t, wrap());
+        aiChatInner.post(new Runnable() {
+            public void run() {
+                if (alive() && screen == S_AI_CHAT) renderAiChat();
+            }
+        });
+    }
+
     /** 重画整页：消息不多，整页重建比局部更新更不容易出错。 */
     private void renderAiChat() {
         if (aiChatInner == null) return;
+        chatDirty = false;
         updateChatBar();
         chatStreamTv = null;
         chatStreamReasonTv = null;
         chatThinkingTv = null;
+        chatBodies.clear();
+        chatReasonViews.clear();
+        chatFoldTips.clear();
         aiChatInner.removeAllViews();
         aiChatInner.addView(chatTopBar(), wrapM());
         if (aiChatModelBtn != null) {
@@ -4476,10 +4511,26 @@ public class MainActivity extends Activity {
             msg.lastTapAt = 0L;
             vibrate();
             msg.folded = !msg.folded;
-            renderAiChat();
+            applyFold(msg);
         } else {
             msg.lastTapAt = now;
         }
+    }
+
+    /** 折叠只改这一条的显示：设行数、翻提示可见性，不重建整页（重建要重新解析公式，手表上会卡）。 */
+    private void applyFold(ChatMsg msg) {
+        TextView body = chatBodies.get(msg);
+        if (body != null) {
+            if (msg.folded) {
+                body.setMaxLines(4);
+                body.setEllipsize(TextUtils.TruncateAt.END);
+            } else {
+                body.setMaxLines(Integer.MAX_VALUE);
+                body.setEllipsize(null);
+            }
+        }
+        TextView tip = chatFoldTips.get(msg);
+        if (tip != null) tip.setVisibility(msg.folded ? View.VISIBLE : View.GONE);
     }
 
     /** 相邻的知识点标记之间补一个顿号：模型常写成【知识:A】【知识:B】，
@@ -4491,12 +4542,19 @@ public class MainActivity extends Activity {
         return out;
     }
 
+    /** 标题归一化的缓存：一次渲染要对上千个标题做正则，缓存下来省很多时间。 */
+    private static final java.util.HashMap<String, String> normCache =
+            new java.util.HashMap<String, String>();
+
     /** 去掉编号、括号注解、空白和「的」，只留主干用来比对标题。 */
     private static String normTitle(String s) {
         if (s == null) return "";
+        String hit = normCache.get(s);
+        if (hit != null) return hit;
         String t = s.replaceAll("^[0-9０-９.．、\\s]+", "");
         t = t.replaceAll("[（(][^）)]*[）)]", "");
         t = t.replace("的", "").replaceAll("\\s+", "");
+        if (normCache.size() < 4000) normCache.put(s, t);
         return t;
     }
 
@@ -4548,7 +4606,7 @@ public class MainActivity extends Activity {
         box.setBackgroundDrawable(pill(user ? 0xFF14384A : C_CARD));
         box.setPadding(dp(10), dp(7), dp(10), dp(8));
 
-        if (chatShowThink && !user
+        if (!user
                 && (msg.streaming || (msg.reasoning != null && msg.reasoning.length() > 0))) {
             // 推理内容可能比正文晚到：先建一个空行占位，流式时再显形
             TextView rt = new TextView(this);
@@ -4556,11 +4614,12 @@ public class MainActivity extends Activity {
             rt.setTextSize(Math.max(9f, m.subtitleSize - 3f));
             rt.setTextColor(C_SUB);
             rt.setLineSpacing(dp(1), 1.2f);
-            rt.setVisibility(msg.reasoning.length() == 0 ? View.GONE : View.VISIBLE);
+            rt.setVisibility(chatShowThink && msg.reasoning.length() > 0 ? View.VISIBLE : View.GONE);
             LinearLayout.LayoutParams rlp = wrap();
             rlp.bottomMargin = dp(3);
             box.addView(rt, rlp);
             if (msg.streaming) chatStreamReasonTv = rt;
+            chatReasonViews.put(msg, rt);
         } else if (!chatShowThink && !user && msg.streaming
                 && msg.content.length() == 0 && msg.reasoning.length() > 0) {
             // 思考藏起来时至少告诉用户「在算」，正文一开始就撤掉这句
@@ -4585,17 +4644,23 @@ public class MainActivity extends Activity {
         if (user) {
             body.setText(text);
         } else {
-            CharSequence sm = safeMarkup(text);
-            SpannableStringBuilder sb = sm instanceof SpannableStringBuilder
-                    ? (SpannableStringBuilder) sm : new SpannableStringBuilder(sm);
-            applyKnowledgeLinks(sb);
-            body.setText(sb);
+            // 公式解析很贵：同一条内容只解析一次，进页面/切开关时直接复用
+            if (msg.bodySpan == null || !text.equals(msg.bodyKey)) {
+                CharSequence sm = safeMarkup(text);
+                SpannableStringBuilder sb = sm instanceof SpannableStringBuilder
+                        ? (SpannableStringBuilder) sm : new SpannableStringBuilder(sm);
+                applyKnowledgeLinks(sb);
+                msg.bodySpan = sb;
+                msg.bodyKey = text;
+            }
+            body.setText(msg.bodySpan);
         }
         body.setTextSize(m.subtitleSize - 1f);
         body.setTextColor(msg.err != null ? 0xFFFFB74D : C_TEXT);
         body.setLineSpacing(dp(2), 1.25f);
         box.addView(body, wrap());
         if (msg.streaming) chatStreamTv = body;
+        chatBodies.put(msg, body);
 
         // 正文统一挂一个触摸处理：点链接跳转、双击折叠。
         // 关键：DOWN 必须 return true 先占住手势，否则上层（ScrollView/父布局）会拿走整串事件，
@@ -4637,15 +4702,17 @@ public class MainActivity extends Activity {
                 }
             });
         }
-        if (canFold && msg.folded) {
+        if (canFold) {
             TextView tip = new TextView(this);
             tip.setText("双击展开");
             tip.setTextSize(Math.max(9f, m.subtitleSize - 3f));
             tip.setTextColor(C_SUB);
             tip.setGravity(Gravity.CENTER);
+            tip.setVisibility(msg.folded ? View.VISIBLE : View.GONE);
             LinearLayout.LayoutParams tlp = wrap();
             tlp.topMargin = dp(3);
             box.addView(tip, tlp);
+            chatFoldTips.put(msg, tip);
         }
 
         if (msg.truncated && !user && msg.err == null) {
@@ -4869,6 +4936,7 @@ public class MainActivity extends Activity {
         ChatMsg a = new ChatMsg("assistant");
         a.streaming = true;
         chatMsgs.add(a);
+        chatDirty = true;
         renderAiChat();
         startChatStream();
     }
@@ -4883,6 +4951,7 @@ public class MainActivity extends Activity {
         ChatMsg a = new ChatMsg("assistant");
         a.streaming = true;
         chatMsgs.add(a);
+        chatDirty = true;
         renderAiChat();
         startChatStream();
     }
@@ -5116,6 +5185,7 @@ public class MainActivity extends Activity {
                 updateChatBar();
                 if (!alive()) return;
                 if (chatMsgs.indexOf(msg) < 0) return;   // 已被清空
+                chatDirty = true;
                 if (screen == S_AI_CHAT) renderAiChat();
                 if (msg.truncated) toast("回复没写完，点「继续」接着写");
             }
@@ -5132,6 +5202,7 @@ public class MainActivity extends Activity {
                 updateChatBar();
                 if (!alive()) return;
                 if (chatMsgs.indexOf(msg) < 0) return;   // 已被清空
+                chatDirty = true;
                 if (screen == S_AI_CHAT) renderAiChat();
                 toast(text);
             }
@@ -5158,6 +5229,7 @@ public class MainActivity extends Activity {
         chatMsgs.clear();
         chatBusy = false;
         chatStopFlag = false;
+        chatDirty = true;
         renderAiChat();
         toast("已清空");
     }
@@ -8643,8 +8715,11 @@ public class MainActivity extends Activity {
             renderAiApi();
             scrollToTop(aiApiScroll);
         } else if (s == S_AI_CHAT) {
-            renderAiChat();
-            scrollChatToBottom(false);
+            if (chatDirty) {
+                showChatLoadingThenRender();
+            } else {
+                scrollChatToBottom(false);
+            }
         } else if (s == S_AI_WEB_CFG) {
             renderAiWebCfg();
             scrollToTop(aiWebCfgScroll);
