@@ -232,6 +232,8 @@ public class MainActivity extends Activity {
     private int aiCfgBack = S_AI_HUB;
     /** 网页只加载一次；反复进出不打断正在进行的对话。 */
     private boolean aiWebLoaded = false;
+    /** 是否往网页注入「隐藏下载 APP 入口」脚本；关掉 = 网页完全原样，用于排查和兜底。 */
+    private boolean aiWebHideDl = true;
     private static final String AI_WEB_URL = "https://chat.deepseek.com/";
     /** 默认 UA 会被网页挡成 429，必须用正常浏览器 UA（这条实测能拿到 200）。 */
     private static final String AI_WEB_UA =
@@ -542,6 +544,7 @@ public class MainActivity extends Activity {
         swipeBack = prefs.getBoolean("swipe_back", true);
         haptic = prefs.getBoolean("haptic", true);
         aiMode = prefs.getString("ai_mode", "web");
+        aiWebHideDl = prefs.getBoolean("ai_web_hide_dl", true);
         loadGitHub();         // 只读 prefs，很快
         bootStart = System.currentTimeMillis();
         showBootSplash();     // 先把开屏画出来，绝不留黑屏
@@ -2433,34 +2436,66 @@ public class MainActivity extends Activity {
     // 网页是 DeepSeek 的，代码不在我们手里：这一层只做「去掉下载 APP 入口」一件事。
     // 输入框、按钮的尺寸一律保持网页默认，不改比例；登录态由网页自己的 Cookie 保持，
     // App 不存密钥、不写日志。SPA 会重绘，所以脚本要能反复跑（延时重试 + MutationObserver）。
+    //
+    // 【黑屏根因 / 别再改回去】老脚本命中下载入口后会「向上爬最多 3 层父元素」再
+    // display:none，条件是父元素文字 ≤40 字。DeepSeek 首屏/登录页的外层容器文字很短
+    // 甚至为空，于是一路爬到 #root / body，把整个页面根节点隐藏 → 只剩 App 纯黑底，
+    // 表现就是「闪一下网页然后全黑」；MutationObserver 又会在每次重绘时重跑，恢复不了。
+    // 现在：只隐藏命中的小叶子元素自身，明确排除根节点，加保险丝和根节点自检，
+    // 任何异常都不可能把整页弄没。
     private static final String AI_WEB_JS = "(function(){"
             + "if(window.__hzWatch){try{window.__hzWatch.run();}catch(e){}return;}"
             + "var re=/下载\\s*(APP|App|app|客户端|应用)|获取\\s*(APP|App)|APP\\s*下载|手机\\s*(APP|客户端)|Download\\s*(the\\s*)?App|Get\\s*the\\s*app|App\\s*Store/i;"
+            + "var MAX=12,hid=0;"
             + "function txt(el){return ((el.innerText||el.textContent||'')+'').trim();}"
-            + "function isDl(el){"
-            + "var t=txt(el);"
-            + "if(t&&t.length<=30&&re.test(t))return true;"
-            + "var href=(el.getAttribute&&el.getAttribute('href'))||'';"
-            + "if(/\\.apk($|\\?)|play\\.google\\.com|apps\\.apple\\.com|\\/download\\/app/i.test(href))return true;"
-            + "var key=((el.className||'')+' '+(el.id||'')+'');"
-            + "if(/download|app-store|google-play|getapp/i.test(key)&&/app|下载|客户端/i.test(t+href))return true;"
+            + "function key(el){var c=(typeof el.className==='string')?el.className:'';return c+' '+(el.id||'');}"
+            + "function isRoot(el){"
+            + "if(!el||el===document.documentElement||el===document.body)return true;"
+            + "var t=(el.tagName||'').toLowerCase();"
+            + "if(t==='html'||t==='body'||t==='main')return true;"
+            + "var id=(el.id||'').toLowerCase();"
+            + "if(id==='root'||id==='app'||id==='__next')return true;"
             + "return false;"
             + "}"
-            + "function hideDl(){"
+            + "function isDl(el){"
+            + "var t=txt(el);"
+            + "if(t.length>30)return false;"
+            + "if(t&&re.test(t))return true;"
+            + "var h=(el.getAttribute&&el.getAttribute('href'))||'';"
+            + "if(/\\.apk($|\\?)|play\\.google\\.com|apps\\.apple\\.com|\\/download\\/app|download|app-store|google-play|getapp/i.test(h))return true;"
+            + "if(/download|app-store|google-play|getapp/i.test(key(el)))return true;"
+            + "return false;"
+            + "}"
+            + "function small(el){"
+            + "if(isRoot(el))return false;"
+            + "if(el.children&&el.children.length>3)return false;"
+            + "var r=el.getBoundingClientRect&&el.getBoundingClientRect();"
+            + "if(!r)return false;"
+            + "if(r.width>window.innerWidth*0.95||r.height>window.innerHeight*0.18)return false;"
+            + "return true;"
+            + "}"
+            + "function guard(){"
+            + "try{var rs=[document.body,document.getElementById('root'),document.getElementById('app')];"
+            + "for(var i=0;i<rs.length;i++){var r=rs[i];if(r&&r.style&&r.style.display==='none')r.style.removeProperty('display');}"
+            + "}catch(e){}"
+            + "}"
+            + "function run(){"
+            + "try{guard();if(hid>=MAX)return;"
             + "var all=document.querySelectorAll('a,button,[role=\"button\"],div,span,li,[class*=\"download\"],[id*=\"download\"]');"
             + "for(var i=0;i<all.length;i++){"
+            + "if(hid>=MAX)break;"
             + "var el=all[i];"
-            + "if(!isDl(el))continue;"
-            + "if(txt(el).length>30)continue;"
-            + "var box=el,up=0;"
-            + "while(box&&up<3&&box.parentElement&&txt(box.parentElement).length<=40){box=box.parentElement;up++;}"
-            + "try{(box||el).style.setProperty('display','none','important');}catch(e){}"
+            + "if(el.getAttribute&&el.getAttribute('data-hz-h')==='1')continue;"
+            + "if(!isDl(el)||!small(el))continue;"
+            + "el.setAttribute('data-hz-h','1');"
+            + "el.style.setProperty('display','none','important');"
+            + "hid++;"
             + "}"
+            + "}catch(e){}"
             + "}"
-            + "function run(){try{hideDl();}catch(e){} }"
             + "window.__hzWatch={run:run};run();"
             + "var timer=null;"
-            + "try{var mo=new MutationObserver(function(){if(timer)clearTimeout(timer);timer=setTimeout(run,240);});"
+            + "try{var mo=new MutationObserver(function(){if(timer)clearTimeout(timer);timer=setTimeout(run,420);});"
             + "mo.observe(document.documentElement||document.body,{childList:true,subtree:true});}catch(e){}"
             + "})()";
 
@@ -2566,25 +2601,34 @@ public class MainActivity extends Activity {
             public void onClick(View v) { aiWebShowBar(true); }
         });
 
-        aiWebHost.addView(aiWebBar, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP));
-        aiWebHost.addView(aiWebMiniBar, new FrameLayout.LayoutParams(dp(26), dp(18), Gravity.TOP));
-
         try {
             WebView wv = new WebView(this);
             aiWebView = wv;
-            aiWebHost.addView(wv, 0, new FrameLayout.LayoutParams(
+            // 顺序就是层级：网页最底 → 错误层 → 工具条 → 小箭头最上。一次排好，
+            // 运行时不再 bringToFront（加载期间反复 requestLayout 会打断网页首次绘制）。
+            aiWebHost.addView(wv, new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
-            aiWebHost.addView(aiWebErrorBox, 1, new FrameLayout.LayoutParams(
+            aiWebHost.addView(aiWebErrorBox, new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+            aiWebHost.addView(aiWebBar, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP));
+            aiWebHost.addView(aiWebMiniBar, new FrameLayout.LayoutParams(dp(26), dp(18), Gravity.TOP));
             configureAiWebView(wv);
         } catch (Throwable t) {
             // 系统没装 WebView 组件时，new WebView 会直接抛异常
             aiWebView = null;
             if (aiWebErrorBox.getParent() == null) {
-                aiWebHost.addView(aiWebErrorBox, 1, new FrameLayout.LayoutParams(
+                aiWebHost.addView(aiWebErrorBox, new FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+            }
+            if (aiWebBar.getParent() == null) {
+                aiWebHost.addView(aiWebBar, new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                        Gravity.TOP));
+            }
+            if (aiWebMiniBar.getParent() == null) {
+                aiWebHost.addView(aiWebMiniBar, new FrameLayout.LayoutParams(dp(26), dp(18), Gravity.TOP));
             }
             aiWebShowError("这台设备没有 WebView 组件，无法使用 DeepSeek 网页版。\n"
                     + "一般手表都自带；如果没有，需要装上系统的 WebView。", false);
@@ -2600,7 +2644,6 @@ public class MainActivity extends Activity {
         aiWebBar.setVisibility(View.VISIBLE);
         aiWebBar.setAlpha(1f);
         aiWebBar.setTranslationY(0f);
-        aiWebBar.bringToFront();
         if (aiWebMiniBar != null) aiWebMiniBar.setVisibility(View.GONE);
         if (autoHide) {
             aiBarHideTask = new Runnable() {
@@ -2693,10 +2736,13 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView v, String url) {
                 aiWebProgress.setVisibility(View.GONE);
+                v.invalidate();                     // 兜底：网页首帧没贴合时主动要一次重绘
+                if (aiWebHost != null) aiWebHost.invalidate();
                 aiWebInject(v);
-                // SPA 首屏可能比 onPageFinished 还晚，延时补几次，确保脚本真的跑起来
+                // SPA 首屏可能比 onPageFinished 还晚，补两次即可；脚本自己也带观察器，
+                // 次数太多会反复遍历整棵 DOM，在手表上拖慢渲染。
                 final WebView wv2 = v;
-                for (long d : new long[]{700L, 1800L, 3600L}) {
+                for (long d : new long[]{600L, 2000L}) {
                     aiWebHost.postDelayed(new Runnable() {
                         public void run() {
                             if (alive() && aiWebView == wv2) aiWebInject(wv2);
@@ -2743,8 +2789,10 @@ public class MainActivity extends Activity {
         return s.contains("download") && s.contains("app");
     }
 
-    /** 只注入优化脚本，不碰网页自己的业务逻辑；SPA 每次重绘都会重跑一遍。 */
+    /** 只注入优化脚本，不碰网页自己的业务逻辑；SPA 每次重绘都会重跑一遍。
+     *  开关关掉时一个字都不注入：这是「网页是否原样」的对照手段，也是兜底。 */
     private void aiWebInject(WebView v) {
+        if (!aiWebHideDl) return;
         try { v.evaluateJavascript(AI_WEB_JS, null); }
         catch (Throwable ignored) { }
     }
@@ -2760,7 +2808,14 @@ public class MainActivity extends Activity {
         aiWebShowBar(true);
         aiWebProgress.setProgress(0);
         aiWebProgress.setVisibility(View.VISIBLE);
-        aiWebView.loadUrl(AI_WEB_URL);
+        // 等这一屏真正完成一次布局再加载：以前在切页淡入（alpha 0）时就 loadUrl，
+        // 网页在不可见的硬件层里初始化，首帧丢失，淡入结束后就一直黑屏。
+        final WebView toLoad = aiWebView;
+        aiWebHost.post(new Runnable() {
+            public void run() {
+                if (alive() && aiWebLoaded && aiWebView == toLoad) toLoad.loadUrl(AI_WEB_URL);
+            }
+        });
     }
 
     private void aiWebShowError(String msg, boolean retryable) {
@@ -2768,7 +2823,6 @@ public class MainActivity extends Activity {
         aiWebErrorTxt.setText(msg);
         aiWebErrorBtn.setVisibility(retryable ? View.VISIBLE : View.GONE);
         aiWebErrorBox.setVisibility(View.VISIBLE);
-        aiWebErrorBox.bringToFront();
         if (aiWebProgress != null) aiWebProgress.setVisibility(View.GONE);
         aiWebShowBar(true);   // 出错时也要能点返回，别把用户困在网页里
     }
@@ -2947,6 +3001,22 @@ public class MainActivity extends Activity {
         warn.setTextColor(0xFFFFB74D);
         warn.setLineSpacing(dp(2), 1.3f);
         aiWebCfgInner.addView(warn, wrap());
+
+        aiWebCfgInner.addView(sectionHeader("网页显示"), wrap());
+        aiWebCfgInner.addView(toggleRow("隐藏网页里的下载 APP 入口", aiWebHideDl,
+                new View.OnClickListener() {
+            public void onClick(View v) {
+                aiWebHideDl = !aiWebHideDl;
+                prefs.edit().putBoolean("ai_web_hide_dl", aiWebHideDl).apply();
+                renderAiWebCfg();
+                // 关掉后要让上一版脚本隐藏过的元素回来，只能重载网页
+                if (aiWebView != null) {
+                    if (aiWebHideDl) aiWebInject(aiWebView);
+                    else aiWebView.reload();
+                }
+            }
+        }), wrap());
+        aiWebCfgInner.addView(aiHint("关掉后 App 不往网页注入任何脚本，网页完全按原样显示。网页打开就黑屏时，先关掉它做对照。"), wrap());
 
         aiWebCfgInner.addView(sectionHeader("登录"), wrap());
         aiWebCfgInner.addView(aiSettingBtn("重新登录（清除网页登录态）", new View.OnClickListener() {
@@ -5966,7 +6036,9 @@ public class MainActivity extends Activity {
         // 动画的起点状态先摆好，但**不在这里启动**：这一页的内容（列表绑定、详情卡片重建）
         // 是在下面才渲染的，渲染期间如果已经可见，会露出「空页面 → 内容突然出现」的闪屏。
         // 所以先设成全透明（alpha 0，用户看不到中间态），等本帧渲染完、下一帧再淡入。
-        boolean animate = !shown && !skipPageAnim;
+        // 问 AI 这一屏里有网页视图：不能在 alpha 0 的淡入层里初始化网页，
+        // 否则首帧绘制丢失，淡入结束后就是一片黑。这一屏直接满不透明地显示。
+        boolean animate = !shown && !skipPageAnim && s != S_AI_WEB;
         skipPageAnim = false;
         float dx = 0f, dy = 0f;
         if (shown) {
