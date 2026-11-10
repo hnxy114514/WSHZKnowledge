@@ -280,7 +280,9 @@ public class MainActivity extends Activity {
     private volatile HttpURLConnection chatConn = null;
     /** 流式刷新节流：80ms 一次，避免一字一刷把主线程刷爆。 */
     private long chatUiAt = 0L;
-    private TextView chatStreamTv = null, chatStreamReasonTv = null;
+    private TextView chatStreamTv = null, chatStreamReasonTv = null, chatThinkingTv = null;
+    /** 是否在对话里显示思考过程；默认关（手表屏幕小，思考会把正文挤下去）。 */
+    private boolean chatShowThink = false;
 
     /** 一条消息：role = user / assistant；reasoning 只对推理模型有值。 */
     private static class ChatMsg {
@@ -3322,7 +3324,8 @@ public class MainActivity extends Activity {
                         renderAiApi();
                     }
                 }), gap());
-        aiApiInner.addView(aiHint("温度越高越发散；思考强度只对支持的模型生效，其余模型忽略。"), wrap());
+        aiApiInner.addView(aiHint("温度越高越发散；思考强度是发给接口的参数，只对支持的模型生效。"
+                + "对话页顶部的「思考 开/关」只控制显不显示思考过程，两者互不影响。"), wrap());
 
         aiApiInner.addView(sectionHeader("关于密钥"), wrap());
         aiApiInner.addView(aiHint("密钥只存在这台手表上：单独存放、不进系统备份、不上传、不写日志。"
@@ -3378,6 +3381,7 @@ public class MainActivity extends Activity {
         aiApiMaxIdx = clampIdx(prefs.getInt("api_max", 1), API_MAX.length);
         aiApiThinkIdx = clampIdx(prefs.getInt("api_think", 0), API_THINK.length);
         aiApiSecret = apiUnseal(secretPrefs().getString(API_SECRET_KEY, ""));
+        chatShowThink = prefs.getBoolean("chat_show_think", false);
     }
 
     private static int clampIdx(int v, int len) {
@@ -4136,6 +4140,28 @@ public class MainActivity extends Activity {
         mlp.rightMargin = dp(4);
         top.addView(aiChatModelBtn, mlp);
 
+        // 「思考」显示开关：只控显示，不影响发给接口的思考强度
+        TextView think = new TextView(this);
+        think.setText(chatShowThink ? "思考 开" : "思考 关");
+        think.setTextSize(Math.max(9f, m.subtitleSize - 2f));
+        think.setTypeface(chatShowThink ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+        think.setTextColor(chatShowThink ? C_PRIMARY : C_SUB);
+        think.setGravity(Gravity.CENTER);
+        think.setSingleLine(true);
+        think.setPadding(dp(7), dp(6), dp(7), dp(6));
+        think.setBackgroundDrawable(clickBg(C_PILL));
+        think.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                chatShowThink = !chatShowThink;
+                prefs.edit().putBoolean("chat_show_think", chatShowThink).apply();
+                renderAiChat();
+                toast(chatShowThink ? "显示思考过程" : "已隐藏思考过程");
+            }
+        });
+        top.addView(think, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
         TextView clear = new TextView(this);
         clear.setText("清空");
         clear.setTextSize(Math.max(9f, m.subtitleSize - 2f));
@@ -4208,6 +4234,7 @@ public class MainActivity extends Activity {
         updateChatBar();
         chatStreamTv = null;
         chatStreamReasonTv = null;
+        chatThinkingTv = null;
         aiChatInner.removeAllViews();
         aiChatInner.addView(chatTopBar(), wrapM());
         if (aiChatModelBtn != null) {
@@ -4244,7 +4271,8 @@ public class MainActivity extends Activity {
         box.setBackgroundDrawable(pill(user ? 0xFF14384A : C_CARD));
         box.setPadding(dp(10), dp(7), dp(10), dp(8));
 
-        if (!user && (msg.streaming || (msg.reasoning != null && msg.reasoning.length() > 0))) {
+        if (chatShowThink && !user
+                && (msg.streaming || (msg.reasoning != null && msg.reasoning.length() > 0))) {
             // 推理内容可能比正文晚到：先建一个空行占位，流式时再显形
             TextView rt = new TextView(this);
             rt.setText(msg.reasoning.length() == 0 ? "" : "思考：" + msg.reasoning);
@@ -4256,6 +4284,17 @@ public class MainActivity extends Activity {
             rlp.bottomMargin = dp(3);
             box.addView(rt, rlp);
             if (msg.streaming) chatStreamReasonTv = rt;
+        } else if (!chatShowThink && !user && msg.streaming
+                && msg.content.length() == 0 && msg.reasoning.length() > 0) {
+            // 思考藏起来时至少告诉用户「在算」，正文一开始就撤掉这句
+            TextView wait = new TextView(this);
+            wait.setText("思考中…");
+            wait.setTextSize(Math.max(9f, m.subtitleSize - 3f));
+            wait.setTextColor(C_SUB);
+            LinearLayout.LayoutParams wlp = wrap();
+            wlp.bottomMargin = dp(3);
+            box.addView(wait, wlp);
+            chatThinkingTv = wait;
         }
 
         final TextView body = new TextView(this);
@@ -4688,6 +4727,10 @@ public class MainActivity extends Activity {
                 if (chatStreamReasonTv != null && msg.reasoning.length() > 0) {
                     chatStreamReasonTv.setText("思考：" + msg.reasoning);
                     chatStreamReasonTv.setVisibility(View.VISIBLE);
+                }
+                if (chatThinkingTv != null) {
+                    if (msg.reasoning.length() > 0) chatThinkingTv.setVisibility(View.VISIBLE);
+                    if (msg.content.length() > 0) chatThinkingTv.setVisibility(View.GONE);
                 }
                 scrollChatToBottom(false);   // 流式跟随时直接跳到底，别每 80ms 起一次平滑动画
             }
