@@ -85,6 +85,8 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.io.RandomAccessFile;
 import java.io.StringWriter;
@@ -199,8 +201,8 @@ public class MainActivity extends Activity {
             S_SEARCH = 4, S_FEEDBACK = 5, S_MYFEEDBACK = 6, S_PROFILE = 7,
             S_CHANGELOG = 8, S_ABOUT = 9, S_DISPLAY = 10, S_TODAY = 11,
             S_EXTRA = 12, S_FAV = 13, S_HIST = 14, S_FAV_SUB = 15, S_DAILY = 16, S_SENT = 17,
-            S_AI_WEB = 18, S_AI_HUB = 19, S_AI_API_CFG = 20, S_AI_WEB_CFG = 21;
-    private static final int SCREEN_COUNT = 22;
+            S_AI_WEB = 18, S_AI_HUB = 19, S_AI_API_CFG = 20, S_AI_WEB_CFG = 21, S_AI_CHAT = 22;
+    private static final int SCREEN_COUNT = 23;
     private int screen = S_SUBJECT;
     private Subject curSubject;
     /** 从科目根走到当前所在的分组节点；空 = 正在看某科目的顶层节点。 */
@@ -266,6 +268,29 @@ public class MainActivity extends Activity {
     private final List<String> aiApiModels = new ArrayList<String>();
     /** 正在拉模型 / 测连接的提示；null = 空闲。 */
     private String aiApiBusy = null;
+
+    // ---- API 对话页（S_AI_CHAT）----
+    private LinearLayout aiChatScreen, aiChatInner, aiChatBar;
+    private ScrollView aiChatScroll;
+    private TextView aiChatModelBtn, aiChatInputBtn, aiChatStopBtn;
+    private int aiChatBack = S_SUBJECT;
+    /** 会话只在内存里：退出 App 就清空，不写盘、不上传。 */
+    private final List<ChatMsg> chatMsgs = new ArrayList<ChatMsg>();
+    private volatile boolean chatBusy = false, chatStopFlag = false;
+    private volatile HttpURLConnection chatConn = null;
+    /** 流式刷新节流：80ms 一次，避免一字一刷把主线程刷爆。 */
+    private long chatUiAt = 0L;
+    private TextView chatStreamTv = null, chatStreamReasonTv = null;
+
+    /** 一条消息：role = user / assistant；reasoning 只对推理模型有值。 */
+    private static class ChatMsg {
+        String role;
+        String content = "";
+        String reasoning = "";
+        boolean streaming = false;
+        String err = null;
+        ChatMsg(String r) { role = r; }
+    }
     /** 从哪个页面点进来的：返回时原路退回，而不是一律回主页。 */
     private int aiWebBack = S_SUBJECT;
     /** 两个设置子页从哪进来的：设置 → 问 AI 子页，或主页「问 AI」直接进来。 */
@@ -2313,6 +2338,9 @@ public class MainActivity extends Activity {
         aiWebCfgScreen = newScreen();
         buildAiWebCfgScreen();
         root.addView(aiWebCfgScreen, fp());
+        aiChatScreen = newScreen();
+        buildAiChatScreen();
+        root.addView(aiChatScreen, fp());
 
         // 主页
         subjectList = new SvList();
@@ -3176,6 +3204,18 @@ public class MainActivity extends Activity {
             aiHubInner.addView(aiHint(aiApiReady()
                     ? ("接口：" + aiApiModel + "，可以测连接")
                     : ("还没配好：" + aiApiMissing())), wrap());
+            aiHubInner.addView(aiSettingBtn("开始对话", new View.OnClickListener() {
+                public void onClick(View v) {
+                    if (!aiApiReady()) {
+                        toast(aiApiMissing());
+                        aiCfgBack = S_AI_HUB;
+                        showScreen(S_AI_API_CFG);
+                        return;
+                    }
+                    aiChatBack = S_AI_HUB;
+                    showScreen(S_AI_CHAT);
+                }
+            }), wrap());
         }
 
         aiHubInner.addView(aiSettingBtn("API AI 设置", new View.OnClickListener() {
@@ -3565,7 +3605,10 @@ public class MainActivity extends Activity {
     }
 
     /** 拉取到的模型列表：模型多的服务商有几十个，所以放进滚动区。 */
-    private void showApiModelPicker() {
+    private void showApiModelPicker() { showApiModelPicker(null); }
+
+    /** after 非空时选完调它（对话页要重绘自己，而不是设置页）；否则刷新设置页。 */
+    private void showApiModelPicker(final Runnable after) {
         if (aiApiModels.isEmpty()) return;
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -3605,7 +3648,8 @@ public class MainActivity extends Activity {
                     try { d.dismiss(); } catch (Throwable ignored) { }
                     aiApiModel = id;
                     saveApiConfig();
-                    renderAiApi();
+                    if (after != null) after.run();
+                    else renderAiApi();
                 }
             });
             LinearLayout.LayoutParams lp = wrap();
@@ -4026,6 +4070,676 @@ public class MainActivity extends Activity {
         }
     }
 
+    // ================= API 对话页（自行配置模式） =================
+
+    private void buildAiChatScreen() {
+        // 消息列表占满剩余高度；顶部的返回 / 模型 / 清空做成「内容头」跟着列表滚，
+        // 不钉在最上面——圆屏顶边是圆弧，钉死的按钮会落在圆弧外点不到。
+        aiChatScroll = new OverScrollScrollView(this);
+        aiChatScroll.setVerticalScrollBarEnabled(false);
+        roundPadScroll(aiChatScroll);
+        aiChatInner = new LinearLayout(this);
+        aiChatInner.setOrientation(LinearLayout.VERTICAL);
+        aiChatScroll.addView(aiChatInner, wrap());
+        aiChatScreen.addView(aiChatScroll, lw());
+
+        // 底部：输入 + 停止（停止只在回复中出现）。它是居中的一条，不会碰到圆弧
+        buildChatInputBar();
+
+        renderAiChat();
+    }
+
+    /** 对话页的内容头：返回 / 当前模型（点一下换）/ 清空。每次重绘都新建，状态从字段里取。 */
+    private View chatTopBar() {
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+
+        top.addView(makeBack("‹", new View.OnClickListener() {
+            public void onClick(View v) { goBack(aiChatBack); }
+        }), new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        TextView model = new TextView(this);
+        aiChatModelBtn = model;
+        aiChatModelBtn.setTextSize(Math.max(9f, m.subtitleSize - 2f));
+        aiChatModelBtn.setTextColor(C_SUB);
+        aiChatModelBtn.setGravity(Gravity.CENTER);
+        aiChatModelBtn.setSingleLine(true);
+        aiChatModelBtn.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        aiChatModelBtn.setPadding(dp(8), dp(6), dp(8), dp(6));
+        aiChatModelBtn.setBackgroundDrawable(clickBg(C_PILL));
+        aiChatModelBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                pickChatModel();
+            }
+        });
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        mlp.leftMargin = dp(4);
+        mlp.rightMargin = dp(4);
+        top.addView(aiChatModelBtn, mlp);
+
+        TextView clear = new TextView(this);
+        clear.setText("清空");
+        clear.setTextSize(Math.max(9f, m.subtitleSize - 2f));
+        clear.setTextColor(C_SUB);
+        clear.setGravity(Gravity.CENTER);
+        clear.setPadding(dp(8), dp(6), dp(8), dp(6));
+        clear.setBackgroundDrawable(clickBg(C_PILL));
+        clear.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                if (chatMsgs.isEmpty()) {
+                    toast("还没有对话");
+                    return;
+                }
+                confirmAction("清空这次对话？", "只清屏上的内容，接口那边不会被动到。",
+                        "清空", 0xFFFFB74D, new Runnable() {
+                            public void run() { chatReset(); }
+                        });
+            }
+        });
+        top.addView(clear, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        return top;
+    }
+
+    private void buildChatInputBar() {
+        aiChatBar = new LinearLayout(this);
+        aiChatBar.setOrientation(LinearLayout.HORIZONTAL);
+        aiChatBar.setGravity(Gravity.CENTER_VERTICAL);
+        // 圆屏底部是圆弧：不给安全距离，按钮会落在屏幕外点不到
+        int bp = m.round ? Math.max(dp(4), m.roundSafe) : dp(4);
+        aiChatBar.setPadding(0, dp(4), 0, bp);
+
+        aiChatInputBtn = new TextView(this);
+        aiChatInputBtn.setText("说点什么…");
+        aiChatInputBtn.setTextSize(m.subtitleSize - 1f);
+        aiChatInputBtn.setTextColor(C_SUB);
+        aiChatInputBtn.setGravity(Gravity.CENTER);
+        aiChatInputBtn.setPadding(dp(10), dp(9), dp(10), dp(9));
+        aiChatInputBtn.setBackgroundDrawable(clickBg(C_PILL));
+        aiChatInputBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { vibrate(); chatAskInput(); }
+        });
+        aiChatBar.addView(aiChatInputBtn, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        aiChatStopBtn = new TextView(this);
+        aiChatStopBtn.setText("停止");
+        aiChatStopBtn.setTextSize(m.subtitleSize - 1f);
+        aiChatStopBtn.setTypeface(Typeface.DEFAULT_BOLD);
+        aiChatStopBtn.setTextColor(0xFFFFB74D);
+        aiChatStopBtn.setGravity(Gravity.CENTER);
+        aiChatStopBtn.setPadding(dp(10), dp(9), dp(10), dp(9));
+        aiChatStopBtn.setBackgroundDrawable(clickBg(C_PILL));
+        aiChatStopBtn.setVisibility(View.GONE);
+        aiChatStopBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { chatStop(); }
+        });
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        slp.leftMargin = dp(4);
+        aiChatBar.addView(aiChatStopBtn, slp);
+
+        aiChatScreen.addView(aiChatBar, wrap());
+    }
+
+    /** 重画整页：消息不多，整页重建比局部更新更不容易出错。 */
+    private void renderAiChat() {
+        if (aiChatInner == null) return;
+        updateChatBar();
+        chatStreamTv = null;
+        chatStreamReasonTv = null;
+        aiChatInner.removeAllViews();
+        aiChatInner.addView(chatTopBar(), wrapM());
+        if (aiChatModelBtn != null) {
+            aiChatModelBtn.setText(aiApiModel.length() == 0 ? "未选模型" : aiApiModel);
+        }
+
+        if (chatMsgs.isEmpty()) {
+            TextView hint = new TextView(this);
+            hint.setText("点下面一行写问题。\n回答来自你配置的接口，App 只做转发：不存盘、不上传。");
+            hint.setTextSize(m.subtitleSize - 2f);
+            hint.setTextColor(C_SUB);
+            hint.setGravity(Gravity.CENTER);
+            hint.setLineSpacing(dp(3), 1.3f);
+            hint.setPadding(dp(8), dp(14), dp(8), dp(14));
+            aiChatInner.addView(hint, wrap());
+        } else {
+            for (int i = 0; i < chatMsgs.size(); i++) {
+                ChatMsg msg = chatMsgs.get(i);
+                LinearLayout.LayoutParams lp = wrap();
+                lp.bottomMargin = dp(6);
+                aiChatInner.addView(chatBubble(msg), lp);
+            }
+        }
+        // 上下各加一段屏高 25% 的占位（圆屏），内容才不会贴在圆弧边上
+        padInner(aiChatInner);
+        scrollChatToBottom(false);
+    }
+
+    /** 一条消息气泡：用户主色底、AI 卡片底；长按复制，出错时给「重试」。 */
+    private View chatBubble(final ChatMsg msg) {
+        final boolean user = "user".equals(msg.role);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setBackgroundDrawable(pill(user ? 0xFF14384A : C_CARD));
+        box.setPadding(dp(10), dp(7), dp(10), dp(8));
+
+        if (!user && (msg.streaming || (msg.reasoning != null && msg.reasoning.length() > 0))) {
+            // 推理内容可能比正文晚到：先建一个空行占位，流式时再显形
+            TextView rt = new TextView(this);
+            rt.setText(msg.reasoning.length() == 0 ? "" : "思考：" + msg.reasoning);
+            rt.setTextSize(Math.max(9f, m.subtitleSize - 3f));
+            rt.setTextColor(C_SUB);
+            rt.setLineSpacing(dp(1), 1.2f);
+            rt.setVisibility(msg.reasoning.length() == 0 ? View.GONE : View.VISIBLE);
+            LinearLayout.LayoutParams rlp = wrap();
+            rlp.bottomMargin = dp(3);
+            box.addView(rt, rlp);
+            if (msg.streaming) chatStreamReasonTv = rt;
+        }
+
+        final TextView body = new TextView(this);
+        String text;
+        if (msg.err != null) text = msg.err;
+        else if (msg.content.length() == 0) text = msg.streaming ? "…" : "（空回复）";
+        else text = msg.content;
+        body.setText(text);
+        body.setTextSize(m.subtitleSize - 1f);
+        body.setTextColor(msg.err != null ? 0xFFFFB74D : C_TEXT);
+        body.setLineSpacing(dp(2), 1.25f);
+        box.addView(body, wrap());
+        if (msg.streaming) chatStreamTv = body;
+
+        final String copy = msg.err != null ? msg.err : msg.content;
+        box.setOnLongClickListener(new View.OnLongClickListener() {
+            public boolean onLongClick(View v) {
+                if (copy == null || copy.length() == 0) return false;
+                vibrate();
+                chatCopyToClipboard(copy);
+                return true;
+            }
+        });
+
+        if (msg.err != null && !user) {
+            TextView retry = new TextView(this);
+            retry.setText("重试");
+            retry.setTextSize(Math.max(9f, m.subtitleSize - 2f));
+            retry.setTypeface(Typeface.DEFAULT_BOLD);
+            retry.setTextColor(C_PRIMARY);
+            retry.setGravity(Gravity.CENTER);
+            retry.setPadding(dp(8), dp(6), dp(8), dp(6));
+            retry.setBackgroundDrawable(clickBg(C_PILL));
+            retry.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    vibrate();
+                    chatRetry(msg);
+                }
+            });
+            LinearLayout.LayoutParams tlp = wrap();
+            tlp.topMargin = dp(5);
+            box.addView(retry, tlp);
+        }
+        return box;
+    }
+
+    /** 对话气泡长按复制（网页页另有一套 copyToClipboard，别混用）。 */
+    private void chatCopyToClipboard(String text) {
+        try {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("chat", text));
+            toast("已复制");
+        } catch (Throwable t) {
+            toast("复制失败");
+        }
+    }
+
+    private void scrollChatToBottom(boolean smooth) {
+        if (aiChatScroll == null) return;
+        final boolean s = smooth;
+        aiChatScroll.post(new Runnable() {
+            public void run() {
+                if (!alive() || aiChatScroll == null) return;
+                // 底部有一段占位，滚到底会空出一截；减掉它，最后一条正好停在输入条上方
+                int h = Math.max(0, aiChatInner.getHeight() - overDist());
+                if (s) aiChatScroll.smoothScrollTo(0, h);
+                else aiChatScroll.scrollTo(0, h);
+            }
+        });
+    }
+
+    private void updateChatBar() {
+        if (aiChatStopBtn == null) return;
+        aiChatStopBtn.setVisibility(chatBusy ? View.VISIBLE : View.GONE);
+        if (aiChatInputBtn != null) {
+            aiChatInputBtn.setText(chatBusy ? "等回复…" : "说点什么…");
+            aiChatInputBtn.setTextColor(chatBusy ? C_SUB : C_TEXT);
+        }
+    }
+
+    /** 输入弹窗：多行，输入法能换行；写完点「发送」。 */
+    private void chatAskInput() {
+        if (chatBusy) {
+            toast("还在回复，先点停止");
+            return;
+        }
+        if (!aiApiReady()) {
+            toast(aiApiMissing());
+            return;
+        }
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(13), dp(12), dp(13), dp(8));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xFF151515);
+        bg.setCornerRadius(dp(16));
+        box.setBackgroundDrawable(bg);
+
+        TextView t = new TextView(this);
+        t.setText("问点什么");
+        t.setTextSize(m.subtitleSize);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setTextColor(Color.WHITE);
+        t.setGravity(Gravity.CENTER);
+        box.addView(t, wrap());
+
+        final EditText ed = new EditText(this);
+        ed.setHint("输入问题");
+        ed.setTextSize(m.subtitleSize - 1f);
+        ed.setTextColor(Color.WHITE);
+        ed.setHintTextColor(C_SUB);
+        ed.setBackgroundDrawable(pill(C_PILL));
+        ed.setPadding(dp(10), dp(8), dp(10), dp(8));
+        ed.setGravity(Gravity.TOP | Gravity.START);
+        ed.setMinLines(2);
+        ed.setMaxLines(4);
+        ed.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(m.round ? 66 : 84));
+        elp.topMargin = dp(6);
+        box.addView(ed, elp);
+
+        final AlertDialog d = new AlertDialog.Builder(this).setView(box).create();
+
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        TextView send = new TextView(this);
+        send.setText("发送");
+        send.setTextSize(m.backSize);
+        send.setTypeface(Typeface.DEFAULT_BOLD);
+        send.setGravity(Gravity.CENTER);
+        send.setTextColor(C_PRIMARY);
+        send.setPadding(dp(10), dp(11), dp(10), dp(11));
+        send.setBackgroundDrawable(pill(0xFF14384A));
+        bar.addView(send, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 2f));
+        TextView cancel = new TextView(this);
+        cancel.setText("取消");
+        cancel.setTextSize(m.subtitleSize - 1f);
+        cancel.setGravity(Gravity.CENTER);
+        cancel.setTextColor(C_SUB);
+        cancel.setPadding(dp(8), dp(11), dp(8), dp(11));
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        clp.leftMargin = dp(6);
+        bar.addView(cancel, clp);
+        LinearLayout.LayoutParams blp = wrap();
+        blp.topMargin = dp(6);
+        box.addView(bar, blp);
+
+        send.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                String q = ed.getText().toString().trim();
+                if (q.length() == 0) {
+                    toast("还没写内容");
+                    return;
+                }
+                try { d.dismiss(); } catch (Throwable ignored) { }
+                chatSend(q);
+            }
+        });
+        cancel.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                try { d.dismiss(); } catch (Throwable ignored) { }
+            }
+        });
+
+        tuneDialogInput(d);
+        d.show();
+        sizeDialog(d, 0.86f);
+    }
+
+    /** 对话页换模型：拉过列表就弹列表，没拉过就手填。 */
+    private void pickChatModel() {
+        if (!aiApiModels.isEmpty()) {
+            showApiModelPicker(new Runnable() {
+                public void run() { renderAiChat(); }
+            });
+            return;
+        }
+        apiInputDialog("模型名", "如 deepseek-chat", aiApiModel, false, new ApiTextSink() {
+            public void onText(String v) {
+                String s = v == null ? "" : v.trim();
+                if (s.length() == 0) {
+                    toast("模型名不能为空");
+                    return;
+                }
+                aiApiModel = s;
+                saveApiConfig();
+                renderAiChat();
+            }
+        });
+        toast("还没拉取模型，可直接手填");
+    }
+
+    private void chatSend(String q) {
+        if (chatBusy) {
+            toast("还在回复，先点停止");
+            return;
+        }
+        if (!aiApiReady()) {
+            toast(aiApiMissing());
+            return;
+        }
+        ChatMsg u = new ChatMsg("user");
+        u.content = q;
+        chatMsgs.add(u);
+        ChatMsg a = new ChatMsg("assistant");
+        a.streaming = true;
+        chatMsgs.add(a);
+        renderAiChat();
+        startChatStream();
+    }
+
+    private void chatRetry(ChatMsg failed) {
+        if (chatBusy) {
+            toast("还在回复，先点停止");
+            return;
+        }
+        int i = chatMsgs.indexOf(failed);
+        if (i >= 0) chatMsgs.remove(i);
+        ChatMsg a = new ChatMsg("assistant");
+        a.streaming = true;
+        chatMsgs.add(a);
+        renderAiChat();
+        startChatStream();
+    }
+
+    /** 组上下文：一条 system（约束简短）+ 最近 N 轮问答；没说完的空消息不算。 */
+    private JSONArray chatContext(int rounds) {
+        JSONArray arr = new JSONArray();
+        try {
+            JSONObject sys = new JSONObject();
+            sys.put("role", "system");
+            sys.put("content", "你是手表上的知识助手。回答尽量简短、直接，能分点就分点，不要长篇大论。");
+            arr.put(sys);
+        } catch (Throwable ignored) { }
+        List<ChatMsg> hist = new ArrayList<ChatMsg>();
+        for (int i = 0; i < chatMsgs.size(); i++) {
+            ChatMsg m = chatMsgs.get(i);
+            if (m.content != null && m.content.length() > 0) hist.add(m);
+        }
+        int max = Math.max(1, rounds) * 2;
+        int from = Math.max(0, hist.size() - max);
+        for (int i = from; i < hist.size(); i++) {
+            ChatMsg m = hist.get(i);
+            try {
+                JSONObject o = new JSONObject();
+                o.put("role", m.role);
+                o.put("content", m.content);
+                arr.put(o);
+            } catch (Throwable ignored) { }
+        }
+        return arr;
+    }
+
+    private void startChatStream() {
+        chatBusy = true;
+        chatStopFlag = false;
+        updateChatBar();
+        final String model = aiApiModel;
+        final float temp = API_TEMPS[aiApiTempIdx];
+        final int maxTok = API_MAX[aiApiMaxIdx];
+        final int think = aiApiThinkIdx;
+        final JSONArray ctx = chatContext(API_CTX[aiApiCtxIdx]);
+        final ChatMsg target = chatMsgs.get(chatMsgs.size() - 1);
+        Thread t = new Thread(new Runnable() {
+            public void run() {
+                chatRun(model, temp, maxTok, think, ctx, target);
+            }
+        });
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** 请求体分三档：全参数 → 去掉思考强度 → 只留模型和消息。
+     *  有些网关见到不认识的参数会直接 400，逐档降级才不会因为一个可选参数把对话卡死。 */
+    private JSONObject chatBody(String model, JSONArray ctx, float temp, int maxTok,
+                                int think, int level) {
+        JSONObject b = new JSONObject();
+        try {
+            b.put("model", model);
+            b.put("messages", ctx);
+            b.put("stream", true);
+            if (level < 2) {
+                b.put("max_tokens", maxTok);
+                b.put("temperature", temp);
+            }
+            if (level == 0 && think > 0) {
+                b.put("reasoning_effort", think == 1 ? "medium" : "high");
+            }
+        } catch (Throwable ignored) { }
+        return b;
+    }
+
+    private void chatRun(String model, float temp, int maxTok, int think,
+                         JSONArray ctx, ChatMsg target) {
+        for (int level = 0; level < 3; level++) {
+            if (chatStopFlag) return;
+            JSONObject body = chatBody(model, ctx, temp, maxTok, think, level);
+            HttpURLConnection c = null;
+            int code = 0;
+            String errBody = "";
+            try {
+                c = (HttpURLConnection) new URL(apiUrl("/chat/completions")).openConnection();
+                c.setConnectTimeout(15000);
+                c.setReadTimeout(120000);          // 推理模型可能要想很久，读超时给足
+                c.setRequestMethod("POST");
+                c.setInstanceFollowRedirects(false);   // 不跟跳转，免得密钥被带到别的域
+                c.setDoOutput(true);
+                c.setRequestProperty("Authorization", "Bearer " + aiApiSecret);
+                c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                c.setRequestProperty("Accept", "text/event-stream");
+                c.setRequestProperty("User-Agent", "HZKnowledge-Android");
+                byte[] data = body.toString().getBytes(StandardCharsets.UTF_8);
+                c.setFixedLengthStreamingMode(data.length);
+                OutputStream os = c.getOutputStream();
+                os.write(data);
+                os.flush();
+                os.close();
+                chatConn = c;
+                code = c.getResponseCode();
+                if (code == 200) {
+                    chatPump(c, target);
+                    return;
+                }
+                errBody = readAllText(c.getErrorStream());
+            } catch (java.net.SocketTimeoutException e) {
+                if (chatStopFlag) chatDone(target);
+                else chatFail(target, "等回复超时了，可以重试或换个模型");
+                return;
+            } catch (Throwable e) {
+                if (chatStopFlag) chatDone(target);
+                else chatFail(target, "连不上：" + (e == null ? "未知原因"
+                        : e.getClass().getSimpleName()));
+                return;
+            } finally {
+                chatConn = null;
+                if (c != null) {
+                    try { c.disconnect(); } catch (Throwable ignored) { }
+                }
+            }
+            if (code == 400 && level < 2) continue;   // 参数不被支持：降级重试
+            chatFail(target, apiErrText(code, errBody));
+            return;
+        }
+        chatFail(target, "没有拿到回复");
+    }
+
+    /** 读 SSE：一段一段把 delta 追到当前气泡上；也兼容网关直接回整段 JSON。 */
+    private void chatPump(HttpURLConnection c, ChatMsg target) {
+        BufferedReader br = null;
+        try {
+            br = new BufferedReader(new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8));
+            String line;
+            while (!chatStopFlag && (line = br.readLine()) != null) {
+                String s = line.trim();
+                if (s.length() == 0) continue;
+                if (!s.startsWith("data:")) {
+                    if (s.startsWith("{")) {   // 不支持流式：整段当普通回复解析
+                        chatParseWhole(s, target);
+                        return;
+                    }
+                    continue;
+                }
+                String d = s.substring(5).trim();
+                if ("[DONE]".equals(d)) break;
+                try {
+                    JSONObject o = new JSONObject(d);
+                    JSONArray ch = o.optJSONArray("choices");
+                    if (ch == null || ch.length() == 0) continue;
+                    JSONObject c0 = ch.optJSONObject(0);
+                    if (c0 == null) continue;
+                    JSONObject delta = c0.optJSONObject("delta");
+                    if (delta == null) delta = c0.optJSONObject("message");
+                    if (delta == null) continue;
+                    String think = delta.optString("reasoning_content", "");
+                    String piece = delta.optString("content", "");
+                    // 思考内容留个上限，别把内存堆满
+                    if (think.length() > 0 && target.reasoning.length() < 4000) {
+                        target.reasoning += think;
+                    }
+                    if (piece.length() > 0) target.content += piece;
+                    chatPush(target, false);
+                } catch (Throwable ignored) { }
+            }
+            if (chatStopFlag && target.content.length() > 0
+                    && target.content.indexOf("（已停止）") < 0) {
+                target.content += "\n（已停止）";
+            }
+            chatDone(target);
+        } catch (Throwable t) {
+            if (chatStopFlag) chatDone(target);
+            else chatFail(target, "读取回复失败：" + (t == null ? "未知原因"
+                    : t.getClass().getSimpleName()));
+        } finally {
+            try { if (br != null) br.close(); } catch (Throwable ignored) { }
+        }
+    }
+
+    private void chatParseWhole(String json, ChatMsg target) {
+        try {
+            JSONArray ch = new JSONObject(json).optJSONArray("choices");
+            JSONObject c0 = ch == null || ch.length() == 0 ? null : ch.optJSONObject(0);
+            JSONObject msg = c0 == null ? null : c0.optJSONObject("message");
+            if (msg != null) {
+                target.reasoning = msg.optString("reasoning_content", "");
+                target.content = msg.optString("content", "");
+            }
+        } catch (Throwable ignored) { }
+        chatDone(target);
+    }
+
+    /** 流式刷新：80ms 一次，主线程只改文本，不重建列表。 */
+    private void chatPush(final ChatMsg msg, boolean force) {
+        long now = SystemClock.uptimeMillis();
+        if (!force && now - chatUiAt < 80L) return;
+        chatUiAt = now;
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (!alive() || screen != S_AI_CHAT) return;
+                if (chatStreamTv != null) {
+                    chatStreamTv.setText(msg.content.length() == 0
+                            ? "…" : msg.content + "▍");
+                }
+                if (chatStreamReasonTv != null && msg.reasoning.length() > 0) {
+                    chatStreamReasonTv.setText("思考：" + msg.reasoning);
+                    chatStreamReasonTv.setVisibility(View.VISIBLE);
+                }
+                scrollChatToBottom(false);   // 流式跟随时直接跳到底，别每 80ms 起一次平滑动画
+            }
+        });
+    }
+
+    private void chatDone(final ChatMsg msg) {
+        msg.streaming = false;
+        chatBusy = false;
+        chatStopFlag = false;
+        runOnUiThread(new Runnable() {
+            public void run() {
+                updateChatBar();
+                if (!alive()) return;
+                if (chatMsgs.indexOf(msg) < 0) return;   // 已被清空
+                if (screen == S_AI_CHAT) renderAiChat();
+            }
+        });
+    }
+
+    private void chatFail(final ChatMsg msg, final String text) {
+        msg.err = text;
+        msg.streaming = false;
+        chatBusy = false;
+        chatStopFlag = false;
+        runOnUiThread(new Runnable() {
+            public void run() {
+                updateChatBar();
+                if (!alive()) return;
+                if (chatMsgs.indexOf(msg) < 0) return;   // 已被清空
+                if (screen == S_AI_CHAT) renderAiChat();
+                toast(text);
+            }
+        });
+    }
+
+    private void chatStop() {
+        if (!chatBusy) return;
+        vibrate();
+        chatStopFlag = true;
+        HttpURLConnection c = chatConn;
+        if (c != null) {
+            try { c.disconnect(); } catch (Throwable ignored) { }
+        }
+        toast("已停止");
+    }
+
+    private void chatReset() {
+        chatStopFlag = true;
+        HttpURLConnection c = chatConn;
+        if (c != null) {
+            try { c.disconnect(); } catch (Throwable ignored) { }
+        }
+        chatMsgs.clear();
+        chatBusy = false;
+        chatStopFlag = false;
+        renderAiChat();
+        toast("已清空");
+    }
+
+    private String apiErrText(int code, String body) {
+        ApiRes r = new ApiRes();
+        r.code = code;
+        r.body = body;
+        return apiErrText(r);
+    }
+
     private void buildAiWebCfgScreen() {
         aiWebCfgScroll = new OverScrollScrollView(this);
         aiWebCfgScroll.setVerticalScrollBarEnabled(false);
@@ -4096,10 +4810,14 @@ public class MainActivity extends Activity {
     /** 主页「问 AI」按当前模式分流；实时读 aiMode，切换后不用重绘主页列表也生效。 */
     private void openAiFromHome() {
         if ("api".equals(aiMode)) {
+            aiChatBack = S_SUBJECT;
             aiCfgBack = S_SUBJECT;
-            showScreen(S_AI_API_CFG);
-            if (!aiApiReady()) toast(aiApiMissing());
-            else toast("配置已就绪；对话页下一版接入");
+            if (aiApiReady()) {
+                showScreen(S_AI_CHAT);
+            } else {
+                showScreen(S_AI_API_CFG);
+                toast(aiApiMissing());
+            }
         } else {
             aiWebBack = S_SUBJECT;
             showScreen(S_AI_WEB);
@@ -7084,7 +7802,8 @@ public class MainActivity extends Activity {
         View[] screens = {subjectScreen, nodeScreen, detailScreen, settingsScreen,
                 searchScreen, feedbackScreen, mineScreen, profileScreen, changelogScreen, aboutScreen,
                 displayScreen, todayScreen, extraScreen, favScreen, histScreen, favSubScreen,
-                dailyScreen, sentScreen, aiWebScreen, aiHubScreen, aiApiScreen, aiWebCfgScreen};
+                dailyScreen, sentScreen, aiWebScreen, aiHubScreen, aiApiScreen, aiWebCfgScreen,
+                aiChatScreen};
         View target = screens[s];
         boolean shown = target.getVisibility() == View.VISIBLE && target.getAlpha() > 0.95f
                 && Math.abs(target.getTranslationX()) < dp(4);
@@ -7222,6 +7941,9 @@ public class MainActivity extends Activity {
         } else if (s == S_AI_API_CFG) {
             renderAiApi();
             scrollToTop(aiApiScroll);
+        } else if (s == S_AI_CHAT) {
+            renderAiChat();
+            scrollChatToBottom(false);
         } else if (s == S_AI_WEB_CFG) {
             renderAiWebCfg();
             scrollToTop(aiWebCfgScroll);
@@ -7357,6 +8079,7 @@ public class MainActivity extends Activity {
         if (screen == S_DAILY) return dailyBack;
         if (screen == S_SENT) return "hist".equals(sentMode) ? S_HIST : S_FAV;
         if (screen == S_AI_WEB) return aiWebBack;
+        if (screen == S_AI_CHAT) return aiChatBack;
         if (screen == S_AI_HUB) return S_SETTINGS;
         if (screen == S_AI_API_CFG || screen == S_AI_WEB_CFG) return aiCfgBack;
         return -1;
@@ -7386,6 +8109,7 @@ public class MainActivity extends Activity {
             case S_AI_HUB: return aiHubScreen;
             case S_AI_API_CFG: return aiApiScreen;
             case S_AI_WEB_CFG: return aiWebCfgScreen;
+            case S_AI_CHAT: return aiChatScreen;
             default: return null;
         }
     }
@@ -7512,6 +8236,7 @@ public class MainActivity extends Activity {
             case S_AI_HUB: return aiHubScreen;
             case S_AI_API_CFG: return aiApiScreen;
             case S_AI_WEB_CFG: return aiWebCfgScreen;
+            case S_AI_CHAT: return aiChatScreen;
             default: return subjectScreen;
         }
     }
