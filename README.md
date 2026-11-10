@@ -506,9 +506,9 @@ enterApp()：buildUi() 建主界面（setContentView 换掉开屏）→ 定首�
   它是 `setContentView` 的第一份内容，主界面建好后被 `setContentView(root)` 顶掉。
 - 窗口底色全程是 `C_BG`（纯黑），换内容不会白闪。
 
-### 界面骨架：19 个「屏幕」叠在一个 FrameLayout 里
+### 界面骨架：22 个「屏幕」叠在一个 FrameLayout 里
 
-`buildUi()` 建一个 `root`（FrameLayout），往里 add 19 个 `newScreen()`（LinearLayout，位置 `fp()` 铺满），
+`buildUi()` 建一个 `root`（FrameLayout），往里 add 22 个 `newScreen()`（LinearLayout，位置 `fp()` 铺满），
 同一时刻只有一个 `VISIBLE`，切换就是「把旧的 GONE、新的 VISIBLE」——不是跳 Activity，所以很快、也没有转场黑屏。
 
 屏幕常量与「第几个」强绑定，**顺序不能乱**：
@@ -534,8 +534,11 @@ enterApp()：buildUi() 建主界面（setContentView 换掉开屏）→ 定首�
 | 16 | S_DAILY | 每日一句 | `renderDaily()` |
 | 17 | S_SENT | 每日一句的收藏 / 浏览记录 | `renderSent()` |
 | 18 | S_AI_WEB | 问 AI（DeepSeek 网页版） | `buildAiWebScreen()` → `aiWebLoad()` |
+| 19 | S_AI_HUB | 问 AI 设置（模式开关 + 两个入口） | `buildAiHubScreen()` → `renderAiHub()` |
+| 20 | S_AI_API_CFG | API AI 设置 | `buildAiApiScreen()` → `renderAiApi()` |
+| 21 | S_AI_WEB_CFG | DeepSeek 网页版设置 | `buildAiWebCfgScreen()` → `renderAiWebCfg()` |
 
-`SCREEN_COUNT = 19`。五个地方必须同步改，漏一个就会错位或崩：
+`SCREEN_COUNT = 22`。五个地方必须同步改，漏一个就会错位或崩：
 ① 常量与 `SCREEN_COUNT`；② `showScreen()` 里的 `screens[]` 数组（**下标即常量值**）；
 ③ `screenView(s)` 的 switch；④ `currentScreenView(s)` 的 switch（右滑预览用）；
 ⑤ `backTarget()`（返回去哪）与 `showScreen()` 里的渲染分支。
@@ -543,7 +546,7 @@ enterApp()：buildUi() 建主界面（setContentView 换掉开屏）→ 定首�
 
 ### 加一屏的完整步骤
 
-1. 在常量后面加 `S_XXX = 19`，`SCREEN_COUNT` 改 20；
+1. 在常量后面加 `S_XXX = 22`，`SCREEN_COUNT` 改 23；
 2. `buildUi()` 里 `xxxScreen = newScreen(); ... root.addView(xxxScreen, fp());`；
 3. `screens[]` 数组末尾加 `xxxScreen`（顺序必须和常量值一致）；
 4. `screenView()` / `currentScreenView()` 各加一个 `case S_XXX:`；`svOf()` 只有列表页才需要加；
@@ -686,17 +689,21 @@ Node {
 - 每页的「‹ 返回」是随内容滚动的第一项，不固定占用顶部空间；系统返回键/手势始终可用。
   - **只有返回上一级才回到离开时的位置**（`goBack()` 打标记 + `SvList.restore()`）；
     之后再正向点进同一页一律回到默认位置（顶部），不会停在半中间。
-- **问 AI（DeepSeek 网页版）**：主页「新增知识点（今日）」下面多一行「问 AI」，设置 → 问 AI 里也有入口。
-  - 这一屏是网页视图直接打开 DeepSeek 网页版，**登录、密钥、模型、对话记录全由网页自己管**；
-    App 不保存密钥、不读聊天内容、不写日志，本地存储里没有任何 AI 相关键。
-  - **没有系统 WebView 组件就用不了**（创建网页视图会直接报错），设置页有一行醒目的检测提示，
-    页面加载不出来也会给「重试」。默认手表自带 WebView。
-  - 默认 UA 会被网页挡住，所以固定用正常浏览器 UA；加载完贴一层优化：
-    去掉「下载 APP」入口、放大输入框和带文字的按钮、给底部留安全区。
-    网页是动态页面，元素会被重画，所以这层优化挂了监听，重画后自动再贴一次。登录表单本身不改结构。
-  - 顶部工具条是 App 自己的（返回 / 刷新 / 重新登录），因为圆屏会把网页边角裁掉、网页按钮也偏小；
-    「重新登录」只清网页登录态，带确认弹窗，不动收藏和知识点。
-  - **这一屏不接管右滑**：网页里横滑、拖输入框光标都常见，退出走顶部「‹ 返回」或实体返回键；
+- **问 AI**：主页「新增知识点（今日）」下面多一行「问 AI」；设置主页里只放一个「问 AI」入口。
+  - 网页页整屏是 DeepSeek 网页版，**登录、密钥、模型、对话记录全由网页自己管**；
+    App 不保存密钥、不读聊天内容、不写日志。
+  - **设置分三级**：设置 → 问 AI → 一个模式切换开关（DeepSeek 网页版 / API AI）+ 两个按钮
+    （「API AI 设置」「DeepSeek 网页版设置」）。三个子页全用既有的
+    `OverScrollScrollView + roundPadScroll + padInner + scrollToTop` 那套圆屏占位，不另起做法；
+    模式存在 `ai_mode`，主页「问 AI」按当前模式分流。
+  - 「重新登录」收在「DeepSeek 网页版设置」里，只清网页登录态，带确认弹窗，不动收藏和知识点；
+    那一页还有醒目的检测提示：**没有系统 WebView 组件就用不了，默认手表已带**。
+  - 默认 UA 会被网页挡住，所以固定用正常浏览器 UA。贴的那层脚本**只做一件事：去掉「下载 APP」入口**；
+    输入框和按钮一律保持网页默认比例，不改尺寸。网页是动态页面，元素会被重画，
+    所以除了挂监听反复贴，还在加载完成后延时补几次；链接里带应用商店 / APK 的也在跳转层拦掉。
+  - **顶部工具条不再常驻**：它只是盖在网页上的浮层，只有「‹ 返回」和「刷新」，进页面几秒后自动收起，
+    只留一个极小的箭头；网页往下滑立即收起、往上滑再展开，点小箭头也能展开。
+    右滑返回在这一屏同样可用（起手区收到左 20dp、距离加到 64dp，避免网页横滑误触）。
     网页自己有上一页时，实体返回键先退网页，退完了才退出这一屏。
   - 加载中有进度条，失败给一句人话和「重试」，不会卡在空白页。
 - **右滑返回**：设置 → 显示 → 「右滑返回」可开关（默认开）。起手点须在屏幕左侧 1/4 内，向右拖动时当前页跟手右移、下方露出上一级页面的实时预览（视差 32%）；松手超过 46dp 即滑出并切页，不足则两页一起回弹。主页不触发；在输入框内起手需从最左 18dp 内且滑 80dp 以上（避免拖动光标误触）。
