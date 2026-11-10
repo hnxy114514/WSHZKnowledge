@@ -293,8 +293,9 @@ public class MainActivity extends Activity {
             + "3. 上下标写成 a^{2}、a_{n}；希腊字母写成 \\alpha \\beta \\gamma \\theta \\pi\n"
             + "4. 一行只写一个公式，不要用 aligned、array、矩阵等环境，也不要贴图片\n"
             + "5. 乘号写 \\times，除号写 \\div，不等号写 \\ne \\le \\ge\n"
-            + "回答里如果涉及本软件里的知识点，用 【知识:关键词】 标注（关键词取知识点标题里的 2-8 个字，"
-            + "一次最多标 3 处），应用会把它显示成可点开跳转的下划线；这条只在 API 模式生效。\n"
+            + "回答里如果涉及本软件里的知识点，用 【知识:标题】 标注：标题写知识点的完整名称"
+            + "（如「基本不等式（均值不等式）」，前面有编号可以省略），一次最多标 3 处；"
+            + "应用会把它显示成可点开跳转的下划线；这条只在 API 模式生效。\n"
             + "列表用「•」开头，不要用 - 或 * 做项目符号，公式单独成行时前面也不要加任何符号"
             + "（横杠贴在公式前会被看成负号）；可以用 **文字** 强调重点；"
             + "不要用 Markdown 表格、代码块和标题符号。";
@@ -4409,7 +4410,8 @@ public class MainActivity extends Activity {
     /** 回答里的知识点标记（下划线 + 主色），点一下跳过去。 */
     private static class KbMark {
         final String keyword;
-        KbMark(String k) { keyword = k; }
+        final Node node;          // 渲染时就解析好；点的时候直接用，不再临时找
+        KbMark(String k, Node n) { keyword = k; node = n; }
     }
 
     /** 把【知识:xxx】换成可点击的知识点链接；没有标记就原样返回。 */
@@ -4424,11 +4426,15 @@ public class MainActivity extends Activity {
             String inner = all.substring(start + 3, end)
                     .replace("：", "").replace(":", "").trim();
             if (inner.length() == 0) { from = end + 1; continue; }
-            sb.replace(start, end + 1, inner);
-            int ks = start, ke = start + inner.length();
+            Node node = findKnowledgeNode(inner);
+            // 用知识点本来的标题显示，而不是模型写的关键词：关键词常常只是几个字，看着像被截断了
+            String show = (node != null && node.name != null && node.name.length() > 0)
+                    ? node.name : inner;
+            sb.replace(start, end + 1, show);
+            int ks = start, ke = start + show.length();
             sb.setSpan(new UnderlineSpan(), ks, ke, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             sb.setSpan(new ForegroundColorSpan(C_PRIMARY), ks, ke, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            sb.setSpan(new KbMark(inner), ks, ke, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            sb.setSpan(new KbMark(inner, node), ks, ke, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             all = sb.toString();
             from = ke;
         }
@@ -4452,7 +4458,14 @@ public class MainActivity extends Activity {
         KbMark[] marks = ((Spanned) cs).getSpans(off, off, KbMark.class);
         if (marks.length == 0) return false;
         vibrate();
-        openKnowledgeByKeyword(marks[0].keyword);
+        KbMark mk = marks[0];
+        Node target = mk.node != null ? mk.node : findKnowledgeNode(mk.keyword);
+        if (target == null) {
+            toast("没找到「" + mk.keyword + "」这个知识点");
+            return true;
+        }
+        toast("在：" + shortPath(target.path()));
+        openNodeFrom(target, S_AI_CHAT);
         return true;
     }
 
@@ -4478,30 +4491,53 @@ public class MainActivity extends Activity {
         return out;
     }
 
-    /** 按关键词在本软件里定位知识点：先找同名，再找名称包含，最后搜正文。 */
-    private void openKnowledgeByKeyword(String kw) {
+    /** 去掉编号、括号注解、空白和「的」，只留主干用来比对标题。 */
+    private static String normTitle(String s) {
+        if (s == null) return "";
+        String t = s.replaceAll("^[0-9０-９.．、\\s]+", "");
+        t = t.replaceAll("[（(][^）)]*[）)]", "");
+        t = t.replace("的", "").replaceAll("\\s+", "");
+        return t;
+    }
+
+    /** 标题匹配打分：完全同名最高，其次是去掉编号/括号后同名，再看前缀、包含，
+     *  同等条件下短的优先、分组略优先——「基本不等式」应该落到「2.2 基本(均值)不等式」
+     *  而不是「基本不等式的实际应用」。 */
+    private static int kbScore(String kw, String name, boolean group) {
+        if (name == null) return -1;
+        String k = kw == null ? "" : kw.trim();
+        if (k.length() == 0) return -1;
+        // 同分时偏叶子：叶子才是真正的内容，分组只是容器；
+        // 这样「基本不等式」会落到「基本(均值)不等式」而不是「2.2 基本(均值)不等式」这一层
+        int bonus = group ? 0 : 10;
+        if (name.equals(k)) return 1000 + bonus;
+        String nk = normTitle(k), nn = normTitle(name);
+        if (nn.length() > 0 && nn.equals(nk)) return 900 + bonus;
+        if (nn.length() > 0 && nn.startsWith(nk)) return 700 - (nn.length() - nk.length()) + bonus;
+        if (nn.length() > 0 && nn.contains(nk)) return 500 - (nn.length() - nk.length()) + bonus;
+        if (nn.length() > 0 && nk.contains(nn)) return 300 - (nk.length() - nn.length()) + bonus;
+        return -1;
+    }
+
+    /** 在本软件里找最贴切的那个知识点：分组和叶子一起比，再兜底搜正文。 */
+    private Node findKnowledgeNode(String kw) {
         String q = kw == null ? "" : kw.trim();
-        if (q.length() == 0) return;
+        if (q.length() == 0) return null;
         Node best = null;
+        int bestScore = -1;
+        for (Node n : allGroups) {
+            int sc = kbScore(q, n.name, true);
+            if (sc > bestScore) { bestScore = sc; best = n; }
+        }
         for (Node n : allHits) {
-            if (n.name != null && n.name.equals(q)) { best = n; break; }
+            int sc = kbScore(q, n.name, false);
+            if (sc > bestScore) { bestScore = sc; best = n; }
         }
-        if (best == null) {
-            for (Node n : allHits) {
-                if (n.name != null && n.name.contains(q)) { best = n; break; }
-            }
+        if (bestScore >= 0) return best;
+        for (Node n : allHits) {
+            if (n.body != null && n.body.contains(q)) return n;
         }
-        if (best == null) {
-            for (Node n : allHits) {
-                if (n.body != null && n.body.contains(q)) { best = n; break; }
-            }
-        }
-        if (best == null) {
-            toast("没找到「" + q + "」这个知识点");
-            return;
-        }
-        toast("在：" + shortPath(best.path()));
-        openNodeFrom(best, S_AI_CHAT);
+        return null;
     }
 
     /** 一条消息气泡：用户主色底、AI 卡片底；长按复制，出错时给「重试」。 */
