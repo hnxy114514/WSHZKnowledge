@@ -285,6 +285,10 @@ public class MainActivity extends Activity {
     private TextView chatStreamTv = null, chatStreamReasonTv = null, chatThinkingTv = null;
     /** 对话内容变了才需要重画；页面来回切、切「思考」开关都不该重画。 */
     private boolean chatDirty = true;
+    /** 这次进对话页要不要停在顶部（顶上有按钮，默认停在顶部；发消息才往下滚）。 */
+    private boolean chatScrollTopOnRender = false;
+    /** 「思考」开关按钮的引用，切开关时就地改文字，不用整页重画。 */
+    private TextView chatThinkBtn = null;
     /** 每条的正文/折叠提示视图，用来就地更新（折叠、切思考）而不是整页重建。 */
     private final java.util.Map<ChatMsg, TextView> chatBodies = new java.util.LinkedHashMap<ChatMsg, TextView>();
     private final java.util.Map<ChatMsg, TextView> chatReasonViews = new java.util.LinkedHashMap<ChatMsg, TextView>();
@@ -1749,8 +1753,10 @@ public class MainActivity extends Activity {
             try {
                 cn = (HttpURLConnection) new URL(u).openConnection();
                 activeCn = cn;
-                cn.setConnectTimeout(8000);
-                cn.setReadTimeout(20000);
+                // 直连只在前面几秒试一下：超过 5 秒还没动静就直接换镜像，别让人干等（反馈 #43）
+                boolean direct = (i == 0);
+                cn.setConnectTimeout(direct ? 5000 : 8000);
+                cn.setReadTimeout(direct ? 5000 : 20000);
                 cn.setInstanceFollowRedirects(true);
                 cn.setRequestProperty("User-Agent", "HZKnowledge-Android");
                 int total = cn.getContentLength();
@@ -1761,9 +1767,12 @@ public class MainActivity extends Activity {
                 long t0 = System.currentTimeMillis();
                 while ((n = is.read(b)) > 0) {
                     if (downloadCancel) throw new Exception("已取消");
+                    if (direct && done == 0 && System.currentTimeMillis() - t0 > 5000) {
+                        throw new Exception("直连太慢");
+                    }
                     fos.write(b, 0, n);
                     done += n;
-                    if (done < 150 * 1024 && System.currentTimeMillis() - t0 > 15000) {
+                    if (done < 150 * 1024 && System.currentTimeMillis() - t0 > (direct ? 8000 : 15000)) {
                         throw new Exception("连接太慢");
                     }
                     int pct = (total > 0) ? (int) (done * 100L / total) : -1;
@@ -4237,6 +4246,7 @@ public class MainActivity extends Activity {
 
         // 「思考」显示开关：只控显示，不影响发给接口的思考强度
         TextView think = new TextView(this);
+        chatThinkBtn = think;
         think.setText(chatShowThink ? "思考 开" : "思考 关");
         think.setTextSize(Math.max(9f, m.subtitleSize - 2f));
         think.setTypeface(chatShowThink ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
@@ -4253,6 +4263,12 @@ public class MainActivity extends Activity {
                 // 只翻可见性，不整页重建：重建会把每条公式再解析一遍，手表上能卡半秒以上
                 for (TextView tv : chatReasonViews.values()) {
                     tv.setVisibility(chatShowThink ? View.VISIBLE : View.GONE);
+                }
+                // 按钮本身也要跟着变，否则点了看不出状态（反馈 #44）
+                if (chatThinkBtn != null) {
+                    chatThinkBtn.setText(chatShowThink ? "思考 开" : "思考 关");
+                    chatThinkBtn.setTextColor(chatShowThink ? C_PRIMARY : C_SUB);
+                    chatThinkBtn.setTypeface(chatShowThink ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
                 }
                 toast(chatShowThink ? "显示思考过程" : "已隐藏思考过程");
             }
@@ -4405,7 +4421,22 @@ public class MainActivity extends Activity {
         }
         // 上下各加一段屏高 25% 的占位（圆屏），内容才不会贴在圆弧边上
         padInner(aiChatInner);
-        scrollChatToBottom(false);
+        if (chatScrollTopOnRender) {
+            chatScrollTopOnRender = false;
+            scrollChatToTop();
+        } else {
+            scrollChatToBottom(false);
+        }
+    }
+
+    /** 停在对话顶部：顶部占位之后就是「返回 / 模型 / 思考 / 清空」那一行。 */
+    private void scrollChatToTop() {
+        if (aiChatScroll == null) return;
+        aiChatScroll.post(new Runnable() {
+            public void run() {
+                if (alive() && aiChatScroll != null) aiChatScroll.scrollTo(0, overDist());
+            }
+        });
     }
 
     /** 带兜底的渲染入口：公式解析或绘制出任何问题（包括嵌套过深导致 StackOverflowError），
@@ -4416,7 +4447,7 @@ public class MainActivity extends Activity {
             if (text.length() > 12000) {          // 超长回复不做公式排版，省内存也省时间
                 return fixListMarks(text);
             }
-            return applyMarkup(fixListMarks(text));
+            return applyMarkup(fixListMarks(fontSafe(text)));
         } catch (Throwable t) {
             log("CHAT", "公式渲染失败，退回纯文本：" + t);
             return fixListMarks(text);
@@ -4612,7 +4643,7 @@ public class MainActivity extends Activity {
                 && (msg.streaming || (msg.reasoning != null && msg.reasoning.length() > 0))) {
             // 推理内容可能比正文晚到：先建一个空行占位，流式时再显形
             TextView rt = new TextView(this);
-            rt.setText(msg.reasoning.length() == 0 ? "" : "思考：" + msg.reasoning);
+            rt.setText(msg.reasoning.length() == 0 ? "" : "思考：" + prettyReasoning(msg.reasoning));
             rt.setTextSize(Math.max(9f, m.subtitleSize - 3f));
             rt.setTextColor(C_SUB);
             rt.setLineSpacing(dp(1), 1.2f);
@@ -5190,7 +5221,7 @@ public class MainActivity extends Activity {
                             ? "…" : safeMarkup(msg.content + "▍"));
                 }
                 if (chatStreamReasonTv != null && msg.reasoning.length() > 0) {
-                    chatStreamReasonTv.setText("思考：" + msg.reasoning);
+                    chatStreamReasonTv.setText("思考：" + prettyReasoning(msg.reasoning));
                     chatStreamReasonTv.setVisibility(View.VISIBLE);
                 }
                 if (chatThinkingTv != null) {
@@ -5567,8 +5598,16 @@ public class MainActivity extends Activity {
             box.addView(botSp);
             sc.setScrollListener(new OverScrollScrollView.OnScrollListener() {
                 public void onScroll(int y, int h, int contentH) {
-                    if (!selfScroll) pendingY = -1;   // 用户自己滑了，就不再替他定位
+                    // 不在这里清 pendingY：onScroll 是延后回调的，程序自己滚出来的事件也会走到这里，
+                    // 一旦误清，后面新增行时就不再补定位，页面会停在顶部（返回定位失效就是这么来的）。
                     if (nearEnd()) more();
+                }
+            });
+            // 只有「手指真的按下」才算用户接管，这时才放弃程序定位
+            sc.setOnTouchListener(new View.OnTouchListener() {
+                public boolean onTouch(View v, MotionEvent e) {
+                    if (e.getActionMasked() == MotionEvent.ACTION_DOWN) pendingY = -1;
+                    return false;                     // 不拦事件，滚动照常
                 }
             });
         }
@@ -5692,6 +5731,8 @@ public class MainActivity extends Activity {
                     selfScroll = true;
                     sc.scrollTo(0, y);
                     selfScroll = false;
+                    // 内容还没铺够时 scrollTo 会被钳制，这时不能算完成，等下一批行再补
+                    if (Math.abs(sc.getScrollY() - y) <= dp(2)) pendingY = -1;
                 }
             });
         }
@@ -7344,6 +7385,10 @@ public class MainActivity extends Activity {
             "supset","⊃","supseteq","⊇","cup","∪","cap","∩","emptyset","∅","varnothing","∅",
             "complement","∁","forall","∀","exists","∃","nexists","∄","neg","¬","land","∧","lor","∨",
             "to","→","rightarrow","→","leftarrow","←","leftrightarrow","↔",
+            // 化学平衡用得多：可逆箭头 ⇌ 这类字体经常缺字，先映射成符号，后面再按字形兜底
+            "rightleftharpoons","⇌","leftrightharpoons","⇌","rightleftarrows","⇄",
+            "leftrightarrows","⇄","rightleftharpoonup","↼","updownarrow","↕",
+            "longrightarrow","⟶","longleftarrow","⟵","Longrightarrow","⟹","Longleftarrow","⟸",
             "Rightarrow","⇒","Leftarrow","⇐","Leftrightarrow","⇔","implies","⇒","iff","⇔",
             "longrightarrow","⟶","longrightarrow","⟶","uparrow","↑","downarrow","↓",
             "nearrow","↗","searrow","↘","mapsto","↦",
@@ -7369,6 +7414,9 @@ public class MainActivity extends Activity {
         LX_WRAP.put("mathit", "");
         LX_WRAP.put("operatorname", "");
         LX_WRAP.put("mbox", "");
+        // 化学式：\ce{H2O} 之类直接输出内部文本，别把 \ce 露在正文里
+        LX_WRAP.put("ce", "");
+        LX_WRAP.put("chem", "");
     }
 
     private static String readArg(String s, int pos, int[] used) {
@@ -7488,7 +7536,8 @@ public class MainActivity extends Activity {
             }
             String sym = LX.get(cmd);
             if (sym != null) { out.append(sym); i = k; continue; }
-            out.append('\\').append(cmd);
+            // 不认识的命令：只留名字，不留反斜杠——留着反斜杠看起来就像乱码
+            out.append(cmd);
             i = k;
         }
         return out.toString();
@@ -8005,6 +8054,72 @@ public class MainActivity extends Activity {
                 paint.setStyle(Paint.Style.FILL);
             }
         }
+    }
+
+    /** 高风险符号的等价写法：手表字体是裁剪过的，⇌、⇄、⟶ 这类常常没有字形，
+     *  直接画会变成方框（看着就是乱码）。每行第一个是原字符，后面是依次尝试的备选。 */
+    private static final String[][] GLYPH_FALLBACK = {
+            {"⇌", "↔", "<->"}, {"⇄", "↔", "<->"}, {"⇆", "↔", "<->"}, {"⇋", "↔", "<->"},
+            {"⇔", "↔", "<->"}, {"⟷", "↔", "<->"}, {"↔", "<->", "-"},
+            {"⟶", "→", "->"}, {"⟵", "←", "<-"}, {"⟹", "→", "=>"}, {"⟸", "←", "<="},
+            {"→", "->", ">"}, {"←", "<-", "<"}, {"⇒", "=>", ">"}, {"⇐", "<=", "<"},
+            {"↕", "↑↓", "|"}, {"↼", "<-", "-"}, {"⇀", "->", "-"},
+            {"∑", "Σ", "sum"}, {"∏", "Π", "prod"}, {"∫", "∫", "S"}, {"∮", "∫", "S"},
+            {"≈", "~", "="}, {"≦", "<=", "<"}, {"≧", ">=", ">"},
+            {"≤", "<=", "<"}, {"≥", ">=", ">"}, {"≠", "!=", "!"},
+            {"±", "+-", "+"}, {"×", "x", "x"}, {"÷", "/", "/"}, {"·", ".", "."},
+            {"°", "o", "o"}, {"√", "√", "v"}, {"∂", "d", "d"}, {"∞", "inf", "8"},
+            {"∈", "in", "e"}, {"∪", "U", "u"}, {"∩", "n", "n"}
+    };
+    private Paint glyphProbe = null;
+
+    private void ensureGlyphProbe() {
+        if (glyphProbe != null) return;
+        glyphProbe = new Paint();
+        glyphProbe.setTypeface(Typeface.DEFAULT);
+        glyphProbe.setTextSize(16f * getResources().getDisplayMetrics().scaledDensity);
+        glyphProbe.setAntiAlias(true);
+    }
+
+    private boolean hasGlyph(String ch) {
+        ensureGlyphProbe();
+        try { return glyphProbe.hasGlyph(ch); } catch (Throwable t) { return true; }
+    }
+
+    /** 这枚字符在字体里能用哪种写法：原字符有字形就用原来的，否则依次试备选。 */
+    private String pickGlyph(String ch) {
+        for (String[] row : GLYPH_FALLBACK) {
+            if (!row[0].equals(ch)) continue;
+            if (hasGlyph(row[0])) return row[0];
+            for (int k = 1; k < row.length; k++) {
+                if (hasGlyph(row[k])) return row[k];
+            }
+            return row[row.length - 1];
+        }
+        return null;
+    }
+
+    /** 把字体画不出来的符号换成等价写法；文本里没有高风险符号时原样返回（不做逐字检测）。 */
+    private String fontSafe(String src) {
+        if (src == null || src.length() == 0) return "";
+        boolean need = false;
+        for (String[] row : GLYPH_FALLBACK) {
+            if (src.indexOf(row[0]) >= 0) { need = true; break; }
+        }
+        if (!need) return src;
+        StringBuilder out = new StringBuilder(src.length() + 8);
+        for (int i = 0; i < src.length(); i++) {
+            String ch = String.valueOf(src.charAt(i));
+            String rep = pickGlyph(ch);
+            out.append(rep == null ? ch : rep);
+        }
+        return out.toString();
+    }
+
+    /** 思考内容按「可读文本」显示：命令换成符号、丢掉公式占位符、缺字换等价写法。 */
+    private String prettyReasoning(String r) {
+        if (r == null || r.length() == 0) return "";
+        return fontSafe(humanizeRaw(latexToText(r)));
     }
 
     /** 把内部占位符还原成人能看的写法：兜底显示原文时不能把 \uE000 这种私用字符甩给用户。 */
@@ -8758,10 +8873,12 @@ public class MainActivity extends Activity {
             renderAiApi();
             scrollToTop(aiApiScroll);
         } else if (s == S_AI_CHAT) {
+            chatScrollTopOnRender = true;
             if (chatDirty) {
                 showChatLoadingThenRender();
             } else {
-                scrollChatToBottom(false);
+                scrollChatToTop();
+                chatScrollTopOnRender = false;
             }
         } else if (s == S_AI_WEB_CFG) {
             renderAiWebCfg();
