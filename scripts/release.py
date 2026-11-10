@@ -23,7 +23,7 @@ MANIFEST = "app/src/main/AndroidManifest.xml"
 
 def http(url, method="GET", data=None, headers=None):
     """统一走 curl：本机代理会破坏 urllib 带 Authorization 的 POST（报 Bad credentials）。"""
-    cmd = ["curl", "-sk", "-X", method,
+    cmd = ["curl", "-sk", "--noproxy", "*", "-X", method,
            "-H", "Authorization: token " + os.environ["GITHUB_TOKEN"],
            "-H", "Accept: application/vnd.github+json",
            "-w", "\n%{http_code}"]

@@ -462,6 +462,8 @@ public class MainActivity extends Activity {
     private boolean subjectDirty = true;
     private String lastQuery = null;
     private final boolean[] restoreNext = new boolean[SCREEN_COUNT];
+    /** 普通滚动页（非 SvList）离开时的位置：返回时用它复位。 */
+    private final int[] savedScrollY = new int[SCREEN_COUNT];
     private LinearLayout bootSplash;      // 启动开屏（数据就绪后淡出移除）
     private FrameLayout bootHost;         // 开屏与主界面共用的容器
     private boolean skipPageAnim = false; // 启动首屏不做淡入（开屏还盖着）
@@ -5544,19 +5546,58 @@ public class MainActivity extends Activity {
         scrollToY(sc, overDist());
     }
 
-    /** 滚到指定位置。内容分帧渲染时可能还没铺够高，scrollTo 会被钳制到半路，
-     *  所以没到位就下一帧再定一次（最多 5 次）；期间用户自己滑过（位置已超过目标）就不再动。 */
+    /** 页面 → 它的滚动容器（只有普通 ScrollView 页；列表页由 SvList 自己管）。 */
+    private ScrollView scrollOf(int s) {
+        switch (s) {
+            case S_DETAIL: return detailScroll;
+            case S_EXTRA: return extraScroll;
+            case S_SETTINGS: return settingsScroll;
+            case S_AI_HUB: return aiHubScroll;
+            case S_AI_API_CFG: return aiApiScroll;
+            case S_AI_WEB_CFG: return aiWebCfgScroll;
+            case S_ABOUT: return aboutScroll;
+            case S_DISPLAY: return displayScroll;
+            case S_CHANGELOG: return changelogScroll;
+            case S_FEEDBACK: return feedbackScroll;
+            case S_PROFILE: return profScroll;
+            default: return null;
+        }
+    }
+
+    /** 每个滚动容器当前挂着的「定位监听器」：替换式单一目标，多次调用只留最新一个。 */
+    private final java.util.Map<ScrollView, android.view.ViewTreeObserver.OnGlobalLayoutListener> scrollLoc =
+            new java.util.HashMap<ScrollView, android.view.ViewTreeObserver.OnGlobalLayoutListener>();
+
+    /** 滚到指定位置。关键：在「布局完成后、绘制前」(OnGlobalLayoutListener) 就位，第一帧绘制前位置已对，
+     *  不会再出现「先露顶部占位、再跳到内容」的闪。内容分帧渲染时高度没铺够，scrollTo 会被钳制，
+     *  所以布局完成时再定一次；到位即移除——不会每帧跑、也不会残留。替换式：同一容器多次调用只留最新目标。
+     *  注册与移除都固定持有「注册时」的 ViewTreeObserver 引用，避免 detach/可见性切换导致观察者实例变化、
+     *  移除删不干净（那会让旧监听器永远每帧滚动，拖垮主线程）。 */
     private void scrollToY(final ScrollView sc, final int y) {
-        final int[] tries = new int[]{0};
-        final Runnable r = new Runnable() {
-            public void run() {
-                sc.scrollTo(0, y);
-                View child = sc.getChildAt(0);
-                int range = (child == null ? 0 : child.getHeight()) - sc.getHeight();
-                if (tries[0]++ < 5 && y > 0 && sc.getScrollY() < y && range >= y) sc.post(this);
-            }
-        };
-        sc.post(r);
+        if (sc == null) return;
+        final int target = Math.max(0, y);
+        sc.scrollTo(0, target);                       // 先同步设一次：内容已量好就直接到位（不闪）
+        if (Math.abs(sc.getScrollY() - target) <= dp(2)) return;  // 已到位则不必挂监听，零残留
+        final android.view.ViewTreeObserver vto = sc.getViewTreeObserver();  // 注册时固定持有
+        final android.view.ViewTreeObserver.OnGlobalLayoutListener old = scrollLoc.remove(sc);
+        if (old != null) vto.removeOnGlobalLayoutListener(old);
+        final android.view.ViewTreeObserver.OnGlobalLayoutListener l =
+                new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
+                    int tries = 0;
+                    public void onGlobalLayout() {
+                        sc.scrollTo(0, target);
+                        final View child = sc.getChildAt(0);
+                        final int range = (child == null ? 0 : child.getHeight()) - sc.getHeight();
+                        // 到位、内容本就不够高（钳到底）、或试够次数就收手
+                        if (Math.abs(sc.getScrollY() - target) <= dp(2)
+                                || range < target || tries++ >= 8) {
+                            scrollLoc.remove(sc);
+                            vto.removeOnGlobalLayoutListener(this);
+                        }
+                    }
+                };
+        scrollLoc.put(sc, l);
+        vto.addOnGlobalLayoutListener(l);
     }
 
     /** 行数据源：只告诉列表「一共几行、第几行长什么样」，行由列表按需造，不一次全建。 */
@@ -8805,6 +8846,9 @@ public class MainActivity extends Activity {
             leaving.sc.setTranslationX(0f);
             leaving.sc.setAlpha(1f);
         }
+        // 离开的是普通滚动页：记下当前滚动位置，返回时复位（修复「返回上一级定位错误/回到顶端」）
+        ScrollView leavingSc = scrollOf(screen);
+        if (leavingSc != null) savedScrollY[screen] = leavingSc.getScrollY();
         screen = s;
         // 顺序必须与 S_* 常量一一对应（0..15）
         View[] screens = {subjectScreen, nodeScreen, detailScreen, settingsScreen,
@@ -8970,6 +9014,13 @@ public class MainActivity extends Activity {
                 enter.restore();
             } else {
                 enter.enter();
+            }
+        } else {
+            // 普通滚动页：返回时回到离开的位置；正向进入交给上面各分支的 scrollToTop 贴顶。
+            ScrollView tsc = scrollOf(s);
+            if (tsc != null && restoreNext[s]) {
+                restoreNext[s] = false;
+                scrollToY(tsc, savedScrollY[s]);
             }
         }
 
