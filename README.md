@@ -718,6 +718,9 @@ Node {
       - 流式：`POST /chat/completions` 带 `stream:true`，按行读 SSE（`data:` / `[DONE]`），
         `delta.content` 追到当前气泡，`delta.reasoning_content` 显示成灰色的「思考：…」，
         80ms 节流刷新；网关不支持流式、直接回整段 JSON 时也能解析。
+      - **所有文本字段都过 `jsonStr()`**：Android 的 `org.json` 里 `optString` 遇到 JSON null
+        会返回字面量 "null"（不是空串、也不吃默认值），流式每块都带 `"content": null` 占位，
+        直接拼就会刷出一长串 null。`jsonStr` 先 `has()` 再 `isNull()` 再兜一次 "null" 判断。
       - 请求体分三档降级：全参数（含 `reasoning_effort`）→ 去掉思考强度 → 只留模型和消息。
         有些网关见到不认识的参数直接 400，逐档降级才不会因为一个可选参数把对话卡死。
       - 上下文：一条 system（要求回答简短）+ 最近 N 轮问答（N 取设置里的 4/8/16），

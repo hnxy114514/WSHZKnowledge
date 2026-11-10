@@ -3845,6 +3845,21 @@ public class MainActivity extends Activity {
         return b + path;
     }
 
+    /** 安全取字符串：Android 的 optString 遇到 JSON null 会返回字面量 "null"，
+     *  流式里每块都带一个 "content": null，就会拼出一长串 null。这里统一挡掉。 */
+    private static String jsonStr(JSONObject o, String key) {
+        if (o == null || key == null) return "";
+        try {
+            if (!o.has(key) || o.isNull(key)) return "";
+            Object v = o.opt(key);
+            if (v == null || v == JSONObject.NULL) return "";
+            String s = String.valueOf(v);
+            return "null".equals(s) ? "" : s;
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
     /** 一次接口调用的结果：HTTP 码 + 正文 + 网络层错误 + 耗时。 */
     private static class ApiRes {
         int code = 0;
@@ -3941,8 +3956,8 @@ public class MainActivity extends Activity {
         try {
             JSONObject o = new JSONObject(body);
             JSONObject e = o.optJSONObject("error");
-            String m = e == null ? o.optString("message", "") : e.optString("message", "");
-            if (m.length() == 0) m = o.optString("detail", "");
+            String m = e == null ? jsonStr(o, "message") : jsonStr(e, "message");
+            if (m.length() == 0) m = jsonStr(o, "detail");
             m = firstLine(m == null ? "" : m.trim(), 40);
             return m.length() == 0 ? "" : "：" + m;
         } catch (Throwable t) {
@@ -3975,7 +3990,7 @@ public class MainActivity extends Activity {
                         if (arr != null) {
                             for (int i = 0; i < arr.length(); i++) {
                                 JSONObject o = arr.optJSONObject(i);
-                                String id = o == null ? "" : o.optString("id", "");
+                                String id = jsonStr(o, "id");
                                 if (id.length() > 0 && !ids.contains(id)) ids.add(id);
                             }
                         }
@@ -4062,8 +4077,8 @@ public class MainActivity extends Activity {
             JSONObject c0 = ch.optJSONObject(0);
             JSONObject msg = c0 == null ? null : c0.optJSONObject("message");
             if (msg == null) return "";
-            String s = msg.optString("content", "");
-            if (s == null || s.trim().length() == 0) s = msg.optString("reasoning_content", "");
+            String s = jsonStr(msg, "content");
+            if (s.trim().length() == 0) s = jsonStr(msg, "reasoning_content");
             return firstLine(s == null ? "" : s.trim(), 24);
         } catch (Throwable t) {
             return "";
@@ -4621,8 +4636,8 @@ public class MainActivity extends Activity {
                     JSONObject delta = c0.optJSONObject("delta");
                     if (delta == null) delta = c0.optJSONObject("message");
                     if (delta == null) continue;
-                    String think = delta.optString("reasoning_content", "");
-                    String piece = delta.optString("content", "");
+                    String think = jsonStr(delta, "reasoning_content");
+                    String piece = jsonStr(delta, "content");
                     // 思考内容留个上限，别把内存堆满
                     if (think.length() > 0 && target.reasoning.length() < 4000) {
                         target.reasoning += think;
@@ -4651,8 +4666,8 @@ public class MainActivity extends Activity {
             JSONObject c0 = ch == null || ch.length() == 0 ? null : ch.optJSONObject(0);
             JSONObject msg = c0 == null ? null : c0.optJSONObject("message");
             if (msg != null) {
-                target.reasoning = msg.optString("reasoning_content", "");
-                target.content = msg.optString("content", "");
+                target.reasoning = jsonStr(msg, "reasoning_content");
+                target.content = jsonStr(msg, "content");
             }
         } catch (Throwable ignored) { }
         chatDone(target);
