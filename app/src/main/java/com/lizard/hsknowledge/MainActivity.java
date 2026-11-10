@@ -7428,15 +7428,17 @@ public class MainActivity extends Activity {
             // 根号一笔画完：顶部短横 → 向左下撇到最低点 → 从最低点回笔升到顶部 → 长横线盖住被开方数。
             // 关键是不能省掉「回笔」那一笔，少了它就只剩「一捺加一横」，根本不像根号。
             // 顶边按墨迹算（见 inkTop），横线才贴着字母，不会飘在半空。
-            float top = base - ink - size * 0.10f;
-            float bot = base + Math.max(in[2], size * 0.06f) + size * 0.06f;
+            // 顶边略高于被开方数，最低点只比基线低一点点：
+            // 原来用「字体 descent」当下沉量，腿伸得太长，看着像一个「∫」。
+            float top = base - Math.max(ink, size * 0.52f) - size * 0.08f;
+            float bot = base + size * 0.10f;
             // 形状按标准根号摆：短横在左上角，最低点是整个字形的最左端，
             // 从最低点斜升到横线起点（斜率别太陡，否则看着像一根竖线）。
-            float x0 = x + hook * 0.10f;                    // 短横左端
-            float xs = x + hook * 0.34f;                    // 短横右端，撇从这开始
-            float xl = x;                                   // 最低点：字形最左端
-            float xr = x + hook * 0.78f;                    // 回笔升回顶部，长横线从这起
-            float right = innerX + in[0] + size * 0.04f;    // 长横线右端，只留一点点余量
+            float x0 = x + hook * 0.06f;                    // 短横左端
+            float xs = x + hook * 0.30f;                    // 短横右端，撇从这开始
+            float xl = x + hook * 0.02f;                    // 最低点：整条 V 的最左
+            float xr = x + hook * 0.62f;                    // 回笔升回顶部，长横线从这起
+            float right = innerX + in[0] + size * 0.03f;    // 长横线右端，只留一点点余量
             Path rad = new Path();
             rad.moveTo(x0, top);
             rad.lineTo(xs, top);
@@ -7482,15 +7484,20 @@ public class MainActivity extends Activity {
         private final Inl root;
         private final int script;      // 0 正常 1 上标 2 下标
         private final boolean hi;      // 落在「重点标亮」范围内：用高亮色 + 加粗绘制
+        /** 这段公式的原始文本：度量或绘制万一出错，就退回去画原文，绝不让内容凭空消失。 */
+        private final String raw;
 
-        InlineSpan(Inl root) { this(root, 0, false); }
+        InlineSpan(Inl root) { this(root, 0, false, ""); }
 
-        InlineSpan(Inl root, int script) { this(root, script, false); }
+        InlineSpan(Inl root, int script) { this(root, script, false, ""); }
 
-        InlineSpan(Inl root, int script, boolean hi) {
+        InlineSpan(Inl root, int script, boolean hi) { this(root, script, hi, ""); }
+
+        InlineSpan(Inl root, int script, boolean hi, String raw) {
             this.root = root;
             this.script = script;
             this.hi = hi;
+            this.raw = raw == null ? "" : raw;
         }
 
         /** 公式是自绘的 ReplacementSpan，不会自动继承 ForegroundColorSpan/StyleSpan，
@@ -7523,12 +7530,14 @@ public class MainActivity extends Activity {
             int oc = paint.getColor();
             boolean ob = paint.isFakeBoldText();
             try {
-                return measure(paint, fm, orig, oc, ob);
+                int w = measure(paint, fm, orig, oc, ob);
+                if (w <= 0 || w > 4000) throw new IllegalStateException("宽度异常 " + w);
+                return w;
             } catch (Throwable t) {
-                // 度量炸了也不能崩：给一个空格宽度，退回普通文字排法
+                // 度量炸了或结果不合理：按原文留位（下面 draw 也会画原文），内容不会消失
                 paint.setTextSize(orig);
                 clearHi(paint, oc, ob);
-                return Math.max(1, (int) paint.measureText("\u00A0"));
+                return Math.max(1, (int) paint.measureText(raw.length() == 0 ? "\u00A0" : raw));
             }
         }
 
@@ -7564,8 +7573,16 @@ public class MainActivity extends Activity {
             try {
                 applyHi(paint);
                 drawInl(canvas, paint, root, x, baseOf(orig, y), sizeOf(orig), paint.getColor());
-            } catch (Throwable ignored) {
-                // 绘制阶段出错就这一帧不画公式，别把进程带崩
+            } catch (Throwable t) {
+                // 绘制出错：把这段公式的原文画出来（而不是留一片空白），并记一笔方便排查
+                try {
+                    paint.setTextSize(orig);
+                    paint.setColor(color);
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setTextAlign(Paint.Align.LEFT);
+                    if (raw.length() > 0) canvas.drawText(raw, x, y, paint);
+                    noteRenderError(t, raw);
+                } catch (Throwable ignored) { }
             } finally {
                 paint.setTextSize(orig);
                 clearHi(paint, color, ob);
@@ -7573,6 +7590,24 @@ public class MainActivity extends Activity {
                 paint.setStyle(Paint.Style.FILL);
             }
         }
+    }
+
+    /** 记一笔公式排版错误（最多留 4KB）：这些错误现在不崩了，但要留下线索。 */
+    private void noteRenderError(Throwable t, String raw) {
+        try {
+            String line = t.getClass().getSimpleName() + "："
+                    + (raw == null ? "" : (raw.length() > 120 ? raw.substring(0, 120) : raw)) + "\n";
+            java.io.File f = new java.io.File(getFilesDir(), "render.log");
+            if (!f.exists() || f.length() > 4096) {
+                java.io.FileOutputStream fos = new java.io.FileOutputStream(f, false);
+                fos.write(line.getBytes(StandardCharsets.UTF_8));
+                fos.close();
+            } else {
+                java.io.FileOutputStream fos = new java.io.FileOutputStream(f, true);
+                fos.write(line.getBytes(StandardCharsets.UTF_8));
+                fos.close();
+            }
+        } catch (Throwable ignored) { }
     }
 
     private SpannableStringBuilder applyMarkup(String src) {
@@ -7589,10 +7624,11 @@ public class MainActivity extends Activity {
             if (c == '\uE000' || c == '\uE003') {
                 int[] b = findBlock(txt, i + 1);
                 if (b[1] > i) {
-                    Inl root = Inl.group(parseInl(txt.substring(i, b[1] + 1)));
+                    String block = txt.substring(i, b[1] + 1);
+                    Inl root = Inl.group(parseInl(block));
                     int st = ssb.length();
                     ssb.append('\u00A0');
-                    ssb.setSpan(new InlineSpan(root, 0, hl), st, ssb.length(),
+                    ssb.setSpan(new InlineSpan(root, 0, hl, block), st, ssb.length(),
                             Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                     i = b[1] + 1;
                     continue;
@@ -7603,10 +7639,11 @@ public class MainActivity extends Activity {
             if (c == '\uE005') {
                 int e = txt.indexOf('\uE006', i + 1);
                 if (e > i) {
-                    Inl root = Inl.group(parseInl(txt.substring(i, e + 1)));
+                    String block = txt.substring(i, e + 1);
+                    Inl root = Inl.group(parseInl(block));
                     int st = ssb.length();
                     ssb.append('\u00A0');
-                    ssb.setSpan(new InlineSpan(root, 0, hl), st, ssb.length(),
+                    ssb.setSpan(new InlineSpan(root, 0, hl, block), st, ssb.length(),
                             Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                     i = e + 1;
                     continue;
@@ -10528,6 +10565,23 @@ public class MainActivity extends Activity {
                         if (tail.length() > 0) {
                             body += "\n\n---\n\n<details><summary>应用日志（末尾）</summary>\n\n```\n"
                                     + tail + "\n```\n</details>\n";
+                        }
+                    }
+                    // 公式排版/崩溃的记录单独存了两个小文件，跟着反馈一起带上，省得让用户找
+                    if (fbAttachLog) {
+                        java.io.File rf = new java.io.File(getFilesDir(), "render.log");
+                        String rl = readFileQuiet(rf);
+                        if (rl.length() > 0) {
+                            body += "\n\n---\n\n<details><summary>公式排版异常记录</summary>\n\n```\n"
+                                    + (rl.length() > 3000 ? rl.substring(rl.length() - 3000) : rl)
+                                    + "\n```\n</details>\n";
+                        }
+                        java.io.File cf = new java.io.File(getFilesDir(), "crash.log");
+                        String cl = readFileQuiet(cf);
+                        if (cl.length() > 0) {
+                            body += "\n\n---\n\n<details><summary>上次崩溃记录</summary>\n\n```\n"
+                                    + (cl.length() > 3000 ? cl.substring(cl.length() - 3000) : cl)
+                                    + "\n```\n</details>\n";
                         }
                     }
                     payload.put("body", body);
