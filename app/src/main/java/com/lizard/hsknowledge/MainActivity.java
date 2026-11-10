@@ -292,7 +292,9 @@ public class MainActivity extends Activity {
             + "3. 上下标写成 a^{2}、a_{n}；希腊字母写成 \\alpha \\beta \\gamma \\theta \\pi\n"
             + "4. 一行只写一个公式，不要用 aligned、array、矩阵等环境，也不要贴图片\n"
             + "5. 乘号写 \\times，除号写 \\div，不等号写 \\ne \\le \\ge\n"
-            + "可以用 **文字** 强调重点；不要用 Markdown 表格、代码块和标题符号。";
+            + "列表用「•」开头，不要用 - 或 * 做项目符号，公式单独成行时前面也不要加任何符号"
+            + "（横杠贴在公式前会被看成负号）；可以用 **文字** 强调重点；"
+            + "不要用 Markdown 表格、代码块和标题符号。";
 
     /** 是否在对话里显示思考过程；默认关（手表屏幕小，思考会把正文挤下去）。 */
     private boolean chatShowThink = false;
@@ -4282,6 +4284,27 @@ public class MainActivity extends Activity {
         scrollChatToBottom(false);
     }
 
+    /** 行首的「- 」「* 」项目符号换成「• 」：横杠紧贴公式会被读成负号。
+     *  只在行首、且后面跟空白时替换（"-1 ≤ x" 这种负数不动）；其它位置的横杠保持原样。 */
+    private static String fixListMarks(String s) {
+        if (s == null || s.length() == 0) return "";
+        StringBuilder out = new StringBuilder(s.length() + 8);
+        boolean lineStart = true;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (lineStart && (c == '-' || c == '*') && i + 1 < s.length()
+                    && (s.charAt(i + 1) == ' ' || s.charAt(i + 1) == '\t')) {
+                out.append('\u2022');
+                lineStart = false;
+                continue;              // 后面的空格照常输出，成「• 」
+            }
+            if (c == '\n') lineStart = true;
+            else if (c != ' ' && c != '\t') lineStart = false;
+            out.append(c);
+        }
+        return out.toString();
+    }
+
     /** 一条消息气泡：用户主色底、AI 卡片底；长按复制，出错时给「重试」。 */
     private View chatBubble(final ChatMsg msg) {
         final boolean user = "user".equals(msg.role);
@@ -4323,7 +4346,7 @@ public class MainActivity extends Activity {
         else text = msg.content;
         // AI 的回复走知识点同一套渲染：\frac / \sqrt / ^{} / **重点** 都会被画出来；
         // 用户自己打的字保持原样，免得一个下划线就被当成下标。
-        body.setText(user ? text : applyMarkup(text));
+        body.setText(user ? text : applyMarkup(fixListMarks(text)));
         body.setTextSize(m.subtitleSize - 1f);
         body.setTextColor(msg.err != null ? 0xFFFFB74D : C_TEXT);
         body.setLineSpacing(dp(2), 1.25f);
@@ -4795,7 +4818,7 @@ public class MainActivity extends Activity {
                 if (!alive() || screen != S_AI_CHAT) return;
                 if (chatStreamTv != null) {
                     chatStreamTv.setText(msg.content.length() == 0
-                            ? "…" : applyMarkup(msg.content + "▍"));
+                            ? "…" : applyMarkup(fixListMarks(msg.content) + "▍"));
                 }
                 if (chatStreamReasonTv != null && msg.reasoning.length() > 0) {
                     chatStreamReasonTv.setText("思考：" + msg.reasoning);
