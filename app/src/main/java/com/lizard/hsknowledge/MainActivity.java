@@ -315,6 +315,8 @@ public class MainActivity extends Activity {
         String finish = "";
         /** 被截断了，气泡下给一个「继续」。 */
         boolean truncated = false;
+        /** 双击折叠：只对已答完的回答生效。 */
+        boolean folded = false;
         ChatMsg(String r) { role = r; }
     }
     /** 从哪个页面点进来的：返回时原路退回，而不是一律回主页。 */
@@ -647,7 +649,8 @@ public class MainActivity extends Activity {
         aiNoWebView = !aiHasWebView();
         if (aiNoWebView && !"api".equals(aiMode)) {
             aiMode = "api";
-            prefs.edit().putString("ai_mode", aiMode).apply();
+            prefs.edit().putString("ai_mode", aiMode)
+                    .putBoolean("ai_choice_done", true).apply();
             aiSwitchedByNoWebView = true;
         }
         aiWebHideDl = prefs.getBoolean("ai_web_hide_dl", true);
@@ -3272,7 +3275,8 @@ public class MainActivity extends Activity {
                     return;
                 }
                 aiMode = "api".equals(aiMode) ? "web" : "api";
-                prefs.edit().putString("ai_mode", aiMode).apply();
+                prefs.edit().putString("ai_mode", aiMode)
+                        .putBoolean("ai_choice_done", true).apply();
                 markSubjectsDirty();
                 renderAiHub();
             }
@@ -3285,25 +3289,16 @@ public class MainActivity extends Activity {
             aiHubInner.addView(aiHint(aiApiReady()
                     ? ("接口：" + aiApiModel + "，可以测连接")
                     : ("还没配好：" + aiApiMissing())), wrap());
-            aiHubInner.addView(aiSettingBtn("开始对话", new View.OnClickListener() {
-                public void onClick(View v) {
-                    if (!aiApiReady()) {
-                        toast(aiApiMissing());
-                        aiCfgBack = S_AI_HUB;
-                        showScreen(S_AI_API_CFG);
-                        return;
-                    }
-                    aiChatBack = S_AI_HUB;
-                    showScreen(S_AI_CHAT);
-                }
-            }), wrap());
         }
 
+        // 两个入口之间统一留 8dp：以前第二个按钮只有 topMargin，第一个没留，挨在一起了
+        LinearLayout.LayoutParams lp1 = wrap();
+        lp1.topMargin = dp(8);
         aiHubInner.addView(aiSettingBtn("API AI 设置", new View.OnClickListener() {
             public void onClick(View v) { aiCfgBack = S_AI_HUB; showScreen(S_AI_API_CFG); }
-        }), wrap());
+        }), lp1);
         LinearLayout.LayoutParams lp2 = wrap();
-        lp2.topMargin = dp(6);
+        lp2.topMargin = dp(8);
         aiHubInner.addView(aiSettingBtn("DeepSeek 网页版设置", new View.OnClickListener() {
             public void onClick(View v) { aiCfgBack = S_AI_HUB; showScreen(S_AI_WEB_CFG); }
         }), lp2);
@@ -4276,7 +4271,8 @@ public class MainActivity extends Activity {
         aiChatBar.setOrientation(LinearLayout.HORIZONTAL);
         aiChatBar.setGravity(Gravity.CENTER_VERTICAL);
 
-        int bottomGap = m.round ? Math.max(dp(6), Math.round(m.roundSafe * 0.9f)) : dp(6);
+        // 贴着屏幕最下沿：圆屏只留一点点（4dp 起），宽度由下面的圆几何另算，不会出圆
+        int bottomGap = m.round ? Math.max(dp(5), Math.round(m.roundSafe * 0.55f)) : dp(4);
         aiChatBar.setPadding(0, dp(2), 0, bottomGap);
         int barH = dp(38);
 
@@ -4287,6 +4283,8 @@ public class MainActivity extends Activity {
         aiChatInputBtn.setTextColor(C_PRIMARY);
         aiChatInputBtn.setGravity(Gravity.CENTER);
         aiChatInputBtn.setSingleLine(true);
+        aiChatInputBtn.setPadding(dp(4), 0, dp(4), 0);   // 贴下沿时按钮窄，内边距吃太多会裁字
+        aiChatInputBtn.setPadding(dp(4), 0, dp(4), 0);   // 贴下沿时按钮窄，内边距吃太多会裁字
         aiChatInputBtn.setBackgroundDrawable(clickBg(0xFF14384A));
         aiChatInputBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { vibrate(); chatAskInput(); }
@@ -4297,6 +4295,8 @@ public class MainActivity extends Activity {
         aiChatStopBtn.setTextSize(m.subtitleSize - 1f);
         aiChatStopBtn.setGravity(Gravity.CENTER);
         aiChatStopBtn.setSingleLine(true);
+        aiChatStopBtn.setPadding(dp(4), 0, dp(4), 0);
+        aiChatStopBtn.setPadding(dp(4), 0, dp(4), 0);
         aiChatStopBtn.setTextColor(0xFFFFB74D);
         aiChatStopBtn.setBackgroundDrawable(clickBg(C_PILL));
         aiChatStopBtn.setVisibility(View.GONE);
@@ -4320,7 +4320,8 @@ public class MainActivity extends Activity {
             double half = Math.sqrt(Math.max(1.0, 2 * r * d - d * d));
             int cap = (int) Math.floor(half * 2) - dp(2);   // 留 2dp 余量
             int avail = getResources().getDisplayMetrics().widthPixels - 2 * m.sidePad;
-            blp.width = Math.max(dp(120), Math.min(avail, cap));
+            // 贴着下沿时圆只剩这么宽：取 cap，但至少给 76dp，否则两个按钮放不下字
+            blp.width = Math.max(Math.min(dp(76), avail), Math.min(avail, cap));
             blp.gravity = Gravity.CENTER_HORIZONTAL;
         }
         aiChatScreen.addView(aiChatBar, blp);
@@ -4445,15 +4446,40 @@ public class MainActivity extends Activity {
         box.addView(body, wrap());
         if (msg.streaming) chatStreamTv = body;
 
-        final String copy = msg.err != null ? msg.err : msg.content;
-        box.setOnLongClickListener(new View.OnLongClickListener() {
-            public boolean onLongClick(View v) {
-                if (copy == null || copy.length() == 0) return false;
-                vibrate();
-                chatCopyToClipboard(copy);
-                return true;
+        // 长按复制去掉了；改成双击折叠/展开，只对已经答完、而且内容够长的回答生效
+        final boolean canFold = !user && !msg.streaming && msg.err == null
+                && msg.content.length() > 100;
+        if (canFold) {
+            if (msg.folded) {
+                body.setMaxLines(4);
+                body.setEllipsize(TextUtils.TruncateAt.END);
             }
-        });
+            final long[] lastTap = new long[]{0L};
+            box.setClickable(true);
+            box.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    long now = SystemClock.uptimeMillis();
+                    if (now - lastTap[0] < 320L) {      // 两次点击够快才算双击
+                        lastTap[0] = 0L;
+                        vibrate();
+                        msg.folded = !msg.folded;
+                        renderAiChat();
+                    } else {
+                        lastTap[0] = now;
+                    }
+                }
+            });
+            if (msg.folded) {
+                TextView tip = new TextView(this);
+                tip.setText("双击展开");
+                tip.setTextSize(Math.max(9f, m.subtitleSize - 3f));
+                tip.setTextColor(C_SUB);
+                tip.setGravity(Gravity.CENTER);
+                LinearLayout.LayoutParams tlp = wrap();
+                tlp.topMargin = dp(3);
+                box.addView(tip, tlp);
+            }
+        }
 
         if (msg.truncated && !user && msg.err == null) {
             TextView more = new TextView(this);
@@ -4495,17 +4521,6 @@ public class MainActivity extends Activity {
             box.addView(retry, tlp);
         }
         return box;
-    }
-
-    /** 对话气泡长按复制（网页页另有一套 copyToClipboard，别混用）。 */
-    private void chatCopyToClipboard(String text) {
-        try {
-            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("chat", text));
-            toast("已复制");
-        } catch (Throwable t) {
-            toast("复制失败");
-        }
     }
 
     private void scrollChatToBottom(boolean smooth) {
@@ -5054,8 +5069,116 @@ public class MainActivity extends Activity {
         else scrollToTop(aiWebCfgScroll);
     }
 
+    /** 第一次进 AI 界面时问用哪种方式：网页版开箱即用，API 要自己配地址和密钥。 */
+    private void askAiModeFirstTime() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(13), dp(12), dp(13), dp(8));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xFF151515);
+        bg.setCornerRadius(dp(16));
+        box.setBackgroundDrawable(bg);
+
+        TextView t = new TextView(this);
+        t.setText("用哪种 AI？");
+        t.setTextSize(m.subtitleSize);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setTextColor(Color.WHITE);
+        t.setGravity(Gravity.CENTER);
+        box.addView(t, wrap());
+
+        TextView webTip = new TextView(this);
+        webTip.setText("网页版：直接打开 DeepSeek 网页，登录就能用，不用填任何配置。\n普通用户建议选这个。");
+        webTip.setTextSize(m.subtitleSize - 2f);
+        webTip.setTextColor(C_TEXT);
+        webTip.setLineSpacing(dp(2), 1.25f);
+        webTip.setPadding(dp(6), dp(8), dp(6), dp(2));
+        box.addView(webTip, wrap());
+
+        TextView apiTip = new TextView(this);
+        apiTip.setText("API 模式：自己填接口地址和密钥，按用量计费，适合已经有 API 的人。");
+        apiTip.setTextSize(m.subtitleSize - 2f);
+        apiTip.setTextColor(C_SUB);
+        apiTip.setLineSpacing(dp(2), 1.25f);
+        apiTip.setPadding(dp(6), dp(4), dp(6), dp(6));
+        box.addView(apiTip, wrap());
+
+        final AlertDialog d = new AlertDialog.Builder(this).setView(box).create();
+
+        TextView web = new TextView(this);
+        web.setText("用网页版（推荐）");
+        web.setTextSize(m.backSize);
+        web.setTypeface(Typeface.DEFAULT_BOLD);
+        web.setGravity(Gravity.CENTER);
+        web.setTextColor(C_PRIMARY);
+        web.setPadding(dp(10), dp(11), dp(10), dp(11));
+        web.setBackgroundDrawable(pill(0xFF14384A));
+        LinearLayout.LayoutParams wlp = wrap();
+        wlp.topMargin = dp(4);
+        box.addView(web, wlp);
+
+        TextView api = new TextView(this);
+        api.setText("用 API 模式");
+        api.setTextSize(m.subtitleSize - 1f);
+        api.setGravity(Gravity.CENTER);
+        api.setTextColor(C_SUB);
+        api.setPadding(dp(10), dp(10), dp(10), dp(10));
+        api.setBackgroundDrawable(pill(C_PILL));
+        LinearLayout.LayoutParams alp = wrap();
+        alp.topMargin = dp(6);
+        box.addView(api, alp);
+
+        TextView later = new TextView(this);
+        later.setText("以后再说");
+        later.setTextSize(m.subtitleSize - 2f);
+        later.setGravity(Gravity.CENTER);
+        later.setTextColor(C_SUB);
+        later.setPadding(dp(8), dp(9), dp(8), dp(2));
+        box.addView(later, wrap());
+
+        web.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                aiMode = "web";
+                prefs.edit().putString("ai_mode", aiMode)
+                        .putBoolean("ai_choice_done", true).apply();
+                try { d.dismiss(); } catch (Throwable ignored) { }
+                openAiFromHome();
+            }
+        });
+        api.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                aiMode = "api";
+                prefs.edit().putString("ai_mode", aiMode)
+                        .putBoolean("ai_choice_done", true).apply();
+                try { d.dismiss(); } catch (Throwable ignored) { }
+                openAiFromHome();
+                toast(aiApiReady() ? "已经是配好的接口" : "先在这页填地址和密钥");
+            }
+        });
+        later.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                // 不选就按网页版走，别再每次进来都问
+                prefs.edit().putBoolean("ai_choice_done", true).apply();
+                try { d.dismiss(); } catch (Throwable ignored) { }
+                openAiFromHome();
+            }
+        });
+
+        tuneDialogWindow(d);
+        d.show();
+        sizeDialog(d, 0.86f);
+    }
+
     /** 主页「问 AI」按当前模式分流；实时读 aiMode，切换后不用重绘主页列表也生效。 */
     private void openAiFromHome() {
+        // 有 WebView 的设备，第一次进 AI 界面先问清楚用哪种方式（没有 WebView 的已经在启动时定好了）
+        if (!aiNoWebView && !prefs.getBoolean("ai_choice_done", false)) {
+            askAiModeFirstTime();
+            return;
+        }
         if (aiNoWebView && !"api".equals(aiMode)) {
             aiMode = "api";
             prefs.edit().putString("ai_mode", aiMode).apply();
@@ -7369,11 +7492,9 @@ public class MainActivity extends Activity {
         }
         if (grp.type == 4) {
             float[] in = measList(grp.kids.get(0), p, size);
-            float[] g = sqrtGlyph(p, size);
-            float needTop = Math.max(inkTop(grp.kids.get(0), p, size), size * 0.52f) + size * 0.10f;
-            float needBot = size * 0.12f;
-            float w = g[0] * 0.72f + in[0] + size * 0.04f;
-            return new float[]{w, needTop, needBot};
+            float barH = Math.max(inkTop(grp.kids.get(0), p, size) + size * 0.10f, size * 0.62f);
+            float w = size * 0.52f + in[0] + size * 0.03f;
+            return new float[]{w, barH, size * 0.10f};
         }
         if (grp.type == 6) {
             float[] in = measList(grp.kids.get(0), p, size);
@@ -7452,31 +7573,38 @@ public class MainActivity extends Activity {
         } else if (t.type == 4) {
             Inl kid = t.kids.get(0);
             float[] in = measList(kid, p, size);
-            float[] g = sqrtGlyph(p, size);
-            float needTop = Math.max(inkTop(kid, p, size), size * 0.52f) + size * 0.10f;
-            float needBot = size * 0.12f;
-            // 字形按需要的高度纵向拉伸（横线接到它右上），比自己拼三条线的形状稳
-            float scaleY = Math.max(1f, (needTop + needBot) / Math.max(1f, g[1] + g[2]));
-            p.setTextSize(size);
-            p.setTextAlign(Paint.Align.LEFT);
-            p.setStyle(Paint.Style.FILL);
-            p.setColor(color);
-            int sc = c.save();
-            c.translate(x, base + needBot);
-            c.scale(1f, scaleY);
-            c.drawText("\u221A", 0f, 0f, p);
-            c.restoreToCount(sc);
-            float innerX = x + g[0] * 0.72f;
-            drawList(c, p, kid, innerX, base, size, color);
-            float barY = base - needTop;
-            float right = innerX + in[0] + size * 0.04f;
+            float ink = inkTop(kid, p, size);
+            // 模仿字体里的 √：左上短横 → 斜向右下到最低点 → 斜向右上到横线高度 → 横线盖住被开方数。
+            // 整条是一条 Path 一笔画完，笔宽统一、拐角圆接，勾和横线自然连在一起。
+            float barH = Math.max(ink + size * 0.10f, size * 0.62f);
+            float barY = base - barH;
+            float tickY = Math.min(base - size * 0.10f, barY + size * 0.16f);
+            float botY = base + size * 0.10f;
+            float x0 = x + size * 0.02f;      // 短横左端
+            float x1 = x + size * 0.20f;      // 短横右端
+            float x2 = x + size * 0.32f;      // 最低点
+            float x3 = x + size * 0.50f;      // 斜升到横线的位置
+            float innerX = x + size * 0.52f;  // 被开方数起点
+            float right = innerX + in[0] + size * 0.03f;
+            Path rad = new Path();
+            rad.moveTo(x0, tickY);
+            rad.lineTo(x1, tickY);
+            rad.lineTo(x2, botY);
+            rad.lineTo(x3, barY);
+            rad.lineTo(right, barY);
+            Paint.Style oldStyle = p.getStyle();
+            Paint.Cap oldCap = p.getStrokeCap();
+            Paint.Join oldJoin = p.getStrokeJoin();
             p.setStyle(Paint.Style.STROKE);
             p.setStrokeCap(Paint.Cap.ROUND);
-            p.setStrokeWidth(Math.max(1.2f, size * 0.055f));
+            p.setStrokeJoin(Paint.Join.ROUND);
+            p.setStrokeWidth(Math.max(1.3f, size * 0.055f));
             p.setColor(color);
-            c.drawLine(x + g[0] * 0.52f, barY, right, barY, p);
-            p.setStyle(Paint.Style.FILL);
-            p.setStrokeCap(Paint.Cap.BUTT);
+            c.drawPath(rad, p);
+            p.setStyle(oldStyle);
+            p.setStrokeCap(oldCap);
+            p.setStrokeJoin(oldJoin);
+            drawList(c, p, kid, innerX, base, size, color);
         } else if (t.type == 6) {
             drawList(c, p, t.kids.get(0), x, base, size, color);
             float[] in = measList(t.kids.get(0), p, size);
