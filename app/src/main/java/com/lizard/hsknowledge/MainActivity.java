@@ -462,6 +462,8 @@ public class MainActivity extends Activity {
     private boolean subjectDirty = true;
     private String lastQuery = null;
     private final boolean[] restoreNext = new boolean[SCREEN_COUNT];
+    /** 普通滚动页（非 SvList）离开时的位置：返回时用它复位。 */
+    private final int[] savedScrollY = new int[SCREEN_COUNT];
     private LinearLayout bootSplash;      // 启动开屏（数据就绪后淡出移除）
     private FrameLayout bootHost;         // 开屏与主界面共用的容器
     private boolean skipPageAnim = false; // 启动首屏不做淡入（开屏还盖着）
@@ -5540,23 +5542,63 @@ public class MainActivity extends Activity {
     }
 
     /** 正文页进入时定位：跳过顶部占位，让第一个内容贴最顶端。 */
+    /** 页面 → 它的滚动容器（只有普通 ScrollView 页；列表页由 SvList 自己管）。 */
+    private ScrollView scrollOf(int s) {
+        switch (s) {
+            case S_DETAIL: return detailScroll;
+            case S_EXTRA: return extraScroll;
+            case S_SETTINGS: return settingsScroll;
+            case S_AI_HUB: return aiHubScroll;
+            case S_AI_API_CFG: return aiApiScroll;
+            case S_AI_WEB_CFG: return aiWebCfgScroll;
+            case S_ABOUT: return aboutScroll;
+            case S_DISPLAY: return displayScroll;
+            case S_CHANGELOG: return changelogScroll;
+            case S_FEEDBACK: return feedbackScroll;
+            case S_PROFILE: return profScroll;
+            default: return null;
+        }
+    }
+
+    /** 每个滚动容器当前挂着的「定位监听器」：保证替换式单一目标，
+     *  多次调用只保留最新一个，不会挂多个监听器互相打架。 */
+    private final java.util.Map<ScrollView, android.view.ViewTreeObserver.OnPreDrawListener> scrollLoc =
+            new java.util.HashMap<ScrollView, android.view.ViewTreeObserver.OnPreDrawListener>();
+
     private void scrollToTop(final ScrollView sc) {
         scrollToY(sc, overDist());
     }
 
-    /** 滚到指定位置。内容分帧渲染时可能还没铺够高，scrollTo 会被钳制到半路，
-     *  所以没到位就下一帧再定一次（最多 5 次）；期间用户自己滑过（位置已超过目标）就不再动。 */
+    /** 滚到指定位置。关键：在「绘制前」(OnPreDraw) 就位，第一帧绘制前位置已对，
+     *  不会再出现「先露顶部占位、再跳到内容」的闪。内容分帧渲染时高度没铺够，scrollTo 会被
+     *  钳制，所以每帧绘制前再定一次，直到到位或放弃。替换式：同一容器多次调用只留最新目标。 */
     private void scrollToY(final ScrollView sc, final int y) {
-        final int[] tries = new int[]{0};
-        final Runnable r = new Runnable() {
-            public void run() {
-                sc.scrollTo(0, y);
-                View child = sc.getChildAt(0);
-                int range = (child == null ? 0 : child.getHeight()) - sc.getHeight();
-                if (tries[0]++ < 5 && y > 0 && sc.getScrollY() < y && range >= y) sc.post(this);
-            }
-        };
-        sc.post(r);
+        if (sc == null) return;
+        final int target = Math.max(0, y);
+        sc.scrollTo(0, target); // 先同步设一次；pre-draw 前即便被钳制也无妨
+        final android.view.ViewTreeObserver vto = sc.getViewTreeObserver();
+        // 移除上一次的监听器，保证单一目标
+        final android.view.ViewTreeObserver.OnPreDrawListener old = scrollLoc.remove(sc);
+        if (old != null) vto.removeOnPreDrawListener(old);
+        final android.view.ViewTreeObserver.OnPreDrawListener l =
+                new android.view.ViewTreeObserver.OnPreDrawListener() {
+                    int tries = 0;
+                    public boolean onPreDraw() {
+                        sc.scrollTo(0, target);
+                        final View child = sc.getChildAt(0);
+                        final int range = (child == null ? 0 : child.getHeight()) - sc.getHeight();
+                        // 到位、内容本就不够高（钳到底）、或试够次数就收手
+                        if (Math.abs(sc.getScrollY() - target) <= dp(2)
+                                || range < target || tries++ >= 12) {
+                            scrollLoc.remove(sc);
+                            vto.removeOnPreDrawListener(this);
+                            return true;
+                        }
+                        return true;
+                    }
+                };
+        scrollLoc.put(sc, l);
+        vto.addOnPreDrawListener(l);
     }
 
     /** 行数据源：只告诉列表「一共几行、第几行长什么样」，行由列表按需造，不一次全建。 */
@@ -5583,9 +5625,9 @@ public class MainActivity extends Activity {
         private boolean busy;
         private int gen, stepGen;
         int savedY = -1;
-        /** 待定位的位置：行是分帧加的，内容高度一变就要再定一次，直到用户自己滑。 */
+        /** 待定位的位置（定位中 / 已就位后清 -1）：行是分帧加的，内容高度一变就要再定一次，直到用户自己滑。 */
         private int pendingY = -1;
-        private boolean selfScroll;
+
         /** 续载时先让外部把下一批数据补进来（数据全集不是一次就有的列表用，如「今日新增」）。 */
         Runnable fill;
 
@@ -5611,7 +5653,8 @@ public class MainActivity extends Activity {
             // 只有「手指真的按下」才算用户接管，这时才放弃程序定位
             sc.setOnTouchListener(new View.OnTouchListener() {
                 public boolean onTouch(View v, MotionEvent e) {
-                    if (e.getActionMasked() == MotionEvent.ACTION_DOWN) pendingY = -1;
+                    // 只有「手指真的按下」才算用户接管，这时放弃程序定位
+                    if (e.getActionMasked() == MotionEvent.ACTION_DOWN) { pendingY = -1; stopLoc(); }
                     return false;                     // 不拦事件，滚动照常
                 }
             });
@@ -5716,30 +5759,52 @@ public class MainActivity extends Activity {
         /** 进入页面：跳过顶部占位，让第一个内容贴最顶端。 */
         void enter() {
             savedY = -1;
+            stopLoc();
             pendingY = overDist();
             locate();
         }
 
         /** 返回到本页：回到离开时的位置；没记过就按首次进入处理。 */
         void restore() {
+            stopLoc();
             if (savedY < 0) { enter(); return; }
             pendingY = savedY;
             locate();
         }
 
-        /** 定到 pendingY。行一批批加，内容高度一直在变，所以每批渲染完都会再调一次。 */
+        /** 当前挂着的「定位监听器」，单一目标，避免重复添加。 */
+        private android.view.ViewTreeObserver.OnPreDrawListener locL;
+
+        /** 定到 pendingY。行一批批加，内容高度一直在变；用一次性 OnPreDraw 把位置钉住：
+         *  绘制前就位（不闪），内容铺够前每帧再试，直到到位或放弃。 */
         private void locate() {
-            if (pendingY < 0) return;
+            if (pendingY < 0 || locL != null) return;
             final int y = pendingY;
-            sc.post(new Runnable() {
-                public void run() {
-                    selfScroll = true;
-                    sc.scrollTo(0, y);
-                    selfScroll = false;
-                    // 内容还没铺够时 scrollTo 会被钳制，这时不能算完成，等下一批行再补
-                    if (Math.abs(sc.getScrollY() - y) <= dp(2)) pendingY = -1;
+            final ScrollView fsc = sc;
+            locL = new android.view.ViewTreeObserver.OnPreDrawListener() {
+                int tries = 0;
+                public boolean onPreDraw() {
+                    fsc.scrollTo(0, y);
+                    if (Math.abs(fsc.getScrollY() - y) <= dp(2)) {
+                        pendingY = -1;          // 已就位，放弃程序定位，交还用户
+                        stopLoc();
+                    } else if (tries++ >= 12) {
+                        // 内容始终不够高（很短的列表）：放弃，停在能到的最高处
+                        pendingY = -1;
+                        stopLoc();
+                    }
+                    return true;
                 }
-            });
+            };
+            sc.getViewTreeObserver().addOnPreDrawListener(locL);
+        }
+
+        /** 停掉定位监听器（已就位、用户接管、或重定位前都会调）。 */
+        private void stopLoc() {
+            if (locL != null) {
+                sc.getViewTreeObserver().removeOnPreDrawListener(locL);
+                locL = null;
+            }
         }
     }
 
@@ -8798,6 +8863,8 @@ public class MainActivity extends Activity {
     private void showScreen(int s) {
         final int old = screen;
         SvList leaving = svOf(screen);
+        ScrollView leavingSc = scrollOf(screen);
+        if (leavingSc != null) savedScrollY[screen] = leavingSc.getScrollY();
         if (leaving != null) {
             leaving.savedY = leaving.sc.getScrollY();
             // 上一个页面若正好在放 slideNodeList 的位移动画，被 cancel 会停在半中间，
@@ -8970,6 +9037,12 @@ public class MainActivity extends Activity {
                 enter.restore();
             } else {
                 enter.enter();
+            }
+        } else {
+            ScrollView tsc = scrollOf(s);
+            if (tsc != null && restoreNext[s]) {
+                restoreNext[s] = false;
+                scrollToY(tsc, savedScrollY[s]);
             }
         }
 
