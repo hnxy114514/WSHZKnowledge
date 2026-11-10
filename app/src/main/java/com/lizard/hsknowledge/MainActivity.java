@@ -2640,11 +2640,17 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ---- 双指手势：轻点两下切裁切版/原版，长按 2 秒退出 ----
+    // ---- 双指手势：轻点两下切裁切版/原版，长按 2 秒退出（只用于圆屏手表） ----
+    /** 双指手势只在圆屏手表上启用：裁切版是为了避开圆屏四角被物理裁掉的区域，
+     *  手机方屏没有这回事，退出用系统返回键即可，不需要长按。 */
+    private boolean aiTwoGestureEnabled() {
+        return m != null && m.round;
+    }
+
     /** 进页面时把手势说明显示一会儿再淡出：第一次进来要看清楚，之后每次只闪 1 秒。
-     *  设置页里另有一份常驻说明。 */
+     *  设置里另有一份常驻说明。方屏（手机）没有双指手势，不弹这个浮层。 */
     private void showAiGestureHint() {
-        if (aiGestureHint == null) return;
+        if (aiGestureHint == null || !aiTwoGestureEnabled()) return;
         boolean first = !prefs.getBoolean("ai_hint_seen", false);
         if (first) prefs.edit().putBoolean("ai_hint_seen", true).apply();
         if (aiGestureHideTask != null) aiGestureHandler.removeCallbacks(aiGestureHideTask);
@@ -3220,7 +3226,9 @@ public class MainActivity extends Activity {
             }
         }), wrap());
         aiWebCfgInner.addView(aiHint("默认「自动」：按屏幕宽度把网页整体缩小，登录框、验证码和侧边栏都能完整显示。点一下可切「更小」或「原样」，切换不重载网页。"), wrap());
-        aiWebCfgInner.addView(aiHint("手势：双指轻点两下切「裁切版 / 原版」（四边避开圆屏 / 网页铺满整屏）；双指长按 2 秒退出问 AI。当前：" + (aiWebCrop ? "裁切版" : "原版") + "。网页页没有返回和刷新按钮，系统返回键照常可用；网页里的长按复制、自动填充已关掉。"), wrap());
+        aiWebCfgInner.addView(aiHint(aiTwoGestureEnabled()
+                ? "手势：双指轻点两下切「裁切版 / 原版」（四边避开圆屏 / 网页铺满整屏）；双指长按 2 秒退出问 AI。当前：" + (aiWebCrop ? "裁切版" : "原版") + "。网页页没有返回和刷新按钮，系统返回键照常可用；网页里的长按复制、自动填充已关掉。"
+                : "方屏不用裁切，网页铺满整屏；退出用系统返回键。网页里没有返回和刷新按钮，长按复制、自动填充已关掉。"), wrap());
         aiWebCfgInner.addView(toggleRow("隐藏网页里的下载 APP 入口", aiWebHideDl,
                 new View.OnClickListener() {
             public void onClick(View v) {
@@ -6550,9 +6558,9 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
-        // 问 AI 页的双指手势优先：从第二指按下到最后一指抬起期间事件全部由这里处理，
+        // 问 AI 页的双指手势优先（仅圆屏手表）：从第二指按下到最后一指抬起期间事件全部由这里处理，
         // 不传给网页，避免误触按钮，也避开 WebView 自带的双指缩放。
-        if (fullscreenView == null && (screen == S_AI_WEB || aiTwoActive)) {
+        if (fullscreenView == null && (aiTwoActive || (screen == S_AI_WEB && aiTwoGestureEnabled()))) {
             if (handleAiTwoFinger(ev)) return true;
         }
         // 网页页也保留右滑返回，但起手区和所需距离都收紧，
