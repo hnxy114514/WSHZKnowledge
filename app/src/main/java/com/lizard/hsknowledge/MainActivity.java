@@ -9060,14 +9060,24 @@ public class MainActivity extends Activity {
                 public void run() {
                     if (done[0] || screen != fn) return;
                     done[0] = true;
-                    if (oldS != fn && oldS >= 0 && oldS < screens.length) {
-                        screens[oldS].setVisibility(View.GONE);
-                    }
                     tv.setVisibility(View.VISIBLE);
-                    // 渲染完成后再显示 + 短淡入：内容已经就绪，淡入只是渐变，不会露占位/黑屏
+                    // 渲染完成后再显示：新页淡入 + 旧页淡出，时长拉长到 320ms。
+                    // 两页叠加渐变，过渡柔和不像「闪一下」，且谁在上层都不影响观感。
                     tv.setAlpha(0f);
-                    tv.animate().alpha(1f).setDuration(150)
+                    tv.animate().alpha(1f).setDuration(320)
                             .setInterpolator(new DecelerateInterpolator(1.6f)).start();
+                    if (oldS != fn && oldS >= 0 && oldS < screens.length) {
+                        final View ov = screens[oldS];
+                        ov.animate().cancel();
+                        ov.animate().alpha(0f).setDuration(320)
+                                .withEndAction(new Runnable() {
+                                    public void run() {
+                                        ov.setVisibility(View.GONE);
+                                        ov.setAlpha(1f);
+                                        ensureOverlaysOnTop();
+                                    }
+                                }).start();
+                    }
                 }
             };
             if (enter != null) {
@@ -9078,8 +9088,18 @@ public class MainActivity extends Activity {
             // 兜底：万一渲染回调链没触发（返回已渲染页、缓存命中等），也保证页面一定显示，
             // 绝不再出现「页面停在 INVISIBLE → 返回没反应 / 黑屏」。reveal 幂等，只显示一次。
             tv.postDelayed(reveal, 200);
-        } else if (enter != null) {
-            enter.onReady = null;   // 直接显示的页，清掉可能残留的回调
+        } else {
+            // 直接显示的场景（右滑预览已归位 / 启动首屏 / 问 AI）：必须把旧页收掉。
+            // 右滑时 preparePrev 把旧页 bringToFront 提到最上层，不隐藏就会盖住新页，
+            // 表现为「右滑到底又弹回原页、再滑一次退两级」。
+            if (old != s && old >= 0 && old < screens.length) {
+                View ov = screens[old];
+                ov.animate().cancel();
+                ov.setTranslationX(0f);
+                ov.setAlpha(1f);
+                ov.setVisibility(View.GONE);
+            }
+            if (enter != null) enter.onReady = null;   // 清掉可能残留的回调
         }
     }
 
