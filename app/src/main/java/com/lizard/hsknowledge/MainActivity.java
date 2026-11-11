@@ -10406,9 +10406,11 @@ public class MainActivity extends Activity {
     /** 就地重建整个界面（不销毁 Activity）：几毫秒完成，屏幕不会黑。 */
     private void rebuildUi(final int backTo) {
         buildUi();                  // 内部 setContentView(root)，旧树被替换
-        // 视图树整个重建了：主页列表也变成新建的空容器，必须把「待填充」标记打回 true，
-        // 否则返回主页时 showScreen 看到 subjectDirty=false 就不重绑，主页空列表 → 圆屏全黑。
+        // 视图树整个重建了：所有列表都变成新建的空容器。把各「懒加载」标记打回，
+        // 让对应列表下次进入时重新填充，否则会显示空列表（主页黑屏就是 subjectDirty 漏了）。
         subjectDirty = true;
+        lastQuery = null;           // 搜索列表：强制下次进搜索页重新刷新
+        mineDirty = true;           // 我的反馈列表：强制下次进入时重新拉取
         showScreen(backTo);         // 切页动画自带淡入，这里不再叠加第二层
     }
 
