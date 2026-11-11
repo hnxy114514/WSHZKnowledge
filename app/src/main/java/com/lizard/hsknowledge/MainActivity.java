@@ -5617,6 +5617,9 @@ public class MainActivity extends Activity {
         Runnable fill;
         /** 首屏渲染完 + 定位到位后回调一次（showScreen 用它来显示，做到「渲染完成后再打开」）。 */
         Runnable onReady;
+        /** 已渲染行的缓存：key = 数据标识（如当前层路径），返回上一层时复用、不重新渲染；只缓存首屏。 */
+        private final java.util.Map<String, List<View>> rowCache = new java.util.HashMap<String, List<View>>();
+        private String curKey = "";
 
         SvList() {
             sc = new OverScrollScrollView(MainActivity.this);
@@ -5653,12 +5656,42 @@ public class MainActivity extends Activity {
             box.addView(v, box.indexOfChild(botSp), wrapM());
         }
 
-        /** 换一批数据：清空已有行，从头分页渲染。gen 换了旧的续载帧会自己退出，不会串到新数据上。 */
-        void bind(RowSource s) {
+        void bind(RowSource s) { bind(null, s); }
+
+        /** 换一批数据：带缓存。key 相同直接复用已渲染的行（返回上一层很快、不闪），
+         *  不同才清空重渲；只缓存首屏，续载出来的行不缓存。 */
+        void bind(String key, RowSource s) {
+            final String k = key == null ? "" : key;
+            // 先把当前显示的行挪进缓存，供返回时复用
+            if (!curKey.isEmpty() && !rows.isEmpty()) {
+                List<View> snapshot = new ArrayList<View>(rows);
+                for (View v : rows) box.removeView(v);
+                rowCache.put(curKey, snapshot);
+                if (rowCache.size() > 6) {   // 最多缓存 6 层，防止内存涨
+                    String oldest = rowCache.keySet().iterator().next();
+                    rowCache.remove(oldest);
+                }
+            }
             clearRows();
             src = s;
             shown = 0;
             gen++;
+            curKey = k;
+
+            // 命中缓存：复用已渲染的行，直接显示（定位交给 showScreen 的 enter/restore）
+            List<View> cached = rowCache.remove(k);
+            if (cached != null && !cached.isEmpty()) {
+                for (View v : cached) {
+                    rows.add(v);
+                    box.addView(v, box.getChildCount() - 1, wrapM());
+                    shown++;
+                }
+                busy = false;
+                sc.post(new Runnable() { public void run() { fitSpacers(); } });
+                return;
+            }
+
+            // 未命中：分帧渲染首屏
             want = Math.min(s == null ? 0 : s.size(), first);
             if (want > 0) {
                 stepGen = gen;
@@ -5666,14 +5699,13 @@ public class MainActivity extends Activity {
                 sc.post(step);
             } else {
                 busy = false;
+                sc.post(new Runnable() {
+                    public void run() {
+                        fitSpacers();
+                        fireReady();
+                    }
+                });
             }
-            // 空结果也要收一次占位（没有行就不会走 step），否则内容孤零零停在屏幕中间
-            sc.post(new Runnable() {
-                public void run() {
-                    fitSpacers();
-                    fireReady();
-                }
-            });
         }
 
         private void start(int target) {
@@ -6882,7 +6914,7 @@ public class MainActivity extends Activity {
                 if (subtreeMatches(n, q)) shownNodes.add(n);
             }
         }
-        nodeList.bind(new RowSource() {
+        nodeList.bind(currentPath() + "|" + q, new RowSource() {
             public int size() { return shownNodes.size(); }
             public View make(final int i) { return nodeRow(shownNodes.get(i)); }
         });
