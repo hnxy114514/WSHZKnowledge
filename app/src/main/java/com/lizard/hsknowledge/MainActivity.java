@@ -5615,6 +5615,8 @@ public class MainActivity extends Activity {
         private boolean selfScroll;
         /** 续载时先让外部把下一批数据补进来（数据全集不是一次就有的列表用，如「今日新增」）。 */
         Runnable fill;
+        /** 首屏渲染完 + 定位到位后回调一次（showScreen 用它来显示，做到「渲染完成后再打开」）。 */
+        Runnable onReady;
 
         SvList() {
             sc = new OverScrollScrollView(MainActivity.this);
@@ -5666,7 +5668,12 @@ public class MainActivity extends Activity {
                 busy = false;
             }
             // 空结果也要收一次占位（没有行就不会走 step），否则内容孤零零停在屏幕中间
-            sc.post(new Runnable() { public void run() { fitSpacers(); } });
+            sc.post(new Runnable() {
+                public void run() {
+                    fitSpacers();
+                    fireReady();
+                }
+            });
         }
 
         private void start(int target) {
@@ -5707,6 +5714,7 @@ public class MainActivity extends Activity {
                             fitSpacers();
                             locate();                 // 内容变高了，补一次定位
                             if (nearEnd()) more();   // 一批加完时人还停在底部，接着补
+                            sc.post(new Runnable() { public void run() { fireReady(); } });
                         }
                     });
                 }
@@ -5764,9 +5772,21 @@ public class MainActivity extends Activity {
                     sc.scrollTo(0, y);
                     selfScroll = false;
                     // 内容还没铺够时 scrollTo 会被钳制，这时不能算完成，等下一批行再补
-                    if (Math.abs(sc.getScrollY() - y) <= dp(2)) pendingY = -1;
+                    if (Math.abs(sc.getScrollY() - y) <= dp(2)) {
+                        pendingY = -1;
+                        fireReady();
+                    }
                 }
             });
+        }
+
+        /** 通知外部「本列表首屏已渲染完、可以显示了」。取走即清，重复调用无副作用。 */
+        private void fireReady() {
+            if (onReady != null) {
+                Runnable r = onReady;
+                onReady = null;
+                r.run();
+            }
         }
     }
 
@@ -6771,7 +6791,6 @@ public class MainActivity extends Activity {
         curNode = n;
         renderNodes();
         showScreen(S_NODE);
-        slideNodeList(1);
     }
 
     /** 从搜索/收藏/历史/今日跳进某个节点：把它的祖先链补进导航栈，返回时能一路退回来。 */
@@ -6793,7 +6812,6 @@ public class MainActivity extends Activity {
             openDetail(n.name, n.body, n.path(), back, n.img, n.extras, n.id);
         } else {
             showScreen(S_NODE);
-            slideNodeList(1);
         }
     }
 
@@ -6806,7 +6824,6 @@ public class MainActivity extends Activity {
         curNode = null;
         renderNodes();
         showScreen(S_NODE);
-        slideNodeList(1);
     }
 
     /** 返回上一级：用户自己点进的层逐层退；退到「从外部入口进来时的深度」就直接回那一页。 */
@@ -6818,7 +6835,6 @@ public class MainActivity extends Activity {
             renderNodes();
             restoreNext[S_NODE] = true;
             showScreen(S_NODE);
-            slideNodeList(-1);
             return true;
         }
         if (nodeEntryBack >= 0) {           // 从收藏/搜索/今日/历史进来：一次返回就回那一页
@@ -6850,20 +6866,6 @@ public class MainActivity extends Activity {
     private void refreshNodes() {
         if (screen != S_NODE) return;   // 搜索框只在节点页生效
         bindNodes();
-    }
-
-    /** 节点页内部换层（进下一级 / 退回上一级）时的轻动画：列表跟手方向轻微滑入，
-     *  让人一眼看出是往里进还是往外退。dir = 1 进、-1 退。 */
-    private void slideNodeList(int dir) {
-        if (nodeList == null || nodeList.sc == null) return;
-        View v = nodeList.sc;
-        v.animate().cancel();
-        v.setTranslationX(dir * dp(7));
-        v.setAlpha(0.55f);
-        v.animate().translationX(0f).alpha(1f)
-                .setDuration(150)
-                .setInterpolator(new DecelerateInterpolator(1.6f))
-                .start();
     }
 
     /** 真正把当前层的节点绑到列表；renderNodes 与 refreshNodes 共用。 */
@@ -8827,8 +8829,7 @@ public class MainActivity extends Activity {
         SvList leaving = svOf(screen);
         if (leaving != null) {
             leaving.savedY = leaving.sc.getScrollY();
-            // 上一个页面若正好在放 slideNodeList 的位移动画，被 cancel 会停在半中间，
-            // 这里统一归位，免得下次进来列表偏着。
+            // 统一归位：防御性地清掉可能残留的位移/透明度。
             leaving.sc.setTranslationX(0f);
             leaving.sc.setAlpha(1f);
         }
@@ -8846,7 +8847,7 @@ public class MainActivity extends Activity {
         boolean shown = target.getVisibility() == View.VISIBLE && target.getAlpha() > 0.95f
                 && Math.abs(target.getTranslationX()) < dp(4);
         for (int i = 0; i < screens.length; i++) {
-            if (i == s) continue;
+            if (i == s || i == old) continue;   // 旧页面先留着，等新页渲染完成再收起
             screens[i].animate().cancel();
             screens[i].setVisibility(View.GONE);
             screens[i].setTranslationX(0f);
@@ -8854,32 +8855,25 @@ public class MainActivity extends Activity {
             screens[i].setAlpha(1f);
         }
         target.animate().cancel();
-        target.setVisibility(View.VISIBLE);
-        // 动画的起点状态先摆好，但**不在这里启动**：这一页的内容（列表绑定、详情卡片重建）
-        // 是在下面才渲染的，渲染期间如果已经可见，会露出「空页面 → 内容突然出现」的闪屏。
-        // 所以先设成全透明（alpha 0，用户看不到中间态），等本帧渲染完、下一帧再淡入。
-        // 问 AI 这一屏里有网页视图：不能在 alpha 0 的淡入层里初始化网页，
-        // 否则首帧绘制丢失，淡入结束后就是一片黑。这一屏直接满不透明地显示。
-        boolean animate = !shown && !skipPageAnim && s != S_AI_WEB;
+        // 打开/返回页面：先把目标页渲染完（动态加载的渲染完屏幕可见部分）+ 定位好，再显示，
+        // 中间不露占位也不黑屏。切页的淡入 / 位移动画都去掉；右滑返回的跟手动画不在这里、不受影响。
+        // 需要「渲染后再显示」：正向进入、返回、同页换层（内容重建）。
+        // 直接显示的例外：启动首屏（开屏盖着）、右滑返回已归位（shown）、问 AI 网页页（透明层会丢首帧）。
+        boolean needReveal = !shown && !skipPageAnim && s != S_AI_WEB;
+        if (s == old && !skipPageAnim && s != S_AI_WEB) needReveal = true;   // 同页换层也重建
         skipPageAnim = false;
-        float dx = 0f, dy = 0f;
-        if (shown) {
-            // 已经在位（例如右滑返回时上一页已跟手归位），别再动它，免得跳一下
+        if (needReveal) {
+            // 先隐藏（不绘制、不占交互），下面渲染 + 定位完成后在末尾 reveal 显示
             target.setTranslationX(0f);
             target.setTranslationY(0f);
             target.setAlpha(1f);
-        } else if (!animate) {
-            // 启动首屏：开屏还盖在上面，这里必须直接满不透明，不能再淡入
-            target.setTranslationX(0f);
-            target.setTranslationY(0f);
-            target.setAlpha(1f);
+            target.setVisibility(View.INVISIBLE);
         } else {
-            int dir = (old == s) ? 0 : (pageDepth(s) - pageDepth(old));
-            dx = dir > 0 ? dp(12) : (dir < 0 ? -dp(12) : 0f);
-            dy = (dir == 0) ? dp(7) : 0f;
-            target.setTranslationX(dx);
-            target.setTranslationY(dy);
-            target.setAlpha(0f);
+            // shown（右滑返回已归位）或启动首屏或问 AI：直接显示
+            target.setTranslationX(0f);
+            target.setTranslationY(0f);
+            target.setAlpha(1f);
+            target.setVisibility(View.VISIBLE);
         }
 
         if (s == S_SUBJECT) {
@@ -9010,30 +9004,27 @@ public class MainActivity extends Activity {
             }
         }
 
-        // 内容、滚动位置都就绪了，下一帧再淡入：中间不会有一帧「空白页」被看见。
-        if (animate) {
+        // 渲染 + 定位都就绪后再显示：正文页 scrollToTop 已 post 排队，这里再 post 必然排在定位之后；
+        // 列表页是分帧渲染，等首屏渲染完 + 定位到位（SvList.onReady 回调）再显示。
+        if (needReveal) {
             final View tv = target;
             final int fn = s;
-            tv.post(new Runnable() {
+            final int oldS = old;
+            final Runnable reveal = new Runnable() {
                 public void run() {
-                    // 这一帧里用户可能又点走了：目标已不是这一页就别再让它淡入
-                    if (screen != fn || tv.getVisibility() != View.VISIBLE) return;
-                    tv.animate().cancel();
-                    tv.animate().translationX(0f).translationY(0f).alpha(1f)
-                            .setDuration(185)
-                            .setInterpolator(new DecelerateInterpolator(1.6f))
-                            .start();
+                    if (screen != fn) return;
+                    if (oldS != fn && oldS >= 0 && oldS < screens.length) {
+                        screens[oldS].setVisibility(View.GONE);
+                    }
+                    tv.setVisibility(View.VISIBLE);
                 }
-            });
+            };
+            if (enter != null) {
+                enter.onReady = reveal;
+            } else {
+                tv.post(reveal);
+            }
         }
-    }
-
-    /** 页面在导航里的深浅：用来决定切页动画往哪个方向滑。 */
-    private static int pageDepth(int s) {
-        if (s == S_SUBJECT) return 0;
-        if (s == S_FAV_SUB || s == S_DETAIL || s == S_DAILY || s == S_SENT || s == S_AI_HUB) return 2;
-        if (s == S_EXTRA || s == S_AI_API_CFG || s == S_AI_WEB_CFG) return 3;
-        return 1;
     }
 
     private SvList svOf(int s) {
