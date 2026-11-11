@@ -5794,9 +5794,14 @@ public class MainActivity extends Activity {
             locate();
         }
 
-        /** 返回到本页：回到离开时的位置；没记过就保持当前滚动位置（进详情返回时靠 GONE 已保留位置）。 */
+        /** 返回到本页：回到离开时的位置；没记过就保持当前滚动位置（内容已在，直接就绪显示）。 */
         void restore() {
-            if (savedY < 0) return;
+            if (savedY < 0) {
+                // 返回到「已经渲染过、不会重新 bind」的列表页：没有渲染回调，必须自己就绪，
+                // 否则 showScreen 把页面设成 INVISIBLE 后永远没人显示 → 没反应 / 黑屏。
+                sc.post(new Runnable() { public void run() { fireReady(); } });
+                return;
+            }
             pendingY = savedY;
             locate();
         }
@@ -5814,6 +5819,8 @@ public class MainActivity extends Activity {
                     if (Math.abs(sc.getScrollY() - y) <= dp(2)) {
                         pendingY = -1;
                         fireReady();
+                    } else if (!busy) {
+                        fireReady();   // 已渲染完却还是定位不到（内容不足一屏）也要就绪，别一直等
                     }
                 }
             });
@@ -9048,9 +9055,11 @@ public class MainActivity extends Activity {
             final View tv = target;
             final int fn = s;
             final int oldS = old;
+            final boolean[] done = new boolean[]{false};
             final Runnable reveal = new Runnable() {
                 public void run() {
-                    if (screen != fn) return;
+                    if (done[0] || screen != fn) return;
+                    done[0] = true;
                     if (oldS != fn && oldS >= 0 && oldS < screens.length) {
                         screens[oldS].setVisibility(View.GONE);
                     }
@@ -9066,6 +9075,11 @@ public class MainActivity extends Activity {
             } else {
                 tv.post(reveal);
             }
+            // 兜底：万一渲染回调链没触发（返回已渲染页、缓存命中等），也保证页面一定显示，
+            // 绝不再出现「页面停在 INVISIBLE → 返回没反应 / 黑屏」。reveal 幂等，只显示一次。
+            tv.postDelayed(reveal, 200);
+        } else if (enter != null) {
+            enter.onReady = null;   // 直接显示的页，清掉可能残留的回调
         }
     }
 
