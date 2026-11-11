@@ -5617,8 +5617,12 @@ public class MainActivity extends Activity {
         Runnable fill;
         /** 首屏渲染完 + 定位到位后回调一次（showScreen 用它来显示，做到「渲染完成后再打开」）。 */
         Runnable onReady;
-        /** 已渲染行的缓存：key = 数据标识（如当前层路径），返回上一层时复用、不重新渲染；只缓存首屏。 */
-        private final java.util.Map<String, List<View>> rowCache = new java.util.HashMap<String, List<View>>();
+        /** 已渲染行 + 滚动位置的缓存：key = 数据标识（如当前层路径），返回上一层时复用、直接定位回去。 */
+        private class RowCache {
+            final List<View> rows = new ArrayList<View>();
+            int scrollY = -1;
+        }
+        private final java.util.Map<String, RowCache> rowCache = new java.util.HashMap<String, RowCache>();
         private String curKey = "";
 
         SvList() {
@@ -5658,15 +5662,17 @@ public class MainActivity extends Activity {
 
         void bind(RowSource s) { bind(null, s); }
 
-        /** 换一批数据：带缓存。key 相同直接复用已渲染的行（返回上一层很快、不闪），
+        /** 换一批数据：带缓存。key 相同直接复用已渲染的行 + 离开时的滚动位置（返回上一层快、定位正确），
          *  不同才清空重渲；只缓存首屏，续载出来的行不缓存。 */
         void bind(String key, RowSource s) {
             final String k = key == null ? "" : key;
-            // 先把当前显示的行挪进缓存，供返回时复用
+            // 先把当前显示的行和滚动位置挪进缓存，供返回时复用
             if (!curKey.isEmpty() && !rows.isEmpty()) {
-                List<View> snapshot = new ArrayList<View>(rows);
+                RowCache c = new RowCache();
+                c.rows.addAll(rows);
+                c.scrollY = sc.getScrollY();
                 for (View v : rows) box.removeView(v);
-                rowCache.put(curKey, snapshot);
+                rowCache.put(curKey, c);
                 if (rowCache.size() > 6) {   // 最多缓存 6 层，防止内存涨
                     String oldest = rowCache.keySet().iterator().next();
                     rowCache.remove(oldest);
@@ -5678,20 +5684,22 @@ public class MainActivity extends Activity {
             gen++;
             curKey = k;
 
-            // 命中缓存：复用已渲染的行，直接显示（定位交给 showScreen 的 enter/restore）
-            List<View> cached = rowCache.remove(k);
-            if (cached != null && !cached.isEmpty()) {
-                for (View v : cached) {
+            // 命中缓存：复用已渲染的行，并记下该层的离开位置（restore 用）
+            RowCache hit = rowCache.remove(k);
+            if (hit != null && !hit.rows.isEmpty()) {
+                for (View v : hit.rows) {
                     rows.add(v);
                     box.addView(v, box.getChildCount() - 1, wrapM());
                     shown++;
                 }
+                savedY = hit.scrollY;
                 busy = false;
                 sc.post(new Runnable() { public void run() { fitSpacers(); } });
                 return;
             }
 
-            // 未命中：分帧渲染首屏
+            // 未命中：新层，分帧渲染首屏
+            savedY = -1;
             want = Math.min(s == null ? 0 : s.size(), first);
             if (want > 0) {
                 stepGen = gen;
@@ -5782,14 +5790,13 @@ public class MainActivity extends Activity {
 
         /** 进入页面：跳过顶部占位，让第一个内容贴最顶端。 */
         void enter() {
-            savedY = -1;
             pendingY = overDist();
             locate();
         }
 
-        /** 返回到本页：回到离开时的位置；没记过就按首次进入处理。 */
+        /** 返回到本页：回到离开时的位置；没记过就保持当前滚动位置（进详情返回时靠 GONE 已保留位置）。 */
         void restore() {
-            if (savedY < 0) { enter(); return; }
+            if (savedY < 0) return;
             pendingY = savedY;
             locate();
         }
@@ -8860,7 +8867,6 @@ public class MainActivity extends Activity {
         final int old = screen;
         SvList leaving = svOf(screen);
         if (leaving != null) {
-            leaving.savedY = leaving.sc.getScrollY();
             // 统一归位：防御性地清掉可能残留的位移/透明度。
             leaving.sc.setTranslationX(0f);
             leaving.sc.setAlpha(1f);
@@ -9049,6 +9055,10 @@ public class MainActivity extends Activity {
                         screens[oldS].setVisibility(View.GONE);
                     }
                     tv.setVisibility(View.VISIBLE);
+                    // 渲染完成后再显示 + 短淡入：内容已经就绪，淡入只是渐变，不会露占位/黑屏
+                    tv.setAlpha(0f);
+                    tv.animate().alpha(1f).setDuration(150)
+                            .setInterpolator(new DecelerateInterpolator(1.6f)).start();
                 }
             };
             if (enter != null) {
