@@ -294,6 +294,8 @@ public class MainActivity extends Activity {
     private final java.util.Map<ChatMsg, TextView> chatBodies = new java.util.LinkedHashMap<ChatMsg, TextView>();
     private final java.util.Map<ChatMsg, TextView> chatReasonViews = new java.util.LinkedHashMap<ChatMsg, TextView>();
     private final java.util.Map<ChatMsg, TextView> chatFoldTips = new java.util.LinkedHashMap<ChatMsg, TextView>();
+    /** 每条回答底部的「相关知识点」区块，折叠时一起收起。 */
+    private final java.util.Map<ChatMsg, View> chatRelatedBoxes = new java.util.LinkedHashMap<ChatMsg, View>();
     /** 开场白：除了「简短」，重点是把公式写法固定下来——App 只能画它认识的结构，
      *  所以要在系统提示里告诉模型怎么写分式、根号、上下标，再交给 applyMarkup 渲染。 */
     private static final String CHAT_SYSTEM_PROMPT =
@@ -307,6 +309,9 @@ public class MainActivity extends Activity {
             + "回答里如果涉及本软件里的知识点，用 【知识:标题】 标注：标题写知识点的完整名称"
             + "（如「基本不等式（均值不等式）」，前面有编号可以省略），一次最多标 3 处；"
             + "应用会把它显示成可点开跳转的下划线；这条只在 API 模式生效。\n"
+            + "回答的最后另起一行，只写一行关键词：形如 【相关:等比数列|数列求和|前n项和】，"
+            + "给 2~6 个最能概括本题考点的词，每个 2~6 个字，用竖线分隔，不要编号、不要解释、不要加标题。"
+            + "这一行应用会隐藏掉，只用来匹配本软件里的知识点，写错或省略不影响正文。\n"
             + "列表用「•」开头，不要用 - 或 * 做项目符号，公式单独成行时前面也不要加任何符号"
             + "（横杠贴在公式前会被看成负号）；可以用 **文字** 强调重点；"
             + "不要用 Markdown 表格、代码块和标题符号。";
@@ -339,6 +344,8 @@ public class MainActivity extends Activity {
         /** 正文渲染结果的缓存：进页面、切开关时不用再解析一遍公式。 */
         CharSequence bodySpan;
         String bodyKey;
+        /** 这条回答匹配到的相关知识点（答完后算一次，渲染直接复用）。 */
+        List<Node> related;
         ChatMsg(String r) { role = r; }
     }
     /** 从哪个页面点进来的：返回时原路退回，而不是一律回主页。 */
@@ -4403,6 +4410,7 @@ public class MainActivity extends Activity {
         chatBodies.clear();
         chatReasonViews.clear();
         chatFoldTips.clear();
+        chatRelatedBoxes.clear();
         aiChatInner.removeAllViews();
         aiChatInner.addView(chatTopBar(), wrapM());
         if (aiChatModelBtn != null) {
@@ -4572,6 +4580,8 @@ public class MainActivity extends Activity {
         }
         TextView tip = chatFoldTips.get(msg);
         if (tip != null) tip.setVisibility(msg.folded ? View.VISIBLE : View.GONE);
+        View rel = chatRelatedBoxes.get(msg);
+        if (rel != null) rel.setVisibility(msg.folded ? View.GONE : View.VISIBLE);
     }
 
     /** 相邻的知识点标记之间补一个顿号：模型常写成【知识:A】【知识:B】，
@@ -4583,9 +4593,10 @@ public class MainActivity extends Activity {
         return out;
     }
 
-    /** 标题归一化的缓存：一次渲染要对上千个标题做正则，缓存下来省很多时间。 */
-    private static final java.util.HashMap<String, String> normCache =
-            new java.util.HashMap<String, String>();
+    /** 标题归一化的缓存：一次渲染要对上千个标题做正则，缓存下来省很多时间。
+     *  用 ConcurrentHashMap：答完在后代线程算相关知识点时也会写它，普通 HashMap 并发写会坏。 */
+    private static final java.util.concurrent.ConcurrentHashMap<String, String> normCache =
+            new java.util.concurrent.ConcurrentHashMap<String, String>();
 
     /** 去掉编号、括号注解、空白和「的」，只留主干用来比对标题。 */
     private static String normTitle(String s) {
@@ -4639,6 +4650,107 @@ public class MainActivity extends Activity {
         return null;
     }
 
+    /** 回答末尾的关键词行标记：模型按 system prompt 输出「【相关:a|b|c】」，应用解析后隐藏。 */
+    private static final String REL_TAG = "【相关";
+    /** 一条回答最多展示几个相关知识点。 */
+    private static final int REL_LIMIT = 3;
+    /** 太泛的关键词：几乎每科都有，拿它匹配会命中一堆不相干的标题。 */
+    private static final String[] REL_STOP = {
+            "公式", "方法", "定义", "性质", "概念", "原理", "结论", "应用",
+            "计算", "求解", "问题", "题目", "考点", "知识点", "内容", "区别", "关系"
+    };
+
+    private static boolean isGenericKey(String k) {
+        if (k == null) return true;
+        String t = k.trim();
+        if (t.length() < 2) return true;                 // 单字必泛
+        for (String s : REL_STOP) if (s.equals(t)) return true;
+        return false;
+    }
+
+    /** 把正文末尾的【相关:…】整行剔掉（流式输出到一半时连半截一起藏住，别让用户看到残标签）。 */
+    private static String stripRelatedTag(String text) {
+        if (text == null) return "";
+        int i = text.lastIndexOf(REL_TAG);
+        if (i < 0) return text;
+        int end = text.indexOf('】', i);
+        if (end < 0) return text.substring(0, i);      // 还没写完：先藏掉
+        return (text.substring(0, i) + text.substring(end + 1)).trim();
+    }
+
+    /** 取出【相关:…】里的关键词，最多 6 个、每个 2~12 字（太短太泛，太长基本匹配不到）。 */
+    private static List<String> parseRelatedKeys(String text) {
+        List<String> out = new ArrayList<String>();
+        if (text == null) return out;
+        int i = text.lastIndexOf(REL_TAG);
+        if (i < 0) return out;
+        int end = text.indexOf('】', i);
+        if (end < 0) return out;
+        String inner = text.substring(i + REL_TAG.length(), end)
+                .replace("：", "").replace(":", "").trim();
+        for (String p : inner.split("[|｜/、,，]")) {
+            String k = p.trim();
+            if (k.length() >= 2 && k.length() <= 12 && !isGenericKey(k) && !out.contains(k)) out.add(k);
+            if (out.size() >= 6) break;
+        }
+        return out;
+    }
+
+    /** 按关键词重合度挑最相关的知识点：多个词命中同一个节点会累加分数，分组降权，取前 limit 个。 */
+    private List<Node> rankKnowledge(List<String> keys, int limit) {
+        if (keys == null || keys.isEmpty() || limit <= 0) return new ArrayList<Node>();
+        final java.util.HashMap<Node, Integer> score = new java.util.HashMap<Node, Integer>();
+        for (String k : keys) {
+            for (Node n : allHits) {
+                int sc = kbScore(k, n.name, false);
+                if (sc > 0) {
+                    Integer old = score.get(n);
+                    score.put(n, (old == null ? 0 : old) + sc);
+                }
+            }
+            for (Node n : allGroups) {
+                int sc = kbScore(k, n.name, true);
+                if (sc > 0) {
+                    Integer old = score.get(n);
+                    // 分组是容器，同分时让叶子排在前面
+                    score.put(n, (old == null ? 0 : old) + sc - 120);
+                }
+            }
+        }
+        List<Node> list = new ArrayList<Node>(score.keySet());
+        java.util.Collections.sort(list, new java.util.Comparator<Node>() {
+            public int compare(Node a, Node b) {
+                int sa = score.get(a), sb = score.get(b);
+                if (sa != sb) return sb - sa;
+                return a.name == null ? 0 : a.name.compareTo(b.name == null ? "" : b.name);
+            }
+        });
+        if (list.size() > limit) return new ArrayList<Node>(list.subList(0, limit));
+        return list;
+    }
+
+    /** 没有关键词行时的兜底：直接看哪些知识点标题出现在「提问 + 回答」里，越长的标题越可信。 */
+    private List<Node> rankKnowledgeByText(String text, int limit) {
+        List<Node> out = new ArrayList<Node>();
+        if (text == null || text.length() < 4 || limit <= 0) return out;
+        List<Node> found = new ArrayList<Node>();
+        for (Node n : allHits) {
+            String name = n.name == null ? "" : n.name.trim();
+            if (name.length() < 3) continue;                 // 两字标题太容易误中（如「集合」）
+            if (text.contains(name)) found.add(n);
+        }
+        if (found.isEmpty()) return out;
+        java.util.Collections.sort(found, new java.util.Comparator<Node>() {
+            public int compare(Node a, Node b) {
+                int la = a.name == null ? 0 : a.name.length();
+                int lb = b.name == null ? 0 : b.name.length();
+                return lb - la;                              // 长标题优先：更具体
+            }
+        });
+        for (int i = 0; i < found.size() && i < limit; i++) out.add(found.get(i));
+        return out;
+    }
+
     /** 一条消息气泡：用户主色底、AI 卡片底；长按复制，出错时给「重试」。 */
     private View chatBubble(final ChatMsg msg) {
         final boolean user = "user".equals(msg.role);
@@ -4679,7 +4791,8 @@ public class MainActivity extends Activity {
         if (msg.err != null) text = msg.err;
         else if (msg.content.length() == 0) text = msg.streaming ? "…" : "（空回复）";
         else text = msg.content;
-        if (!user) text = spaceOutMarks(text);
+        // 【相关:…】这一行是给应用匹配知识点用的，不给用户看（流式写到一半时连半截一起藏住）
+        if (!user) text = spaceOutMarks(stripRelatedTag(text));
         // AI 的回复走知识点同一套渲染：\frac / \sqrt / ^{} / **重点** 都会被画出来；
         // 用户自己打的字保持原样，免得一个下划线就被当成下标。
         if (user) {
@@ -4754,6 +4867,38 @@ public class MainActivity extends Activity {
             tlp.topMargin = dp(3);
             box.addView(tip, tlp);
             chatFoldTips.put(msg, tip);
+        }
+
+        // 相关知识点：模型标过的 / 末尾关键词匹配到的 / 正文里出现的，最多 3 个，点一下跳过去。
+        // 折叠时一起收起，免得折叠了还占着几行。
+        if (!user && !msg.streaming && msg.err == null
+                && msg.related != null && !msg.related.isEmpty()) {
+            LinearLayout relBox = new LinearLayout(this);
+            relBox.setOrientation(LinearLayout.VERTICAL);
+            relBox.setVisibility(msg.folded ? View.GONE : View.VISIBLE);
+            TextView rt = new TextView(this);
+            rt.setText("相关知识点");
+            rt.setTextSize(Math.max(9f, m.subtitleSize - 3f));
+            rt.setTextColor(C_SUB);
+            relBox.addView(rt, wrap());
+            for (final Node n : msg.related) {
+                TextView row = new TextView(this);
+                row.setText("› " + n.name);
+                row.setTextSize(Math.max(9f, m.subtitleSize - 2f));
+                row.setTextColor(C_PRIMARY);
+                row.setPadding(dp(2), dp(3), dp(2), dp(3));
+                row.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) {
+                        vibrate();
+                        openNodeFrom(n, S_AI_CHAT);
+                    }
+                });
+                relBox.addView(row, wrap());
+            }
+            LinearLayout.LayoutParams rlp2 = wrap();
+            rlp2.topMargin = dp(6);
+            box.addView(relBox, rlp2);
+            chatRelatedBoxes.put(msg, relBox);
         }
 
         if (msg.truncated && !user && msg.err == null) {
@@ -5242,10 +5387,60 @@ public class MainActivity extends Activity {
         });
     }
 
+    /** 这条回答对应的提问（往前找最近一条带内容的 user 消息），兜底匹配用。 */
+    private String lastUserQuestion(ChatMsg msg) {
+        int i = chatMsgs.indexOf(msg);
+        for (int j = (i < 0 ? chatMsgs.size() : i) - 1; j >= 0; j--) {
+            ChatMsg m = chatMsgs.get(j);
+            if ("user".equals(m.role) && m.content != null && m.content.length() > 0) return m.content;
+        }
+        return "";
+    }
+
+    /** 答完之后算一次「相关知识点」，存到消息上，渲染时直接用（后台线程，不卡界面）。 */
+    private void computeRelated(final ChatMsg msg) {
+        if (msg == null || "user".equals(msg.role) || msg.err != null) return;
+        final String raw = msg.content == null ? "" : msg.content;
+        if (raw.length() < 4) return;
+        List<Node> rel = new ArrayList<Node>();
+
+        // ① 模型行内标过的【知识:标题】最可信，先放进来
+        int from = 0;
+        while (rel.size() < REL_LIMIT) {
+            int s0 = raw.indexOf("【知识", from);
+            if (s0 < 0) break;
+            int e0 = raw.indexOf("】", s0);
+            if (e0 < 0) break;
+            String inner = raw.substring(s0 + 3, e0).replace("：", "").replace(":", "").trim();
+            from = e0 + 1;
+            if (inner.length() == 0) continue;
+            Node n = findKnowledgeNode(inner);
+            if (n != null && !rel.contains(n)) rel.add(n);
+        }
+
+        // ② 末尾【相关:…】关键词，按重合度排
+        List<Node> ranked = rankKnowledge(parseRelatedKeys(raw), REL_LIMIT);
+        for (Node n : ranked) {
+            if (rel.size() >= REL_LIMIT) break;
+            if (!rel.contains(n)) rel.add(n);
+        }
+
+        // ③ 都没有关键词时兜底：看「提问 + 回答」里直接出现了哪些标题
+        if (rel.size() < REL_LIMIT) {
+            String text = lastUserQuestion(msg) + "\n" + stripRelatedTag(raw);
+            for (Node n : rankKnowledgeByText(text, REL_LIMIT)) {
+                if (rel.size() >= REL_LIMIT) break;
+                if (!rel.contains(n)) rel.add(n);
+            }
+        }
+        msg.related = rel;
+    }
+
     private void chatDone(final ChatMsg msg) {
         msg.streaming = false;
         chatBusy = false;
         chatStopFlag = false;
+        try { computeRelated(msg); } catch (Throwable ignored) { }
         runOnUiThread(new Runnable() {
             public void run() {
                 updateChatBar();
