@@ -1,5 +1,9 @@
 # 腕上知识汇总（WSHZKnowledge）
 
+> 信息更新时间：2026-11-11 21:40（v3.4.13 修 bug 后同步校对）
+> 校对时间：2026-11-11 21:40（对照当前代码逐节核对：屏幕数 23、切页显示时序、列表缓存与定位、右滑路径、`rebuildUi` 标记、发版脚本直连）
+> 这两个时间只用来**辅助**判断本文档是否可能过时；内容是否仍成立、某段是否适用于眼前问题，请以当前代码与实际运行为准，自己判断。
+
 面向手表（腕上穿戴设备）的高中九科知识点汇总 App。内置语文、数学、英语、物理、化学、生物、政治、历史、地理九门科目的知识清单与配图，支持行内数学公式排版（分数、根号、上下角标、向量可嵌套）与人工标注的重点高亮，并具备基于 GitHub Release 的 APK 覆盖更新。
 
 ---
@@ -42,10 +46,12 @@ WSHZKnowledge/
 │
 ├── cloud/
 │   ├── version.json                    更新兜底用的版本号（App 拉不到 GitHub API 时读它）
+│   ├── update.json                     云端更新包（构建时生成，App 侧兜底数据）
 │   └── thanks.json                     感谢名单的静态备份（API 全不通时 App 读它）
 ├── local/                             本地私密文件（凭据、keystore、备忘），已被 .gitignore 排除
 ├── scripts/build.sh                   无 Gradle 构建脚本（aapt2 + javac + d8 + apksigner）
 ├── scripts/release.py                 一键发布：构建 + 创建 Release + 上传 APK + 写 cloud/version.json + 刷新 cloud/thanks.json
+│                                      （curl 走 `--noproxy '*'` + `--resolve` 钉真实 IP 直连，绕过本机 hosts 劫持/坏代理）
 ├── 编号规则.md                         递归节点编号规则（日期段在最前 + 日期继承流程）
 ├── .gitignore                          排除签名密钥、产物、缓存、归档
 └── README.md                           本文件
@@ -408,7 +414,9 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
 - 公开数据的**读**请求（我的反馈列表、反馈评论）走 `readIssues()`：优先 `apiBase()`，再直连、
   再 `API_MIRRORS` 逐个回退——这些接口返回公开仓库内容，镜像忽略 token 也不会串号。
 - 探测结果出来后浮一个底部气泡「已连接服务器 · 直连 / 镜像域名」，淡入停留 1.8 秒自动移除，不拦截操作，也不弹任何界面。
-- 首启显示调节引导页时不弹气泡（避免盖住「完成」按钮）；点完成后 `recreate()` 会重跑一次，那时补上。
+- 首启显示调节引导页时不弹气泡（避免盖住「完成」按钮）。**注意**：点「完成」走的是
+  `applyDisplayChange(S_SETTINGS)` → `rebuildUi()` 就地重建，**不会重跑启动流程**，
+  所以这次启动不会再补弹气泡；源码里那句旧注释仍写着「recreate 会重跑」，按代码为准。
 - 手动重测：设置 → 其他 → 「重新连接服务器」（`startRouteProbe(true)`）。不沿用上次结果，全部候选重测一遍，
   下面那行实时显示「GitHub 接口：直连 / 镜像域名 / 未连通；文件与头像：…」，检测中显示「正在检测各条线路…」，
   成败都弹气泡（失败是「没连上服务器，稍后再试」）。网络切换后用它最省事。
@@ -508,8 +516,9 @@ enterApp()：buildUi() 建主界面（setContentView 换掉开屏）→ 定首�
 
 ### 界面骨架：22 个「屏幕」叠在一个 FrameLayout 里
 
-`buildUi()` 建一个 `root`（FrameLayout），往里 add 22 个 `newScreen()`（LinearLayout，位置 `fp()` 铺满），
-同一时刻只有一个 `VISIBLE`，切换就是「把旧的 GONE、新的 VISIBLE」——不是跳 Activity，所以很快、也没有转场黑屏。
+`buildUi()` 建一个 `root`（FrameLayout），往里 add 23 个 `newScreen()`（LinearLayout，位置 `fp()` 铺满），
+同一时刻只有一个 `VISIBLE`。切页不是跳 Activity，而是在 `showScreen()` 里把目标页先隐藏、渲染 + 定位完成后
+再淡入显示（见「打开 / 返回页面的过程」），这样中间不会露出空页面或黑底。
 
 屏幕常量与「第几个」强绑定，**顺序不能乱**：
 
@@ -537,8 +546,9 @@ enterApp()：buildUi() 建主界面（setContentView 换掉开屏）→ 定首�
 | 19 | S_AI_HUB | 问 AI 设置（模式开关 + 两个入口） | `buildAiHubScreen()` → `renderAiHub()` |
 | 20 | S_AI_API_CFG | API AI 设置 | `buildAiApiScreen()` → `renderAiApi()` |
 | 21 | S_AI_WEB_CFG | DeepSeek 网页版设置 | `buildAiWebCfgScreen()` → `renderAiWebCfg()` |
+| 22 | S_AI_CHAT | API AI 对话 | `buildAiChatScreen()` → `renderAiChat()` |
 
-`SCREEN_COUNT = 22`。五个地方必须同步改，漏一个就会错位或崩：
+`SCREEN_COUNT = 23`。五个地方必须同步改，漏一个就会错位或崩：
 ① 常量与 `SCREEN_COUNT`；② `showScreen()` 里的 `screens[]` 数组（**下标即常量值**）；
 ③ `screenView(s)` 的 switch；④ `currentScreenView(s)` 的 switch（右滑预览用）；
 ⑤ `backTarget()`（返回去哪）与 `showScreen()` 里的渲染分支。
@@ -546,7 +556,7 @@ enterApp()：buildUi() 建主界面（setContentView 换掉开屏）→ 定首�
 
 ### 加一屏的完整步骤
 
-1. 在常量后面加 `S_XXX = 22`，`SCREEN_COUNT` 改 23；
+1. 在常量后面加 `S_XXX = 23`，`SCREEN_COUNT` 改 24；
 2. `buildUi()` 里 `xxxScreen = newScreen(); ... root.addView(xxxScreen, fp());`；
 3. `screens[]` 数组末尾加 `xxxScreen`（顺序必须和常量值一致）；
 4. `screenView()` / `currentScreenView()` 各加一个 `case S_XXX:`；`svOf()` 只有列表页才需要加；
@@ -558,14 +568,23 @@ enterApp()：buildUi() 建主界面（setContentView 换掉开屏）→ 定首�
 不用 ListView/RecyclerView，全部是 `SvList`：**外层 `OverScrollScrollView` + 竖排 LinearLayout，一行就是一个普通 View**。
 
 - `addHead(view)` 把返回键、标题、搜索框放进滚动区顶部，**跟着内容一起滚**（不固定占位）。
-- `bind(RowSource)` 交给它一个「有多少行 + 第 i 行长什么样」的对象，它负责分页：
+- `bind(RowSource, key)` 交给它一个「有多少行 + 第 i 行长什么样」的对象，它负责分页：
   首屏 `first = 12` 行，滚到还剩约一屏续载 `page = 24` 行，**每帧只追加 `chunk = 6` 行**。
   参数是按手表定的：一屏五六行，12 行够铺两屏，6 行在 16ms 内画得完，滚动不掉帧。
+  - **层缓存**：`bind(key, src)` 按 key（层级路径 + 搜索词）缓存「已渲染的行 + 离开时的滚动位置」，
+    最多 6 层（`rowCache`）。返回上一层命中缓存就直接复用行、`restore()` 回原位置，不重新渲染、不回顶端。
+    只缓存首屏，续载出来的行不缓存。
+  - **同步首屏开关** `syncFirstRender`：右滑预览换层时置 true，本次 `bind` 一次性把首屏行铺满再露出预览，
+    否则预览会先空一帧再分帧加载（用户看到的「闪一下」）。正常进入仍走分帧，避免一次塞太多行掉帧。
+  - **就绪回调** `onReady` / `fireReady()`：首屏渲染完 + 定位到位才回调，`showScreen()` 用它来显示页面。
 - 行是「分批补」的列表（如今日新增）：`sv.fill = ...` 里补数据，`start()` 会先 fill 再渲染；
   **bind 之前要先 fill 一批**，否则 `RowSource.size()` 是 0，首次进来空白。
 - 搜索结果与今日新增受 `HIT_LIMIT = 400` 限制（一次最多 400 行），超了标题会注明。
-- `enter()` 进页面时跳过顶部占位把第一个内容贴顶；`restore()` 恢复上次滚动位置（`savedY`，只有「返回上一级」才恢复）。
+- `enter()` 进页面时跳过顶部占位把第一个内容贴顶；`restore()` 回 `savedY`（缓存里存的离开位置），
+  只有「返回上一级」才恢复，正向点进一律回默认位置。`savedY < 0` 时直接就绪、**不定位**（内容本就在位）。
 - 圆屏才有上下 25% 屏高的透明占位（`makeScrollSpacer()`），方屏不加；内容不满一屏时 `fitSpacers()` 自动收掉。
+- **定位一律 `sc.post()` 延迟滚动，绝不用 `OnPreDraw` / `OnGlobalLayout` 这类每帧监听器**：
+  圆屏（overDist≠0）上监听器会启动即崩，方屏 overDist=0 直接返回所以不崩——历史上 v3.4.2 / v3.4.4 两次闪退都是这个根子。
 
 ### 数据模型只有一个 Node
 
@@ -601,8 +620,11 @@ Node {
   `previewTarget()` 的 -1 判定、面包屑「首页 / 科目名」的清理、`openSubject()` 的重置都要跟着这套规则改。
 - 面包屑 `currentPath()` + `setPath()` 按栈动态拼，有几级几段，每段带 `pathSpan` 可点跳回那一层；
   最后一段灰字不可点。
-- 切页动画在 `showScreen()`：按 `pageDepth()` 差决定「从右进 / 从左退 / 同级上浮」，185ms 减速曲线；
-  节点页内部换层（S_NODE→S_NODE）用 `slideNodeList(±1)` 单独做轻动画。
+- 切页与显示时序在 `showScreen()`：**先把目标页渲染完、定位好，再显示**（详见「界面交互要点」的
+  「打开页面的过程」）。显示时新页淡入 + 旧页淡出，交叉渐变 320ms；右滑返回的跟手预览动画是独立的
+  另一套（`dispatchTouchEvent` / `preparePrev`），不在这里。问 AI 网页页（`S_AI_WEB`）跳过淡入，
+  直接满不透明显示（网页不能在透明层里初始化，否则首帧丢失、淡入结束一片黑）。
+  没有 `pageDepth()` / `slideNodeList()` 了——切页方向动画和节点页换层轻动画都已删除。
 
 ### 渲染：正文与重点高亮
 
@@ -662,9 +684,29 @@ Node {
 **不要用 `recreate()`**：那会把 Activity 整个销毁重建，窗口背景先露出开屏图、还要再走一遍启动流程，
 用户看到的就是「调完显示退出来闪一下黑屏」。
 
+`buildUi()` 会换掉整棵 View 树，**所有列表都变成新建的空容器**，所以 `rebuildUi()` 必须把懒加载标记
+打回去：`subjectDirty = true`、`lastQuery = null`、`mineDirty = true`——否则退出设置回主页时
+`subjectDirty` 还是 false，主页列表不重新填充，圆屏上就是整屏黑、滑动无效（v3.4.6 修过）。
+
 ---
 
 ## 界面交互要点
+
+### 打开 / 返回页面的过程（渲染完成再显示）
+
+单 Activity，所有页都是 `root` 里的子 View。打开或返回一页按这个顺序，目的是**绝不露出「空页面 → 内容突然出现」或顶部占位先闪一下**：
+
+1. `showScreen(s)` 先记下离开页的滚动位置，把目标页设 `INVISIBLE`（不绘制、不占交互），其余页收起但**旧页暂时留着**当背景。
+2. 渲染目标页内容（各页的 `renderXxx()` / `bind()`）；圆屏同时把滚动定位到「跳过顶部占位、内容贴顶」或返回时的离开位置。
+3. 定位走 `sc.post()` 延迟滚动；列表是分帧渲染的，等首屏铺满 + 定位到位后由 `SvList.fireReady()` 触发 `onReady` 回调。
+4. `reveal` 回调里才把目标页设 `VISIBLE`：新页淡入 + 旧页淡出，交叉 320ms，淡出结束把旧页 GONE。
+   `reveal` 幂等（只显示一次），且**带 `postDelayed(reveal, 200)` 兜底**——返回到「已渲染过、不重新 bind」的页时没有渲染回调，
+   没有这个兜底页面会永久停在 `INVISIBLE`（表现为返回没反应 / 黑屏，v3.4.11 修过）。
+5. 例外：启动首屏（开屏盖着）、右滑返回预览已归位（`shown` 成立）、问 AI 网页页 → 直接显示，不隐藏也不淡入。
+
+**右滑返回是另一条轻量路径**：`preparePrev()` 在拖动时就把要退回的那一页渲染好、摆在离开时的位置并露出预览；
+松手 `finishSwipe()` → `handleBack()` 前置 `swipeNavigating` 标志，让 `showScreen()` 走「只确认可见性、不重新 bind、
+不重新定位」的分支——**预览是什么样，退出后就停在什么样**，避免列表被清空重载或弹回顶端。
 
 - **圆屏滚动安全区**：圆屏页面无上下黑边（`newScreen` 上下 padding 归零，只留左右），滚动范围与安全区
   都由滚动容器自己承担；方屏不受影响。
@@ -677,7 +719,7 @@ Node {
     方屏 `overDist()=0`，不加占位。
   - **内容不足一屏时占位自动收掉**（`fitSpacers()`）：这时本来就滚不动，留着只会让顶部空一大块；
     续载把内容撑过一屏时同步补偿滚动位置，画面不会突然往下跳。
-  - **分页渲染**：首屏 30 行，滚到还剩约一屏时续载下一批 40 行，每帧只追加 15 行，滑动不顿；
+  - **分页渲染**：首屏 12 行，滚到还剩约一屏时续载下一批 24 行，每帧只追加 6 行，滑动不顿；
     「今日新增」这种数据不是一次到位的，由 `fill` 先补数据再渲染。命中再多一次也只渲染 400 行
     （`HIT_LIMIT`），再多会让手表吃不消，标题会注明「先列出前 400 条」。
   - **不能在外层 `newScreen` 上加安全区 padding**：外层 padding 固定、内容进不去，会永久留黑边（踩过坑）。
@@ -841,9 +883,14 @@ Node {
     以前这里一律按「回主页」预览，于是拖的时候看到主页、松手却跳到另一页（用户反馈：
     「先回到主页，然后再跳到上级页面」）。
   - 本页内换层没有现成的上一页可露：把当前画面拍成快照（`snapshot()`）顶在上面当「被拖走的页」，
-    底下直接 `renderNodes()` 渲染上一级；没滑够就恢复层级 + 重建列表 + 恢复滚动位置（`swipeSame` 分支）。
-  - 松手切页前，预览页必须先 `setTranslationX(0)` 并 `cancel()` 掉动画，这样 `showScreen()` 的 shown 判定
-    成立、直接当成「已在位」，不会再淡入闪一下。
+    底下渲染上一级。此时走 `syncFirstRender` 同步铺满首屏（不空一帧），并用层缓存里存的
+    「离开这一层的滚动位置」`restore()` 回去——不是 `enter()` 回顶端。
+    没滑够就恢复层级 + 重建列表 + 恢复滚动位置（`swipeSame` 分支，同样同步渲染首屏）。
+  - **渲染时清空搜索框会触发监听、导致列表被绑定两次**：`renderNodes()` 里 `itemSearchBox.setText("")`
+    要用 `nodeRefreshLocked` 锁住 `refreshNodes()`，否则第二次 `bind` 时缓存已被取走、
+    只能重新分帧加载（预览空白闪一下、位置也丢回顶端）。回弹还原搜索词时同样要锁住再 `bindNodes()` 一次。
+  - 松手切页前，预览页先 `setTranslationX(0)` 并 `cancel()` 掉动画；切页走 `swipeNavigating` 轻量路径，
+    不重新渲染、不重新定位，所以预览的位置就是最终位置。
   - **拖动字号/缩放滑块时右滑返回不介入**（`sliderTouching` 标志），避免调滑块调着调着退出页面。
 - **全屏看图时右滑不生效**，只能点左上角「‹ 关闭」（图内支持双指缩放、单指拖动、双击定点缩放）。
 - 个人主页：设置 → 「其他」里，未登录显示「登录 GitHub」，登录后显示圆形头像 + @昵称 + 真实名字；头像会缓存到本地，离线也能显示。
@@ -918,7 +965,7 @@ Node {
   点了才去看历史上最近的一批，标题同步改成「最近新增（MM-DD）· N 条」——
   **不能默认拿历史批次顶替当天**，否则日期永远是错的（曾经 29 号还挂着 28 号的内容）。
   `todayFallbackOn` 记着当前是不是在看历史批次，跨天进页面会强制回到「只看今天」。
-  列表分页渲染：首屏 30 行，滚到还剩约一屏时续载下一批 40 行，只往已有内容尾部追加、不重建整表。
+  列表分页渲染：首屏 12 行，滚到还剩约一屏时续载下一批 24 行，只往已有内容尾部追加、不重建整表。
 - **显示调节（设置 → 显示）**：正文字号、列表字号、标题 / 副标题字号、整体缩放四项。
   - **整体缩放滑块拖动过程中就有实时反馈**：`applyLiveScale()` 只把**预览卡片**按比例放大。
     不要去缩放整个根容器——那会让内容超出屏幕被裁、滑块自己变形、比例跟真正重排的结果对不上，看着很怪。
@@ -929,7 +976,8 @@ Node {
     （`titleSize` / `subtitleSize` / `backSize` / `secTagSize`，构造时已乘）与 `fsSp()` / `lsSp()`。
   - 新增任何文字都要用上面这几个入口，不能直接 `setTextSize(常量)`，否则又会出现「间距变大了、字没变」。
   - **改了缩放必须重建界面**：字号是 `Metrics` 的快照、控件尺寸在创建时量好，
-    光改变量不重建，界面看起来完全没变。统一走 `applyDisplayChange(backTo)`：保存 + `recreate()` + 回到指定页。
+    光改变量不重建，界面看起来完全没变。统一走 `applyDisplayChange(backTo)`：保存 + `rebuildUi(backTo)`
+    就地重建（**不是 `recreate()`**）+ 回到指定页；重建会重置 `subjectDirty` 等懒加载标记，主页才会重新填充。
   - 返回键（「‹ 返回设置」）也要走 `applyDisplayChange`，否则拖完直接返回，设置就白改了。
 - **科目顺序（设置里那排 ▲▼）**：`renderSettings()` 会**保住当前滚动位置**再重绘。
   以前末尾无条件 `scrollToTop()`，点一次上下箭头整页就弹回最上面，用户得重新往下滑才能接着调。
