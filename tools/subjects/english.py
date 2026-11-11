@@ -84,7 +84,13 @@ TREE = [
             {"name": '一般过去时与现在完成时的区别',
              "body": '一般过去时只强调动作发生在过去，与现在没有联系。\n现在完成时强调过去的动作对现在造成的影响或结果。\n**有明确过去时间状语（yesterday、last year、ago）用一般过去时**。\njust、already、yet、so far 等常用现在完成时。\nSince 引导时间状语从句时，主句用现在完成时。'},
             {"name": '将来时的表达方式',
-             "body": '一般将来时用 will + 动词原形，表示将来的动作或状态。\n**be going to 表示打算或根据迹象判断将要发生**。\nbe doing 可表示按计划安排将要发生的动作。\nbe to do 表示按计划、安排将要发生。\n一般现在时也可表示按时刻表将要发生的动作。'},
+             "body": """- **will do**：临时决定、单纯预测、承诺。
+- **be going to do**：已有打算，或根据眼前迹象判断（Look at those clouds. It's going to rain.）。
+- **be doing（现在进行时）**：已安排好的近期计划，多与时间状语连用。
+- **be to do**：按计划、规定、命令「应当」做。
+- **一般现在时**：按时刻表、日程表必然发生（The train leaves at 8.）。
+**区别考点在「临时 vs 事先」**：will 偏临时，be going to 偏事先打算。
+**条件、时间状语从句里用一般现在时表将来，不用 will**（if it rains tomorrow）。"""},
             {"name": '进行时态的用法',
              "body": '**现在进行时表示说话时正在进行的动作**。\n结构为 be + 现在分词。\n也可表示按计划将要发生的动作，如 I am leaving tomorrow。\n过去进行时表示过去某一时刻正在进行的动作。\n现在完成进行时表示从过去持续到现在的动作。'},
             {"name": '过去完成时',
@@ -491,7 +497,12 @@ while 引导的从句多用进行时；两个动作同时进行都用过去进�
             {"name": '演讲稿的写法',
              "body": "演讲稿开头要有称呼和问候语。\n如 Good morning, everyone。\n正文提出观点，展开论述。\n用 First、Second 等连接词使结构清晰。\n**结尾发出号召**，用 Let's... 或 Thank you。"},
             {"name": '请假条的写法',
-             "body": '请假条是向老师或领导请假的便条。\n**写明请假原因和天数**。\n语气诚恳，理由合理。\n格式有称呼、正文、落款（署名和日期）。\n请假条要简洁明了。\n常用开头 I am writing to ask for leave...，结尾表示感谢。'},
+             "body": """**必须写清三件事：请假原因、请假起止时间、请求批准**——缺时间或原因都要扣分。
+格式：**称呼顶格 + 正文（一般一段）+ 落款（署名、日期）**。
+开头：I am writing to ask for a sick/personal leave from ... to ...
+说明原因：I have caught a bad cold and the doctor advised me to rest for two days.
+**结尾要礼貌请求**：I would be grateful if you could grant me the leave. / I will make up for the missed lessons.
+语气诚恳、理由合理，不必长篇铺陈。"""},
             {"name": '高分句式与衔接词',
              "body": """开篇：I am writing to inform you that…／It is a great pleasure to…
 衔接：firstly、besides、what is more、however、as a result、in conclusion。
