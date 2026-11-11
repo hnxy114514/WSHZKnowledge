@@ -288,11 +288,12 @@ public class MainActivity extends Activity {
     private boolean chatDirty = true;
     /** 这次进对话页要不要停在顶部（顶上有按钮，默认停在顶部；发消息才往下滚）。 */
     private boolean chatScrollTopOnRender = false;
+    /** 切换「思考」开关时重建对话的代际号：连点时只让最后一次生效。 */
+    private int chatReloadGen = 0;
     /** 「思考」开关按钮的引用，切开关时就地改文字，不用整页重画。 */
     private TextView chatThinkBtn = null;
     /** 每条的正文/折叠提示视图，用来就地更新（折叠、切思考）而不是整页重建。 */
     private final java.util.Map<ChatMsg, TextView> chatBodies = new java.util.LinkedHashMap<ChatMsg, TextView>();
-    private final java.util.Map<ChatMsg, TextView> chatReasonViews = new java.util.LinkedHashMap<ChatMsg, TextView>();
     private final java.util.Map<ChatMsg, TextView> chatFoldTips = new java.util.LinkedHashMap<ChatMsg, TextView>();
     /** 每条回答底部的「相关知识点」区块，折叠时一起收起。 */
     private final java.util.Map<ChatMsg, View> chatRelatedBoxes = new java.util.LinkedHashMap<ChatMsg, View>();
@@ -306,9 +307,6 @@ public class MainActivity extends Activity {
             + "3. 上下标写成 a^{2}、a_{n}；希腊字母写成 \\alpha \\beta \\gamma \\theta \\pi\n"
             + "4. 一行只写一个公式，不要用 aligned、array、矩阵等环境，也不要贴图片\n"
             + "5. 乘号写 \\times，除号写 \\div，不等号写 \\ne \\le \\ge\n"
-            + "回答里如果涉及本软件里的知识点，用 【知识:标题】 标注：标题写知识点的完整名称"
-            + "（如「基本不等式（均值不等式）」，前面有编号可以省略），一次最多标 3 处；"
-            + "应用会把它显示成可点开跳转的下划线；这条只在 API 模式生效。\n"
             + "回答的最后另起一行，只写一行关键词：形如 【相关:等比数列|数列求和|前n项和】，"
             + "给 2~6 个最能概括本题考点的词，每个 2~6 个字，用竖线分隔，不要编号、不要解释、不要加标题。"
             + "这一行应用会隐藏掉，只用来匹配本软件里的知识点，写错或省略不影响正文。\n"
@@ -4275,16 +4273,15 @@ public class MainActivity extends Activity {
                 vibrate();
                 chatShowThink = !chatShowThink;
                 prefs.edit().putBoolean("chat_show_think", chatShowThink).apply();
-                // 只翻可见性，不整页重建：重建会把每条公式再解析一遍，手表上能卡半秒以上
-                for (TextView tv : chatReasonViews.values()) {
-                    tv.setVisibility(chatShowThink ? View.VISIBLE : View.GONE);
-                }
-                // 按钮本身也要跟着变，否则点了看不出状态（反馈 #44）
+                // 按钮本身先跟着变，否则点了看不出状态（反馈 #44）
                 if (chatThinkBtn != null) {
                     chatThinkBtn.setText(chatShowThink ? "思考 开" : "思考 关");
                     chatThinkBtn.setTextColor(chatShowThink ? C_PRIMARY : C_SUB);
                     chatThinkBtn.setTypeface(chatShowThink ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
                 }
+                // 整页重建：历史对话每条的思考块要跟着增删，只翻可见性做不到
+                //（关掉时那些块根本没建）。先转个圈再重建，顺便盖住滚动位置的变化。
+                reloadChatWithSpinner();
                 toast(chatShowThink ? "显示思考过程" : "已隐藏思考过程");
             }
         });
@@ -4399,6 +4396,40 @@ public class MainActivity extends Activity {
         });
     }
 
+    /** 切「思考」开关后重建整页：先只放一个旋转圆圈，让用户看出「在重新整理」，
+     *  再整页重画。转圈同时把滚动位置的变化盖住，省得再做一套位置恢复。 */
+    private void reloadChatWithSpinner() {
+        if (aiChatInner == null) return;
+        final int gen = ++chatReloadGen;
+        chatDirty = false;
+        chatStreamTv = null;
+        chatStreamReasonTv = null;
+        chatThinkingTv = null;
+        chatBodies.clear();
+        chatFoldTips.clear();
+        chatRelatedBoxes.clear();
+        aiChatInner.removeAllViews();
+        // 顶栏（返回/模型/思考/清空）保留着，别让它跟着一起消失再出现
+        aiChatInner.addView(chatTopBar(), wrapM());
+
+        LinearLayout holder = new LinearLayout(this);
+        holder.setOrientation(LinearLayout.VERTICAL);
+        holder.setGravity(Gravity.CENTER);
+        holder.setPadding(0, dp(36), 0, dp(36));
+        ProgressBar spin = new ProgressBar(this);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(dp(26), dp(26));
+        holder.addView(spin, slp);
+        aiChatInner.addView(holder, wrap());
+
+        aiChatInner.postDelayed(new Runnable() {
+            public void run() {
+                if (gen != chatReloadGen) return;          // 连点时只认最后一次
+                if (!alive() || screen != S_AI_CHAT) return;
+                renderAiChat();
+            }
+        }, 260);
+    }
+
     /** 重画整页：消息不多，整页重建比局部更新更不容易出错。 */
     private void renderAiChat() {
         if (aiChatInner == null) return;
@@ -4408,7 +4439,6 @@ public class MainActivity extends Activity {
         chatStreamReasonTv = null;
         chatThinkingTv = null;
         chatBodies.clear();
-        chatReasonViews.clear();
         chatFoldTips.clear();
         chatRelatedBoxes.clear();
         aiChatInner.removeAllViews();
@@ -4491,68 +4521,6 @@ public class MainActivity extends Activity {
         return out.toString();
     }
 
-    /** 回答里的知识点标记（下划线 + 主色），点一下跳过去。 */
-    private static class KbMark {
-        final String keyword;
-        final Node node;          // 渲染时就解析好；点的时候直接用，不再临时找
-        KbMark(String k, Node n) { keyword = k; node = n; }
-    }
-
-    /** 把【知识:xxx】换成可点击的知识点链接；没有标记就原样返回。 */
-    private void applyKnowledgeLinks(SpannableStringBuilder sb) {
-        String all = sb.toString();
-        int from = 0;
-        while (true) {
-            int start = all.indexOf("【知识", from);
-            if (start < 0) break;
-            int end = all.indexOf("】", start);
-            if (end < 0) break;
-            String inner = all.substring(start + 3, end)
-                    .replace("：", "").replace(":", "").trim();
-            if (inner.length() == 0) { from = end + 1; continue; }
-            Node node = findKnowledgeNode(inner);
-            // 用知识点本来的标题显示，而不是模型写的关键词：关键词常常只是几个字，看着像被截断了
-            String show = (node != null && node.name != null && node.name.length() > 0)
-                    ? node.name : inner;
-            sb.replace(start, end + 1, show);
-            int ks = start, ke = start + show.length();
-            sb.setSpan(new UnderlineSpan(), ks, ke, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            sb.setSpan(new ForegroundColorSpan(C_PRIMARY), ks, ke, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            sb.setSpan(new KbMark(inner, node), ks, ke, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            all = sb.toString();
-            from = ke;
-        }
-    }
-
-    /** 正文里有没有知识点标记。 */
-    private static boolean hasKbMarks(CharSequence cs) {
-        return cs instanceof Spanned
-                && ((Spanned) cs).getSpans(0, cs.length(), KbMark.class).length > 0;
-    }
-
-    /** 触点落在知识点链接上就跳过去；返回 true 表示已处理。 */
-    private boolean tryOpenKb(TextView body, float x, float y) {
-        CharSequence cs = body.getText();
-        Layout lay = body.getLayout();
-        if (!(cs instanceof Spanned) || lay == null) return false;
-        int px = (int) x - body.getTotalPaddingLeft() + body.getScrollX();
-        int py = (int) y - body.getTotalPaddingTop() + body.getScrollY();
-        int line = lay.getLineForVertical(Math.max(0, py));
-        int off = lay.getOffsetForHorizontal(line, Math.max(0, px));
-        KbMark[] marks = ((Spanned) cs).getSpans(off, off, KbMark.class);
-        if (marks.length == 0) return false;
-        vibrate();
-        KbMark mk = marks[0];
-        Node target = mk.node != null ? mk.node : findKnowledgeNode(mk.keyword);
-        if (target == null) {
-            toast("没找到「" + mk.keyword + "」这个知识点");
-            return true;
-        }
-        toast("在：" + shortPath(target.path()));
-        openNodeFrom(target, S_AI_CHAT);
-        return true;
-    }
-
     /** 气泡上的点击：320ms 内两下算双击，切换折叠。 */
     private void onBubbleTap(ChatMsg msg) {
         long now = SystemClock.uptimeMillis();
@@ -4584,16 +4552,27 @@ public class MainActivity extends Activity {
         if (rel != null) rel.setVisibility(msg.folded ? View.GONE : View.VISIBLE);
     }
 
-    /** 相邻的知识点标记之间补一个顿号：模型常写成【知识:A】【知识:B】，
-     *  渲染后两串下划线会粘成一坨，看着像一长条。 */
-    private static String spaceOutMarks(String s) {
-        if (s == null || s.indexOf("【知识") < 0) return s;
-        String out = s;
-        while (out.contains("】【知识")) out = out.replace("】【知识", "】、【知识");
-        return out;
+    /** 兼容旧回答：把【知识:xxx】整个外壳去掉，只留 xxx 当普通文字。
+     *  v3.4.16 起不再用行内链接（和底部「相关知识点」重复），这条只是兜底，别让标签露出来。 */
+    private static String stripKbTags(String text) {
+        if (text == null || text.indexOf("【知识") < 0) return text;
+        StringBuilder out = new StringBuilder();
+        int from = 0;
+        while (true) {
+            int s0 = text.indexOf("【知识", from);
+            if (s0 < 0) { out.append(text, from, text.length()); break; }
+            int e0 = text.indexOf('】', s0);
+            if (e0 < 0) { out.append(text, from, text.length()); break; }
+            out.append(text, from, s0);
+            String inner = text.substring(s0 + 3, e0)
+                    .replace("：", "").replace(":", "").trim();
+            out.append(inner);
+            from = e0 + 1;
+        }
+        return out.toString();
     }
 
-    /** 标题归一化的缓存：一次渲染要对上千个标题做正则，缓存下来省很多时间。
+    /** 文本归一化的缓存：一次渲染要对上千个标题做正则，缓存下来省很多时间。
      *  用 ConcurrentHashMap：答完在后代线程算相关知识点时也会写它，普通 HashMap 并发写会坏。 */
     private static final java.util.concurrent.ConcurrentHashMap<String, String> normCache =
             new java.util.concurrent.ConcurrentHashMap<String, String>();
@@ -4627,27 +4606,6 @@ public class MainActivity extends Activity {
         if (nn.length() > 0 && nn.contains(nk)) return 500 - (nn.length() - nk.length()) + bonus;
         if (nn.length() > 0 && nk.contains(nn)) return 300 - (nk.length() - nn.length()) + bonus;
         return -1;
-    }
-
-    /** 在本软件里找最贴切的那个知识点：分组和叶子一起比，再兜底搜正文。 */
-    private Node findKnowledgeNode(String kw) {
-        String q = kw == null ? "" : kw.trim();
-        if (q.length() == 0) return null;
-        Node best = null;
-        int bestScore = -1;
-        for (Node n : allGroups) {
-            int sc = kbScore(q, n.name, true);
-            if (sc > bestScore) { bestScore = sc; best = n; }
-        }
-        for (Node n : allHits) {
-            int sc = kbScore(q, n.name, false);
-            if (sc > bestScore) { bestScore = sc; best = n; }
-        }
-        if (bestScore >= 0) return best;
-        for (Node n : allHits) {
-            if (n.body != null && n.body.contains(q)) return n;
-        }
-        return null;
     }
 
     /** 回答末尾的关键词行标记：模型按 system prompt 输出「【相关:a|b|c】」，应用解析后隐藏。 */
@@ -4759,7 +4717,8 @@ public class MainActivity extends Activity {
         box.setBackgroundDrawable(pill(user ? 0xFF14384A : C_CARD));
         box.setPadding(dp(10), dp(7), dp(10), dp(8));
 
-        if (!user
+        // 思考过程：只有开关打开才建这个块（关掉时连块都不建，避免流式里被强制显示出来）
+        if (!user && chatShowThink
                 && (msg.streaming || (msg.reasoning != null && msg.reasoning.length() > 0))) {
             // 推理内容可能比正文晚到：先建一个空行占位，流式时再显形
             TextView rt = new TextView(this);
@@ -4767,15 +4726,13 @@ public class MainActivity extends Activity {
             rt.setTextSize(Math.max(9f, m.subtitleSize - 3f));
             rt.setTextColor(C_SUB);
             rt.setLineSpacing(dp(1), 1.2f);
-            rt.setVisibility(chatShowThink && msg.reasoning.length() > 0 ? View.VISIBLE : View.GONE);
+            rt.setVisibility(msg.reasoning.length() > 0 ? View.VISIBLE : View.GONE);
             LinearLayout.LayoutParams rlp = wrap();
             rlp.bottomMargin = dp(3);
             box.addView(rt, rlp);
             if (msg.streaming) chatStreamReasonTv = rt;
-            chatReasonViews.put(msg, rt);
-        } else if (!chatShowThink && !user && msg.streaming
-                && msg.content.length() == 0 && msg.reasoning.length() > 0) {
-            // 思考藏起来时至少告诉用户「在算」，正文一开始就撤掉这句
+        } else if (!user && !chatShowThink && msg.streaming && msg.content.length() == 0) {
+            // 思考藏起来时，生成期间只说一句「思考中…」，正文一开始就撤掉
             TextView wait = new TextView(this);
             wait.setText("思考中…");
             wait.setTextSize(Math.max(9f, m.subtitleSize - 3f));
@@ -4791,8 +4748,8 @@ public class MainActivity extends Activity {
         if (msg.err != null) text = msg.err;
         else if (msg.content.length() == 0) text = msg.streaming ? "…" : "（空回复）";
         else text = msg.content;
-        // 【相关:…】这一行是给应用匹配知识点用的，不给用户看（流式写到一半时连半截一起藏住）
-        if (!user) text = spaceOutMarks(stripRelatedTag(text));
+        // 末尾【相关:…】关键词行 + 旧式【知识:…】标签都去掉，只留正文文字
+        if (!user) text = stripKbTags(stripRelatedTag(text));
         // AI 的回复走知识点同一套渲染：\frac / \sqrt / ^{} / **重点** 都会被画出来；
         // 用户自己打的字保持原样，免得一个下划线就被当成下标。
         if (user) {
@@ -4800,11 +4757,7 @@ public class MainActivity extends Activity {
         } else {
             // 公式解析很贵：同一条内容只解析一次，进页面/切开关时直接复用
             if (msg.bodySpan == null || !text.equals(msg.bodyKey)) {
-                CharSequence sm = safeMarkup(text);
-                SpannableStringBuilder sb = sm instanceof SpannableStringBuilder
-                        ? (SpannableStringBuilder) sm : new SpannableStringBuilder(sm);
-                applyKnowledgeLinks(sb);
-                msg.bodySpan = sb;
+                msg.bodySpan = safeMarkup(text);
                 msg.bodyKey = text;
             }
             body.setText(msg.bodySpan);
@@ -4816,18 +4769,14 @@ public class MainActivity extends Activity {
         if (msg.streaming) chatStreamTv = body;
         chatBodies.put(msg, body);
 
-        // 正文统一挂一个触摸处理：点链接跳转、双击折叠。
-        // 关键：DOWN 必须 return true 先占住手势，否则上层（ScrollView/父布局）会拿走整串事件，
-        // UP 永远到不了这里——上一版就是因此「点了没反应」。
-        final boolean hasLinks = !user && !msg.streaming && msg.err == null
-                && hasKbMarks(body.getText());
+        // 正文只处理双击折叠（行内知识点链接已取消，统一放到底部「相关知识点」）
         final boolean canFold = !user && !msg.streaming && msg.err == null
                 && msg.content.length() > 100;
         if (canFold && msg.folded) {
             body.setMaxLines(4);
             body.setEllipsize(TextUtils.TruncateAt.END);
         }
-        if (hasLinks || canFold) {
+        if (canFold) {
             body.setOnTouchListener(new View.OnTouchListener() {
                 float downX, downY;
                 boolean moved;
@@ -4847,7 +4796,6 @@ public class MainActivity extends Activity {
                             return false;
                         case MotionEvent.ACTION_UP:
                             if (moved) return false;
-                            if (hasLinks && tryOpenKb(body, ev.getX(), ev.getY())) return true;
                             if (canFold) onBubbleTap(msg);
                             return true;
                         default:
@@ -5374,13 +5322,13 @@ public class MainActivity extends Activity {
                     chatStreamTv.setText(msg.content.length() == 0
                             ? "…" : safeMarkup(msg.content + "▍"));
                 }
-                if (chatStreamReasonTv != null && msg.reasoning.length() > 0) {
+                if (chatStreamReasonTv != null && chatShowThink && msg.reasoning.length() > 0) {
                     chatStreamReasonTv.setText("思考：" + prettyReasoning(msg.reasoning));
                     chatStreamReasonTv.setVisibility(View.VISIBLE);
                 }
                 if (chatThinkingTv != null) {
-                    if (msg.reasoning.length() > 0) chatThinkingTv.setVisibility(View.VISIBLE);
-                    if (msg.content.length() > 0) chatThinkingTv.setVisibility(View.GONE);
+                    // 关掉思考时的「思考中…」：正文一出现就撤掉
+                    chatThinkingTv.setVisibility(msg.content.length() == 0 ? View.VISIBLE : View.GONE);
                 }
                 scrollChatToBottom(false);   // 流式跟随时直接跳到底，别每 80ms 起一次平滑动画
             }
@@ -5404,28 +5352,14 @@ public class MainActivity extends Activity {
         if (raw.length() < 4) return;
         List<Node> rel = new ArrayList<Node>();
 
-        // ① 模型行内标过的【知识:标题】最可信，先放进来
-        int from = 0;
-        while (rel.size() < REL_LIMIT) {
-            int s0 = raw.indexOf("【知识", from);
-            if (s0 < 0) break;
-            int e0 = raw.indexOf("】", s0);
-            if (e0 < 0) break;
-            String inner = raw.substring(s0 + 3, e0).replace("：", "").replace(":", "").trim();
-            from = e0 + 1;
-            if (inner.length() == 0) continue;
-            Node n = findKnowledgeNode(inner);
-            if (n != null && !rel.contains(n)) rel.add(n);
-        }
-
-        // ② 末尾【相关:…】关键词，按重合度排
+        // ① 末尾【相关:…】关键词，按重合度排
         List<Node> ranked = rankKnowledge(parseRelatedKeys(raw), REL_LIMIT);
         for (Node n : ranked) {
             if (rel.size() >= REL_LIMIT) break;
             if (!rel.contains(n)) rel.add(n);
         }
 
-        // ③ 都没有关键词时兜底：看「提问 + 回答」里直接出现了哪些标题
+        // ② 没有关键词时兜底：看「提问 + 回答」里直接出现了哪些标题
         if (rel.size() < REL_LIMIT) {
             String text = lastUserQuestion(msg) + "\n" + stripRelatedTag(raw);
             for (Node n : rankKnowledgeByText(text, REL_LIMIT)) {
