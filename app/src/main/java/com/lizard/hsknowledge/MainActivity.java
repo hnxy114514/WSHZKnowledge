@@ -5817,14 +5817,9 @@ public class MainActivity extends Activity {
             locate();
         }
 
-        /** 返回到本页：回到离开时的位置；没记过就保持当前滚动位置（内容已在，直接就绪显示）。 */
+        /** 返回到本页：回到离开时的位置；这一层没记过位置（首次进入）就按默认回顶部。 */
         void restore() {
-            if (savedY < 0) {
-                // 返回到「已经渲染过、不会重新 bind」的列表页：没有渲染回调，必须自己就绪，
-                // 否则 showScreen 把页面设成 INVISIBLE 后永远没人显示 → 没反应 / 黑屏。
-                sc.post(new Runnable() { public void run() { fireReady(); } });
-                return;
-            }
+            if (savedY < 0) { enter(); return; }
             pendingY = savedY;
             locate();
         }
@@ -8931,8 +8926,10 @@ public class MainActivity extends Activity {
         }
         SvList leaving = svOf(screen);
         if (leaving != null) {
-            // 记下离开时的滚动位置，返回本页时恢复（返回上一级定位就靠它，别删）
-            leaving.savedY = leaving.sc.getScrollY();
+            // 记下离开时的滚动位置，返回本页时恢复。
+            // 但**同页换层（s == screen，如章节→科目）绝不能记**：那时 leaving 就是目标列表自己，
+            // 记下来会把 bind() 刚设好的「上一层离开位置」覆盖成当前层的位置，导致返回时弹回顶端。
+            if (screen != s) leaving.savedY = leaving.sc.getScrollY();
             // 统一归位：防御性地清掉可能残留的位移/透明度。
             leaving.sc.setTranslationX(0f);
             leaving.sc.setAlpha(1f);
