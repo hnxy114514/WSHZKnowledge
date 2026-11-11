@@ -603,6 +603,8 @@ public class MainActivity extends Activity {
     private boolean swipeBusy = false;       // 出场动画进行中
     private boolean sliderTouching = false;  // 正在拖动滑块（字号/缩放），此时不触发右滑返回
     private boolean swipeFromInput = false;  // 起手点在输入框内
+    private boolean nodeRefreshLocked = false; // renderNodes 里程序性清空搜索框时锁住监听，避免二次绑定
+    private boolean swipeNavigating = false;   // 右滑返回触发的切页：预览已就位，只确认、不重渲染/重定位
     private View swipeView;                  // 正在被拖动的当前页
     private View swipePrev;                  // 下面露出的上一级页面（预览）
     private View swipeGhost;                 // 同页换层时顶在上面的快照（跟着手指走）
@@ -5613,6 +5615,8 @@ public class MainActivity extends Activity {
         /** 待定位的位置：行是分帧加的，内容高度一变就要再定一次，直到用户自己滑。 */
         private int pendingY = -1;
         private boolean selfScroll;
+        /** 右滑预览换层时置 true：这一批首屏行同步渲染完再露出预览，避免空列表再分帧加载闪一下。 */
+        private boolean syncFirstRender = false;
         /** 续载时先让外部把下一批数据补进来（数据全集不是一次就有的列表用，如「今日新增」）。 */
         Runnable fill;
         /** 首屏渲染完 + 定位到位后回调一次（showScreen 用它来显示，做到「渲染完成后再打开」）。 */
@@ -5666,6 +5670,8 @@ public class MainActivity extends Activity {
          *  不同才清空重渲；只缓存首屏，续载出来的行不缓存。 */
         void bind(String key, RowSource s) {
             final String k = key == null ? "" : key;
+            final boolean syncNow = syncFirstRender;
+            syncFirstRender = false;
             // 先把当前显示的行和滚动位置挪进缓存，供返回时复用
             if (!curKey.isEmpty() && !rows.isEmpty()) {
                 RowCache c = new RowCache();
@@ -5698,9 +5704,26 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            // 未命中：新层，分帧渲染首屏
+            // 未命中：新层。预览换层时同步把首屏铺满再露出，避免空列表闪一下；
+            // 正常进入仍走分帧，避免一次塞太多行掉帧。
             savedY = -1;
             want = Math.min(s == null ? 0 : s.size(), first);
+            if (want > 0 && syncNow) {
+                busy = false;
+                while (shown < want && shown < s.size()) {
+                    View row = s.make(shown);
+                    rows.add(row);
+                    box.addView(row, box.getChildCount() - 1, wrapM());
+                    shown++;
+                }
+                sc.post(new Runnable() {
+                    public void run() {
+                        fitSpacers();
+                        fireReady();
+                    }
+                });
+                return;
+            }
             if (want > 0) {
                 stepGen = gen;
                 busy = true;
@@ -6904,13 +6927,17 @@ public class MainActivity extends Activity {
     }
 
     private void renderNodes() {
+        // 程序性清空搜索框：锁住监听，否则 afterTextChanged→refreshNodes 会多绑定一次列表，
+        // 第二次 bind 时缓存已被取走，只能重新分帧渲染 → 预览一片空白、位置也丢回顶端。
+        nodeRefreshLocked = true;
         itemSearchBox.setText("");
+        nodeRefreshLocked = false;
         setPath(listTitle, currentPath());
         bindNodes();
     }
 
     private void refreshNodes() {
-        if (screen != S_NODE) return;   // 搜索框只在节点页生效
+        if (screen != S_NODE || nodeRefreshLocked) return;   // 搜索框只在节点页生效
         bindNodes();
     }
 
@@ -8872,8 +8899,40 @@ public class MainActivity extends Activity {
     // ================= 页面切换（带动画） =================
     private void showScreen(int s) {
         final int old = screen;
+        // 右滑返回：preparePrev 已经把「要退回的那一页」渲染好、摆在离开时的滚动位置并露出来了。
+        // 这条路径只做可见性确认，绝不重新 bind / 重新定位，否则列表会被清空重载（闪一下）或弹回顶端。
+        if (swipeNavigating) {
+            swipeNavigating = false;
+            View[] ss = {subjectScreen, nodeScreen, detailScreen, settingsScreen,
+                    searchScreen, feedbackScreen, mineScreen, profileScreen, changelogScreen, aboutScreen,
+                    displayScreen, todayScreen, extraScreen, favScreen, histScreen, favSubScreen,
+                    dailyScreen, sentScreen, aiWebScreen, aiHubScreen, aiApiScreen, aiWebCfgScreen,
+                    aiChatScreen};
+            screen = s;
+            for (int i = 0; i < ss.length; i++) {
+                if (i == s) continue;
+                ss[i].animate().cancel();
+                ss[i].setVisibility(View.GONE);
+                ss[i].setTranslationX(0f);
+                ss[i].setTranslationY(0f);
+                ss[i].setAlpha(1f);
+            }
+            View t = ss[s];
+            t.animate().cancel();
+            t.setTranslationX(0f);
+            t.setTranslationY(0f);
+            t.setAlpha(1f);
+            t.setVisibility(View.VISIBLE);
+            restoreNext[s] = false;
+            skipPageAnim = false;
+            SvList sl = svOf(s);
+            if (sl != null) sl.onReady = null;
+            return;
+        }
         SvList leaving = svOf(screen);
         if (leaving != null) {
+            // 记下离开时的滚动位置，返回本页时恢复（返回上一级定位就靠它，别删）
+            leaving.savedY = leaving.sc.getScrollY();
             // 统一归位：防御性地清掉可能残留的位移/透明度。
             leaving.sc.setTranslationX(0f);
             leaving.sc.setAlpha(1f);
@@ -9392,8 +9451,11 @@ public class MainActivity extends Activity {
             swipeQuery = itemSearchBox.getText().toString();
             swipePopped = navStack.remove(navStack.size() - 1);
             curNode = navStack.isEmpty() ? null : navStack.get(navStack.size() - 1);
+            nodeList.syncFirstRender = true;   // 预览换层：首屏同步渲染完再露出，不空一帧
             renderNodes();
-            nodeList.enter();
+            // 缓存里存着「离开这一层时的滚动位置」，命中就定位回去；
+            // 只有从没来过这层（没缓存）才用 enter() 从顶部占位开始。
+            if (nodeList.savedY >= 0) nodeList.restore(); else nodeList.enter();
             cur.animate().cancel();
             cur.setAlpha(1f);
             cur.setTranslationX(-w * PREV_PARALLAX);
@@ -9483,7 +9545,9 @@ public class MainActivity extends Activity {
                             prev.setAlpha(1f);
                         }
                         swipeBusy = false;
-                        handleBack();
+                        // 预览页已就位，handleBack→showScreen 只确认、不重渲染；finally 防标志残留
+                        swipeNavigating = true;
+                        try { handleBack(); } finally { swipeNavigating = false; }
                     }
                 }).start();
         if (prev != null) {
@@ -9519,9 +9583,13 @@ public class MainActivity extends Activity {
                                 navStack.add(popped);
                                 curNode = popped;
                             }
-                            renderNodes();
-                            // 本级搜索的关键词原来被 renderNodes 清掉了，退回时还原
-                            if (query != null && query.length() > 0) itemSearchBox.setText(query);
+                            // 先还原本级搜索词（锁住监听），再用它一次性绑定、同步渲染首屏
+                            nodeRefreshLocked = true;
+                            itemSearchBox.setText(query == null ? "" : query);
+                            nodeRefreshLocked = false;
+                            setPath(listTitle, currentPath());
+                            nodeList.syncFirstRender = true;
+                            bindNodes();
                             nodeList.savedY = oldY;
                             nodeList.restore();
                             if (prev != null) {
