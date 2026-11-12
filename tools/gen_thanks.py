@@ -19,15 +19,29 @@ API = "https://api.github.com/repos/%s/issues?state=closed&per_page=100" % REPO
 
 
 def fetch():
-    req = urllib.request.Request(API, headers={
-        "Accept": "application/vnd.github+json",
-        "User-Agent": "HZKnowledge-thanks",
-    })
-    tok = os.environ.get("GITHUB_TOKEN")
-    if tok:
-        req.add_header("Authorization", "token " + tok)
-    with urllib.request.urlopen(req, timeout=20) as r:
-        return json.loads(r.read().decode("utf-8"))
+    """按页拉全：只拉一页的话，issue 超过 100 条就会漏算，人数和条数都会少。"""
+    out = []
+    page = 1
+    while True:
+        url = API + "&page=%d" % page
+        req = urllib.request.Request(url, headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "HZKnowledge-thanks",
+        })
+        tok = os.environ.get("GITHUB_TOKEN")
+        if tok:
+            req.add_header("Authorization", "token " + tok)
+        with urllib.request.urlopen(req, timeout=20) as r:
+            part = json.loads(r.read().decode("utf-8"))
+        if not part:
+            break
+        out.extend(part)
+        if len(part) < 100:
+            break
+        page += 1
+        if page > 20:      # 保险：理论上到不了
+            break
+    return out
 
 
 def main():

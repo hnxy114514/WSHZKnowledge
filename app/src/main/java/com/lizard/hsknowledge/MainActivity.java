@@ -1893,6 +1893,7 @@ public class MainActivity extends Activity {
         cancelBtn.setPadding(dp(8), dp(7), dp(8), dp(2));
         cancelBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                vibrate();
                 downloadCancel = true;
                 // 立即断开当前下载连接，让阻塞的读取马上抛异常退出，别再等超时
                 if (activeCn != null) { try { activeCn.disconnect(); } catch (Exception ignored) { } }
@@ -2200,12 +2201,14 @@ public class MainActivity extends Activity {
 
         cancel.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                vibrate();
                 try { d.dismiss(); } catch (Exception ignored) { }
             }
         });
         btn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 if (!btn.isEnabled()) return;
+                vibrate();
                 try { d.dismiss(); } catch (Exception ignored) { }
                 startLogging();
                 toast("已开启记录日志");
@@ -2604,6 +2607,7 @@ public class MainActivity extends Activity {
         clrp.leftMargin = dp(6);
         clearBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                vibrate();
                 gSearchBox.setText("");
             }
         });
@@ -3913,6 +3917,7 @@ public class MainActivity extends Activity {
 
         paste.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                vibrate();
                 String s = clipboardText();
                 if (s.length() == 0) {
                     toast("剪贴板是空的");
@@ -4351,7 +4356,10 @@ public class MainActivity extends Activity {
         aiChatStopBtn.setBackgroundDrawable(clickBg(C_PILL));
         aiChatStopBtn.setVisibility(View.GONE);
         aiChatStopBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { chatStop(); }
+            public void onClick(View v) {
+                vibrate();
+                chatStop();
+            }
         });
 
         // 比例 2:1（发消息 : 取消）。取消隐藏时，发消息自动吃满整行。
@@ -6156,8 +6164,8 @@ public class MainActivity extends Activity {
     }
 
 
-    /** 页面上的小按钮：胶囊底、居中、点了有反馈。 */
-    private TextView dailyBtn(String text, View.OnClickListener l) {
+    /** 页面上的小按钮：胶囊底、居中、点了有反馈（震动在这里统一加，调用方不用管）。 */
+    private TextView dailyBtn(String text, final View.OnClickListener l) {
         TextView b = new TextView(this);
         b.setText(text);
         b.setTextSize(m.subtitleSize - 1f);
@@ -6166,7 +6174,12 @@ public class MainActivity extends Activity {
         b.setGravity(Gravity.CENTER);
         b.setPadding(dp(4), dp(7), dp(4), dp(7));
         applyClickBg(b, C_PILL);
-        b.setOnClickListener(l);
+        b.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                l.onClick(v);
+            }
+        });
         return b;
     }
 
@@ -7223,7 +7236,10 @@ public class MainActivity extends Activity {
         close.setPadding(dp(12), dp(9), dp(12), dp(9));
         close.setBackgroundDrawable(pill(0xCC1C1C1C));
         close.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { closeFullscreen(); }
+            public void onClick(View v) {
+                vibrate();
+                closeFullscreen();
+            }
         });
         FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -8647,6 +8663,7 @@ public class MainActivity extends Activity {
         applyIcon(upd, "ic_update", C_PRIMARY, 15);
         upd.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                vibrate();
                 checkUpdate(false);
             }
         });
@@ -8668,7 +8685,10 @@ public class MainActivity extends Activity {
         fbEntry.setBackground(clickBg(C_PILL));
         applyIcon(fbEntry, "ic_feedback", C_PRIMARY, 15);
         fbEntry.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { goBack(S_FEEDBACK); }
+            public void onClick(View v) {
+                vibrate();
+                goBack(S_FEEDBACK);
+            }
         });
         LinearLayout.LayoutParams fbLp = wrap();
         fbLp.topMargin = dp(6);
@@ -8692,7 +8712,10 @@ public class MainActivity extends Activity {
         aiEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
         aiEntry.setBackground(clickBg(C_PILL));
         aiEntry.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_AI_HUB); }
+            public void onClick(View v) {
+                vibrate();
+                showScreen(S_AI_HUB);
+            }
         });
         settingsInner.addView(aiEntry, wrap());
 
@@ -8707,7 +8730,10 @@ public class MainActivity extends Activity {
         profEntry.setBackground(clickBg(C_PILL));
         applyIcon(profEntry, "ic_person", C_PRIMARY, 15);
         profEntry.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { showScreen(S_PROFILE); }
+            public void onClick(View v) {
+                vibrate();
+                showScreen(S_PROFILE);
+            }
         });
         settingsInner.addView(profEntry, wrap());
 
@@ -8809,6 +8835,7 @@ public class MainActivity extends Activity {
         reset.setBackground(clickBg(C_PILL));
         reset.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                vibrate();
                 // 误触代价太大（以前一点就直接执行，还连收藏一起清掉），先确认
                 confirmAction("恢复默认设置？",
                         "字号、缩放、震动、右滑返回和科目顺序回到默认。收藏、浏览记录、每日一句和登录都保留。",
@@ -8902,7 +8929,7 @@ public class MainActivity extends Activity {
         return row;
     }
 
-    private TextView orderBtn(String label, boolean enabled, View.OnClickListener onClick) {
+    private TextView orderBtn(String label, boolean enabled, final View.OnClickListener onClick) {
         TextView t = new TextView(this);
         t.setText(label);
         t.setTextSize(m.backSize);
@@ -8911,7 +8938,12 @@ public class MainActivity extends Activity {
         t.setGravity(Gravity.CENTER);
         t.setPadding(dp(12), dp(6), dp(12), dp(6));
         t.setBackgroundDrawable(pill(enabled ? 0xFF242424 : 0xFF151515));
-        if (enabled) t.setOnClickListener(onClick);
+        if (enabled) t.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                onClick.onClick(v);
+            }
+        });
         return t;
     }
 
@@ -10019,6 +10051,24 @@ public class MainActivity extends Activity {
     /** 拉取已采纳的反馈，按提交人聚合后排序（自己提的不计入）。
      *  取数顺序：直连 api.github.com（5 秒超时）→ 能转发 API 的镜像 → 仓库静态备份名单（走全量镜像）；
      *  全都拿不到就用上次缓存的名单，页面不会一直空着。 */
+    /** 拉全部已关闭 issue：接口一页最多 100 条，只拉第一页的话
+     *  issue 超过 100 条就会漏人、条数也会少（感谢名单数量对不上就是这么来的）。 */
+    private org.json.JSONArray fetchAllClosed(String base, long deadline) {
+        org.json.JSONArray all = new org.json.JSONArray();
+        try {
+            for (int page = 1; page <= 5; page++) {
+                if (android.os.SystemClock.uptimeMillis() > deadline) break;
+                String s = httpGetText(base + "?state=closed&per_page=100&page=" + page, 5000, 6000);
+                org.json.JSONArray part = new org.json.JSONArray(s);
+                for (int i = 0; i < part.length(); i++) all.put(part.opt(i));
+                if (part.length() < 100) break;     // 不满一页，已经是最后一页
+            }
+        } catch (Exception e) {
+            return all.length() > 0 ? all : null;
+        }
+        return all.length() > 0 ? all : null;
+    }
+
     private void loadThanks() {
         if (thanksLoadingBusy) return;
         thanksLoadingBusy = true;
@@ -10035,55 +10085,48 @@ public class MainActivity extends Activity {
 
         new Thread(new Runnable() {
             public void run() {
-                String raw = null;
-                String query = GH_ISSUES + "?state=closed&per_page=100";
+                org.json.JSONArray rawArr = null;
                 // 总时限：一个个源试下去最坏能拖几十秒，到点就收手改用缓存
                 final long deadline = android.os.SystemClock.uptimeMillis() + 25000L;
 
                 // 0) 启动时测出来的最优通道，命中就不必再逐个试
                 if (apiBase().length() > 0) {
-                    try {
-                        raw = httpGetText(apiBase() + query, 5000, 6000);
-                    } catch (Exception ignored) { }
+                    rawArr = fetchAllClosed(apiBase() + GH_ISSUES, deadline);
                 }
 
                 // 1) 直连，超时设短一点，连不上就赶紧换镜像，别让用户干等
-                if (raw == null) {
-                    try {
-                        raw = httpGetText(query, 5000, 6000);
-                    } catch (Exception ignored) { }
+                if (rawArr == null) {
+                    rawArr = fetchAllClosed(GH_ISSUES, deadline);
                 }
 
                 // 2) 能转发 api.github.com 的镜像
-                if (raw == null) {
-                    for (int i = 0; i < API_MIRRORS.length && raw == null; i++) {
+                if (rawArr == null) {
+                    for (int i = 0; i < API_MIRRORS.length && rawArr == null; i++) {
                         if (android.os.SystemClock.uptimeMillis() > deadline) break;
                         setThanksHint("切换镜像 " + hostOf(API_MIRRORS[i]) + "…");
-                        try {
-                            raw = httpGetText(API_MIRRORS[i] + query, 5000, 6000);
-                        } catch (Exception ignored) { }
+                        rawArr = fetchAllClosed(API_MIRRORS[i] + GH_ISSUES, deadline);
                     }
                 }
 
                 // 3) 仓库里的静态备份名单：raw 基本所有镜像都代，这一步成功率最高
-                if (raw == null) {
-                    for (int i = 0; i <= MIRRORS.length && raw == null; i++) {
+                if (rawArr == null) {
+                    for (int i = 0; i <= MIRRORS.length && rawArr == null; i++) {
                         if (android.os.SystemClock.uptimeMillis() > deadline) break;
                         String u = (i == 0) ? THANKS_SNAPSHOT : MIRRORS[i - 1] + THANKS_SNAPSHOT;
                         setThanksHint(i == 0 ? "读取备份名单…"
                                 : "切换镜像 " + hostOf(MIRRORS[i - 1]) + "…");
                         try {
                             String s = httpGetText(u, 5000, 6000);
-                            if (s != null && s.length() > 2) raw = s;
+                            if (s != null && s.length() > 2) rawArr = new org.json.JSONArray(s);
                         } catch (Exception ignored) { }
                     }
                 }
 
                 List<Map.Entry<String, Integer>> list = null;
                 boolean fetched = false;      // 真的取到了数据（哪怕结果是空的）
-                if (raw != null) {
+                if (rawArr != null) {
                     try {
-                        list = parseThanks(new JSONArray(raw));
+                        list = parseThanks(rawArr);
                         fetched = true;
                         if (!list.isEmpty()) {
                             prefs.edit().putString(THANKS_CACHE, packThanks(list)).apply();
@@ -10168,7 +10211,10 @@ public class MainActivity extends Activity {
 
         if (login.equalsIgnoreCase(THANKS_PINNED)) {
             avBox.setOnClickListener(new View.OnClickListener() {
-                public void onClick(View v) { onAvatarTap(); }
+                public void onClick(View v) {
+                    vibrate();
+                    onAvatarTap();
+                }
             });
         }
 
@@ -10404,6 +10450,22 @@ public class MainActivity extends Activity {
             tv.setCompoundDrawables(d, null, pad, null);
             tv.setCompoundDrawablePadding(dp(7));
         } catch (Exception ignored) { }
+    }
+
+    /** 反馈页那几个入口按钮：字号、内边距、图标尺寸必须完全一致，
+     *  否则高矮不齐看着很别扭（反馈 #46 就是这么来的）。新增同类按钮一律用它。 */
+    private TextView fbActionBtn(String text, String icon, int textColor, int bg) {
+        TextView b = new TextView(this);
+        b.setText(text);
+        b.setTextSize(m.backSize);
+        b.setTypeface(Typeface.DEFAULT_BOLD);
+        b.setGravity(Gravity.CENTER);
+        b.setSingleLine(true);
+        b.setPadding(dp(10), dp(11), dp(10), dp(11));
+        b.setTextColor(textColor);
+        b.setBackgroundDrawable(pill(bg));
+        if (icon != null) applyIcon(b, icon, textColor, 15);
+        return b;
     }
 
     /** 头像转圈：小尺寸下用细圈，颜色跟随主色。 */
@@ -11090,6 +11152,7 @@ public class MainActivity extends Activity {
         fbStatusTxt.setBackgroundDrawable(pill(C_PILL));
         fbStatusTxt.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                vibrate();
                 if (ghToken == null) showScreen(S_PROFILE);
             }
         });
@@ -11113,6 +11176,7 @@ public class MainActivity extends Activity {
                 b.setPadding(dp(3), dp(9), dp(3), dp(9));
                 b.setOnClickListener(new View.OnClickListener() {
                     public void onClick(View v) {
+                        vibrate();
                         fbType = idx;
                         updateTypeButtons();
                     }
@@ -11199,30 +11263,19 @@ public class MainActivity extends Activity {
         note.setPadding(dp(4), 0, dp(4), dp(8));
         feedbackInner.addView(note, wrap());
 
-        fbSubmitBtn = new TextView(this);
-        fbSubmitBtn.setText("提交反馈");
-        fbSubmitBtn.setTextSize(m.backSize);
-        fbSubmitBtn.setTypeface(Typeface.DEFAULT_BOLD);
-        fbSubmitBtn.setGravity(Gravity.CENTER);
-        fbSubmitBtn.setPadding(dp(10), dp(11), dp(10), dp(11));
-        fbSubmitBtn.setTextColor(C_PRIMARY);
-        fbSubmitBtn.setBackgroundDrawable(pill(0xFF14384A));
+        fbSubmitBtn = fbActionBtn("提交反馈", "ic_feedback", C_PRIMARY, 0xFF14384A);
         fbSubmitBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { submitFeedback(); }
+            public void onClick(View v) {
+                vibrate();
+                submitFeedback();
+            }
         });
         feedbackInner.addView(fbSubmitBtn, wrap());
 
-        TextView mineBtn = new TextView(this);
-        mineBtn.setText("我的反馈记录");
-        mineBtn.setTextSize(m.backSize);
-        mineBtn.setTypeface(Typeface.DEFAULT_BOLD);
-        mineBtn.setGravity(Gravity.CENTER);
-        mineBtn.setPadding(dp(10), dp(10), dp(10), dp(10));
-        mineBtn.setTextColor(C_PRIMARY);
-        mineBtn.setBackgroundDrawable(pill(C_PILL));
-        applyIcon(mineBtn, "ic_assignment", C_PRIMARY, 15);
+        TextView mineBtn = fbActionBtn("我的反馈记录", "ic_assignment", C_PRIMARY, C_PILL);
         mineBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                vibrate();
                 if (ghToken == null) {
                     toast("请先在个人主页登录 GitHub");
                     showScreen(S_PROFILE);
@@ -11239,18 +11292,11 @@ public class MainActivity extends Activity {
         feedbackInner.addView(mineBtn, mlp);
 
         // 仅项目所有者（@hnxy114514）可见：查看仓库里所有人的反馈（含已/未处理）
-        fbAllBtn = new TextView(this);
-        fbAllBtn.setText("查看全部反馈");
-        fbAllBtn.setTextSize(m.backSize - 1f);
-        fbAllBtn.setTypeface(Typeface.DEFAULT_BOLD);
-        fbAllBtn.setGravity(Gravity.CENTER);
-        fbAllBtn.setPadding(dp(10), dp(9), dp(10), dp(9));
-        fbAllBtn.setTextColor(0xFF4FC3F7);
-        fbAllBtn.setBackgroundDrawable(pill(0xFF10222B));
-        applyIcon(fbAllBtn, "ic_person", 0xFF4FC3F7, 15);
+        fbAllBtn = fbActionBtn("查看全部反馈", "ic_person", 0xFF4FC3F7, 0xFF10222B);
         fbAllBtn.setVisibility(View.GONE);
         fbAllBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                vibrate();
                 if (ghToken == null) {
                     toast("请先在个人主页登录 GitHub");
                     showScreen(S_PROFILE);
@@ -11643,6 +11689,7 @@ public class MainActivity extends Activity {
         open.setBackgroundDrawable(pill(0xFF14384A));
         open.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                vibrate();
                 dismissCodeDialog();
                 openBrowser(url);
             }
@@ -11666,7 +11713,10 @@ public class MainActivity extends Activity {
         close.setGravity(Gravity.CENTER);
         close.setPadding(dp(8), dp(8), dp(8), dp(2));
         close.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { dismissCodeDialog(); }
+            public void onClick(View v) {
+                vibrate();
+                dismissCodeDialog();
+            }
         });
         box.addView(close, wrap());
 
@@ -12559,6 +12609,7 @@ public class MainActivity extends Activity {
         profStatusTxt.setPadding(0, dp(6), 0, dp(6));
         profStatusTxt.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                vibrate();
                 if (ghToken != null) loadProfileFromGitHub();
             }
         });
@@ -12598,6 +12649,7 @@ public class MainActivity extends Activity {
         applyIcon(profLoginBtn, "ic_person", C_PRIMARY, 15);
         profLoginBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                vibrate();
                 if (loginRunning) {
                     if (fbCodeUrl != null) openBrowser(fbCodeUrl);
                     else toast("正在获取登录码…");
