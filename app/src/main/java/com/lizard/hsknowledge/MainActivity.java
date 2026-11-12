@@ -8626,9 +8626,11 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 haptic = !haptic;
                 prefs.edit().putBoolean("haptic", haptic).apply();
+                // 打开的那一刻震一下（说明已经生效）；关掉时不震
+                if (haptic) vibrate();
                 renderSettings();
             }
-        }), wrap());
+        }, false), wrap());
         TextView hapticHint = new TextView(this);
         hapticHint.setText("点击时轻微震动。");
         hapticHint.setTextSize(m.subtitleSize - 2f);
@@ -8949,16 +8951,22 @@ public class MainActivity extends Activity {
 
     /** 开关型设置行：点整行切换，右侧显示开/关。 */
     private View toggleRow(String label, boolean on, View.OnClickListener onClick) {
+        return toggleRow(label, on, onClick, true);
+    }
+
+    /** autoVibrate=false 用于「震动反馈」这一行自己：它要按切换后的状态决定震不震，
+     *  不能让这里先震（关→开时还关着，震不出来；开→关时又白震一下）。 */
+    private View toggleRow(String label, boolean on, final View.OnClickListener onClick,
+                           final boolean autoVibrate) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(10), dp(8), dp(10), dp(8));
         row.setBackgroundDrawable(pill(C_CARD));
-        final View.OnClickListener user = onClick;
         row.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                vibrate();
-                if (user != null) user.onClick(v);
+                if (autoVibrate) vibrate();
+                if (onClick != null) onClick.onClick(v);
             }
         });
 
@@ -10265,8 +10273,9 @@ public class MainActivity extends Activity {
             }
         }
         String[] care = special ? SPECIAL_TIPS : REST_TIPS;
-        // 技巧占大头，关怀穿插：普通用户 80/20；有一类用户更想看关心的话，按 50/50。
-        int techPct = special ? 50 : 80;
+        // 技巧与关怀穿插：普通用户 60/40（以前是 80/20，关怀太少，用户反馈「几乎只见小贴士」）；
+        // 有一类用户更想看关心的话，按 50/50。
+        int techPct = special ? 50 : 60;
         java.util.Random r = new java.util.Random();
         String text = (r.nextInt(100) < techPct)
                 ? TIPS[r.nextInt(TIPS.length)]
