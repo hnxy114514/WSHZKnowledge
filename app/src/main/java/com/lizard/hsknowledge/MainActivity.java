@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.res.Configuration;
 import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -358,6 +359,10 @@ public class MainActivity extends Activity {
     private boolean aiWebLoaded = false;
     /** 是否往网页注入「隐藏下载 APP 入口」脚本；关掉 = 网页完全原样，用于排查和兜底。 */
     private boolean aiWebHideDl = true;
+    /** 强制网页走暗色：给 WebView 一个 UI_MODE_NIGHT_YES 的 Context，
+     *  让网页的 prefers-color-scheme: dark 成立（网站「跟随系统」就会自动暗色）。
+     *  默认开（App 整体暗色）；关掉可对照排查。 */
+    private boolean aiWebDark = true;
     /** 网页显示缩放档位：0 自动 / 1 更小 / 2 原样，存在 prefs 的 ai_web_zoom。
      *  纯 View 层缩放，不往网页注入任何脚本。 */
     private int aiWebZoomMode = 0;
@@ -689,6 +694,7 @@ public class MainActivity extends Activity {
             aiSwitchedByNoWebView = true;
         }
         aiWebHideDl = prefs.getBoolean("ai_web_hide_dl", true);
+        aiWebDark = prefs.getBoolean("ai_web_dark", true);
         aiWebZoomMode = prefs.getInt("ai_web_zoom", 0);
         aiWebCrop = prefs.getBoolean("ai_web_crop", true);
         loadGitHub();         // 只读 prefs，很快
@@ -2783,7 +2789,33 @@ public class MainActivity extends Activity {
         aiGestureHint.setVisibility(View.GONE);
 
         try {
-            WebView wv = new AiWebView(this);
+            // 只给 WebView 换一个「夜间」Context：网页里 prefers-color-scheme: dark 就成立，
+            // 网站的「跟随系统」会自动切暗色。不动 Activity 本身的主题，其它页面不受影响，
+            // 也不需要往网页注入任何脚本（之前注入脚本藏到根节点导致过黑屏）。
+            Context webCtx = this;
+            if (aiWebDark && Build.VERSION.SDK_INT >= 23) {
+                try {
+                    // 用包在 Activity 上的 ContextThemeWrapper 覆盖 uiMode，而不是裸的
+                    // createConfigurationContext：后者不带 Activity 身份，少数厂商 WebView
+                    // 弹键盘 / 取窗口 token 时会出问题。这样只改配置、不改身份。
+                    android.view.ContextThemeWrapper cw =
+                            new android.view.ContextThemeWrapper(this, getTheme());
+                    Configuration cfg = new Configuration(getResources().getConfiguration());
+                    cfg.uiMode = (cfg.uiMode & ~Configuration.UI_MODE_NIGHT_MASK)
+                            | Configuration.UI_MODE_NIGHT_YES;
+                    cw.applyOverrideConfiguration(cfg);
+                    webCtx = cw;
+                } catch (Throwable ignored) { webCtx = this; }
+            }
+            WebView wv;
+            try {
+                wv = new AiWebView(webCtx);
+            } catch (Throwable ctorFail) {
+                // 极少数厂商 WebView 不接受 override Context：退回原生 Context 再建一次。
+                // 宁可暗色不生效，也绝不能因为这个功能让网页打不开。
+                if (webCtx != this) wv = new AiWebView(this);
+                else throw ctorFail;
+            }
             aiWebView = wv;
             // 顺序就是层级：网页最底 → 错误层 → 进度条 → 手势提示。一次排好，
             // 运行时不再 bringToFront（加载期间反复 requestLayout 会打断网页首次绘制）。
@@ -3075,6 +3107,19 @@ public class MainActivity extends Activity {
         s.setGeolocationEnabled(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         s.setMediaPlaybackRequiresUserGesture(true);
+        // 暗色：夜间 Context 已经让 prefers-color-scheme: dark 成立，网站自己的暗色样式会生效。
+        // 系统「算法反色」必须关掉，否则会在网站暗色之上再反一次，图片和品牌色糊成一团。
+        // API 33+ 用 setAlgorithmicDarkeningAllowed(false)；29~32 用 FORCE_DARK_OFF（同样不反色）。
+        // 全程 try/catch：不同厂商 WebView 实现有差异，这一项失败也不该让网页打不开。
+        if (aiWebDark) {
+            try {
+                if (Build.VERSION.SDK_INT >= 33) {
+                    s.setAlgorithmicDarkeningAllowed(false);
+                } else if (Build.VERSION.SDK_INT >= 29) {
+                    s.setForceDark(WebSettings.FORCE_DARK_OFF);
+                }
+            } catch (Throwable ignored) { }
+        }
         wv.setBackgroundColor(C_BG);
         wv.setHorizontalScrollBarEnabled(false);
         wv.setVerticalScrollBarEnabled(false);
@@ -5590,6 +5635,20 @@ public class MainActivity extends Activity {
             }
         }), wrap());
         aiWebCfgInner.addView(aiHint("关掉后 App 不往网页注入任何脚本，网页完全按原样显示。网页打开就黑屏时，先关掉它做对照。"), wrap());
+
+        aiWebCfgInner.addView(toggleRow("网页跟随暗色", aiWebDark,
+                new View.OnClickListener() {
+            public void onClick(View v) {
+                aiWebDark = !aiWebDark;
+                prefs.edit().putBoolean("ai_web_dark", aiWebDark).apply();
+                // 夜间模式是建 WebView 时定下来的，改开关必须重建网页视图才生效
+                try { buildAiWebScreen(); } catch (Throwable ignored) { }
+                renderAiWebCfg();
+                toast(aiWebDark ? "已切到暗色，重新进入问 AI 生效" : "已恢复网页原样");
+            }
+        }), wrap());
+        aiWebCfgInner.addView(aiHint("让网页以为系统是深色模式，网站的「跟随系统」就会自动变暗，"
+                + "和 App 风格一致。只改系统给网页的信号，不往网页注入脚本；关掉可做对照。"), wrap());
 
         aiWebCfgInner.addView(sectionHeader("登录"), wrap());
         aiWebCfgInner.addView(aiSettingBtn("重新登录（清除网页登录态）", new View.OnClickListener() {
@@ -10778,9 +10837,8 @@ public class MainActivity extends Activity {
     /** 滑块松手时的回调：用于在用户调完后统一保存并重建界面。 */
     private interface OnFloatRelease { void onReleased(float v); }
 
-    private TextView pvTag, pvTitle, pvBody, pvList, pvSub;
-    /** 预览卡片（拖动缩放时实时放大的那一张）。 */
-    private LinearLayout pvCard;
+    /** 高级字号区是否展开（只在本次界面有效，不落盘）。 */
+    private boolean displayAdvancedOpen = false;
 
     private void buildDisplayScreen() {
         displayScroll = new OverScrollScrollView(this);
@@ -10829,46 +10887,24 @@ public class MainActivity extends Activity {
     /** 就地重建整个界面（不销毁 Activity）：几毫秒完成，屏幕不会黑。 */
     private void rebuildUi(final int backTo) {
         buildUi();                  // 内部 setContentView(root)，旧树被替换
-        // 视图树整个重建了：所有列表都变成新建的空容器。把各「懒加载」标记打回，
-        // 让对应列表下次进入时重新填充，否则会显示空列表（主页黑屏就是 subjectDirty 漏了）。
-        subjectDirty = true;
-        lastQuery = null;           // 搜索列表：强制下次进搜索页重新刷新
-        mineDirty = true;           // 我的反馈列表：强制下次进入时重新拉取
+        resetLazyContentMarks();    // 新树里的列表容器都是空的，统一把「已填充」标记打回
         showScreen(backTo);         // 切页动画自带淡入，这里不再叠加第二层
     }
 
     /**
-     * 拖动缩放滑块时的实时预览：**只放大预览卡片**。
-     *
-     * 之前试过把整个 root 等比缩放，问题很明显：内容超出屏幕被裁、滑块自己被放大变形、
-     * 缩放是「拉伸」而非「重排」，比例跟真正缩放后的结果对不上，看着很怪。
-     * 现在只让预览卡片按比例长大——卡片本来就是用来预览效果的，
-     * 界面本体保持不动，松手后再由 applyDisplayChange 精确重排。
+     * 视图树整个换掉后，所有「内容已填充 / 已拉取」的标记都必须作废，否则新容器一直是空的。
+     * 以前这些标记散在 rebuildUi 里各写一行，漏一个就出现某个页面空白
+     * （问 AI 聊天页不跟随显示大小，就是漏了 chatDirty）。所有同类标记一律加到这里。
      */
-    private void applyLiveScale(float k) {
-        if (pvCard == null) return;
-        pvCard.setPivotX(pvCard.getWidth() / 2f);
-        pvCard.setPivotY(pvCard.getHeight() / 2f);
-        pvCard.setScaleX(k);
-        pvCard.setScaleY(k);
-    }
-
-    /** 复位预览卡片的缩放（松手重建前调用，避免和新的比例叠加）。 */
-    private void resetLiveScale() {
-        if (pvCard == null) return;
-        pvCard.setScaleX(1f);
-        pvCard.setScaleY(1f);
-    }
-
-    /** 预览区按当前值实时重算（界面缩放通过放大预览字号来体现）。 */
-    private void applyPreview() {
-        if (pvTitle == null) return;
-        float k = uiScale;
-        pvTag.setTextSize(Math.max(8f, (curSubSize() - 1f) * k));
-        pvTitle.setTextSize(curTitleSize() * k);
-        pvBody.setTextSize(fontSizeSp * k);
-        pvList.setTextSize(listSizeSp * k);
-        pvSub.setTextSize(curSubSize() * k);
+    private void resetLazyContentMarks() {
+        subjectDirty = true;        // 主页科目列表
+        lastQuery = null;           // 全局搜索：强制下次进搜索页重新刷新
+        mineDirty = true;           // 我的反馈：强制重新拉取
+        chatDirty = true;           // 问 AI 对话：强制重绘气泡（字号随 m 变化）
+        thanksLoaded = false;       // 关于页感谢名单
+        changelogFilled = false;    // 更新日志页
+        todayBuiltFor = "";         // 今日新增：按日期重建数据
+        // aiWebLoaded 不用管：buildAiWebScreen() 开头自己设 false
     }
 
     /** 一行滑块：上方标签与当前值，下方 SeekBar。 */
@@ -10937,16 +10973,36 @@ public class MainActivity extends Activity {
         return box;
     }
 
+    /** 显示大小的档位：用户看得懂的名字，而不是 0.85~1.40 这种裸数字。
+     *  底层仍用 uiScale 存（键不变，老用户设置不丢）。 */
+    private static final float[] DISPLAY_STEPS = {0.85f, 0.925f, 1.0f, 1.10f, 1.20f, 1.30f, 1.40f};
+    private static final String[] DISPLAY_NAMES = {"很小", "小", "标准", "大", "较大", "特大", "最大"};
+
+    /** 把任意 uiScale 归到最近档位（老版本存的可能是 1.07 这种中间值）。 */
+    private int displayStepIndex(float k) {
+        int best = 0;
+        float d = Float.MAX_VALUE;
+        for (int i = 0; i < DISPLAY_STEPS.length; i++) {
+            float diff = Math.abs(DISPLAY_STEPS[i] - k);
+            if (diff < d) { d = diff; best = i; }
+        }
+        return best;
+    }
+
     private String shownValue(float v, String unit) {
         if ("%".equals(unit)) return Math.round(v * 100) + "%";
+        if ("档".equals(unit)) {
+            int i = Math.round(v);
+            if (i < 0) i = 0;
+            if (i >= DISPLAY_NAMES.length) i = DISPLAY_NAMES.length - 1;
+            return DISPLAY_NAMES[i] + " · " + Math.round(DISPLAY_STEPS[i] * 100) + "%";
+        }
         return Math.round(v) + unit;
     }
 
     private void renderDisplayScreen() {
         if (displayInner == null) return;
         displayInner.removeAllViews();
-        pvTag = pvTitle = pvBody = pvList = pvSub = null;
-        pvCard = null;
 
         if (!tuningFirstRun) {
             displayInner.addView(makeBack("‹ 返回设置", new View.OnClickListener() {
@@ -10964,108 +11020,86 @@ public class MainActivity extends Activity {
 
         TextView tip = new TextView(this);
         tip.setText(tuningFirstRun
-                ? "第一次使用，先按自己的习惯把字号和界面大小调舒服。松手后整个界面立刻按新比例重排，调好点「完成，开始使用」。"
-                : "拖动滑块调整，上面的预览卡片会实时放大；松手后整个界面（字号、按钮、间距、图标）按新比例重新排版。");
+                ? "第一次使用，选一个看着舒服的大小就行，之后随时能在设置里改。松手立即生效。"
+                : "选一个档位，文字、按钮、间距会一起按新比例重新排版，松手立即生效。");
         tip.setTextSize(Math.max(9f, m.subtitleSize - 1f));
         tip.setTextColor(C_SUB);
         tip.setGravity(Gravity.CENTER);
-        tip.setPadding(dp(6), dp(3), dp(6), dp(6));
+        tip.setPadding(dp(6), dp(3), dp(6), dp(8));
         displayInner.addView(tip, wrap());
 
-        // ---- 预览卡片 ----
-        LinearLayout card = new LinearLayout(this);
-        pvCard = card;
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(11), dp(9), dp(11), dp(10));
-        card.setBackgroundDrawable(pill(C_CARD));
-
-        pvTag = new TextView(this);
-        pvTag.setText("第 5 章 · 示例分类");
-        pvTag.setTextColor(C_SUB);
-        card.addView(pvTag, wrap());
-
-        pvTitle = new TextView(this);
-        pvTitle.setText("示例知识点标题");
-        pvTitle.setGravity(Gravity.CENTER);
-        pvTitle.setTypeface(Typeface.DEFAULT_BOLD);
-        pvTitle.setTextColor(0xFFF2F2F2);
-        pvTitle.setPadding(0, dp(2), 0, dp(2));
-        card.addView(pvTitle, wrap());
-
-        pvBody = new TextView(this);
-        pvBody.setText("正文长这样：这里是一段说明文字，读懂它大概就知道正文的字号合不合适了。");
-        pvBody.setTextColor(C_TEXT);
-        card.addView(pvBody, wrap());
-
-        pvList = new TextView(this);
-        pvList.setText("列表项：三角恒等变换 ›");
-        pvList.setGravity(Gravity.CENTER);
-        pvList.setTextColor(0xFFEDEDED);
-        pvList.setPadding(0, dp(5), 0, 0);
-        card.addView(pvList, wrap());
-
-        pvSub = new TextView(this);
-        pvSub.setText("小字：路径、提示、计数用这个字号");
-        pvSub.setGravity(Gravity.CENTER);
-        pvSub.setTextColor(C_SUB);
-        card.addView(pvSub, wrap());
-
-        LinearLayout.LayoutParams cardLp = wrap();
-        cardLp.topMargin = dp(6);
-        displayInner.addView(card, cardLp);
-
-        applyPreview();
-
-        // ---- 字号滑块 ----
-        displayInner.addView(sectionHeader("字号"), wrap());
-        displayInner.addView(sliderRow("正文字号", fontSizeSp, 11, 22, 1, "sp",
-                new OnFloatChange() {
-                    public void onChanged(float v) { fontSizeSp = v; applyPreview(); }
-                }, new OnFloatRelease() {
-                    public void onReleased(float v) { applyDisplayChange(S_DISPLAY); }
-                }), wrap());
-        displayInner.addView(sliderRow("列表字号", listSizeSp, 12, 20, 1, "sp",
-                new OnFloatChange() {
-                    public void onChanged(float v) { listSizeSp = v; applyPreview(); }
-                }, new OnFloatRelease() {
-                    public void onReleased(float v) { applyDisplayChange(S_DISPLAY); }
-                }), wrap());
-        displayInner.addView(sliderRow("标题字号", curTitleSize(), 13, 26, 1, "sp",
-                new OnFloatChange() {
-                    public void onChanged(float v) { titleSizeSp = v; applyPreview(); }
-                }, new OnFloatRelease() {
-                    public void onReleased(float v) { applyDisplayChange(S_DISPLAY); }
-                }), wrap());
-        displayInner.addView(sliderRow("说明小字", curSubSize(), 9, 16, 1, "sp",
-                new OnFloatChange() {
-                    public void onChanged(float v) { subSizeSp = v; applyPreview(); }
-                }, new OnFloatRelease() {
-                    public void onReleased(float v) { applyDisplayChange(S_DISPLAY); }
-                }), wrap());
-
-        // ---- 界面大小 ----
-        displayInner.addView(sectionHeader("界面大小"), wrap());
-        displayInner.addView(sliderRow("整体缩放", uiScale, 0.85f, 1.40f, 0.05f, "%",
+        // ---- 主区：只有一个「显示大小」档位滑块 ----
+        displayInner.addView(sectionHeader("显示大小"), wrap());
+        int steps = DISPLAY_STEPS.length - 1;
+        displayInner.addView(sliderRow("显示大小", displayStepIndex(uiScale), 0, steps, 1, "档",
                 new OnFloatChange() {
                     public void onChanged(float v) {
-                        uiScale = v;
-                        applyPreview();
-                        applyLiveScale(v);   // 拖动过程中只放大预览卡片，界面本体松手后重建
+                        int i = Math.round(v);
+                        if (i < 0) i = 0;
+                        if (i >= DISPLAY_STEPS.length) i = DISPLAY_STEPS.length - 1;
+                        uiScale = DISPLAY_STEPS[i];
                     }
                 }, new OnFloatRelease() {
                     public void onReleased(float v) {
-                        // 先把预览卡片的缩放复位，再精确重建，避免两套缩放叠在一起
-                        resetLiveScale();
-                        applyDisplayChange(S_DISPLAY);
+                        applyDisplayChange(S_DISPLAY);   // 松手就地重建，整页按新比例重排
                     }
                 }), wrap());
-        TextView scaleHint = new TextView(this);
-        scaleHint.setText("拖动时上面的预览卡片会实时放大，松手后整个界面按新比例重新排版。调大后文字、按钮、间距、图标一起变大，适合手指粗或看不清的人；表盘小的机型建议不要超过 115%。");
-        scaleHint.setTextSize(Math.max(9f, m.subtitleSize - 2f));
-        scaleHint.setTextColor(C_SUB);
-        scaleHint.setGravity(Gravity.CENTER);
-        scaleHint.setPadding(dp(4), dp(2), dp(4), dp(4));
-        displayInner.addView(scaleHint, wrap());
+        displayInner.addView(aiHint("调大后文字、按钮、间距、图标一起变大，适合手指粗或看不清的人；"
+                + "表盘小的机型建议别超过「较大」。"), wrap());
+
+        // ---- 高级：单独调四类字号，默认收起 ----
+        final LinearLayout advBox = new LinearLayout(this);
+        advBox.setOrientation(LinearLayout.VERTICAL);
+        final TextView advBtn = new TextView(this);
+        advBtn.setText(displayAdvancedOpen ? "▾ 高级：分别调整字号" : "▸ 高级：分别调整字号");
+        advBtn.setTextSize(m.backSize);
+        advBtn.setTextColor(C_SUB);
+        advBtn.setGravity(Gravity.CENTER);
+        advBtn.setPadding(dp(10), dp(10), dp(10), dp(10));
+        advBtn.setBackground(clickBg(C_PILL));
+        advBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                displayAdvancedOpen = !displayAdvancedOpen;
+                advBtn.setText(displayAdvancedOpen ? "▾ 高级：分别调整字号" : "▸ 高级：分别调整字号");
+                advBox.setVisibility(displayAdvancedOpen ? View.VISIBLE : View.GONE);
+            }
+        });
+        LinearLayout.LayoutParams advLp = wrap();
+        advLp.topMargin = dp(10);
+        displayInner.addView(advBtn, advLp);
+        advBox.setVisibility(displayAdvancedOpen ? View.VISIBLE : View.GONE);
+        displayInner.addView(advBox, wrap());
+
+        advBox.addView(aiHint("一般不用动这里。只有当你觉得某一类文字单独偏大/偏小时才调。"), wrap());
+        advBox.addView(sliderRow("正文字号", fontSizeSp, 11, 22, 1, "sp",
+                new OnFloatChange() {
+                    public void onChanged(float v) { fontSizeSp = v; }
+                }, new OnFloatRelease() {
+                    public void onReleased(float v) { applyDisplayChange(S_DISPLAY); }
+                }), wrap());
+        advBox.addView(sliderRow("列表字号", listSizeSp, 12, 20, 1, "sp",
+                new OnFloatChange() {
+                    public void onChanged(float v) { listSizeSp = v; }
+                }, new OnFloatRelease() {
+                    public void onReleased(float v) { applyDisplayChange(S_DISPLAY); }
+                }), wrap());
+        advBox.addView(sliderRow("标题字号", curTitleSize(), 13, 26, 1, "sp",
+                new OnFloatChange() {
+                    public void onChanged(float v) { titleSizeSp = v; }
+                }, new OnFloatRelease() {
+                    public void onReleased(float v) { applyDisplayChange(S_DISPLAY); }
+                }), wrap());
+        advBox.addView(sliderRow("说明小字", curSubSize(), 9, 16, 1, "sp",
+                new OnFloatChange() {
+                    public void onChanged(float v) { subSizeSp = v; }
+                }, new OnFloatRelease() {
+                    public void onReleased(float v) { applyDisplayChange(S_DISPLAY); }
+                }), wrap());
+
+        // ---- 网页版单独说明：它是第三方网页，显示大小管不到 ----
+        displayInner.addView(aiHint("问 AI 的网页版是第三方网页，字号由网页自己控制；"
+                + "它的缩放和暗色在「问 AI → 网页版设置」里单独调。"), wrap());
 
         // ---- 底部按钮 ----
         TextView done = new TextView(this);
@@ -11085,8 +11119,35 @@ public class MainActivity extends Activity {
             }
         });
         LinearLayout.LayoutParams doneLp = wrap();
-        doneLp.topMargin = dp(10);
+        doneLp.topMargin = dp(12);
         displayInner.addView(done, doneLp);
+
+        // 首启可跳过：直接按默认档位进主页，不强制用户先调一通
+        if (tuningFirstRun) {
+            TextView skip = new TextView(this);
+            skip.setText("跳过，用默认大小");
+            skip.setTextSize(Math.max(9f, m.subtitleSize - 1f));
+            skip.setGravity(Gravity.CENTER);
+            skip.setTextColor(C_SUB);
+            skip.setPadding(dp(10), dp(10), dp(10), dp(10));
+            skip.setBackground(clickBg(C_PILL));
+            skip.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    vibrate();
+                    fontSizeSp = m.round ? 13f : 14f;
+                    listSizeSp = m.round ? 14f : 15f;
+                    titleSizeSp = 0f;
+                    subSizeSp = 0f;
+                    uiScale = 1f;
+                    prefs.edit().putBoolean("display_tuned", true).apply();
+                    tuningFirstRun = false;
+                    applyDisplayChange(S_SETTINGS);
+                }
+            });
+            LinearLayout.LayoutParams skipLp = wrap();
+            skipLp.topMargin = dp(5);
+            displayInner.addView(skip, skipLp);
+        }
 
         TextView reset = new TextView(this);
         reset.setText("恢复默认");
