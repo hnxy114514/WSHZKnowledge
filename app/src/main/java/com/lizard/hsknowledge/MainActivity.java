@@ -664,6 +664,13 @@ public class MainActivity extends Activity {
     /** 列表字号（含整体缩放）。 */
     private float lsSp() { return listSizeSp * uiScale; }
 
+    /** 问 AI 对话页专用字号：绑「正文字号 / 列表字号」而不是「说明小字」，
+     *  下限也要跟着 uiScale 走，不能写死 9f（写死会把小档位全钳成一样大，看着像没生效）。
+     *  以前用 m.subtitleSize（说明小字 11sp）+ Math.max(9f,…)，调档位几乎看不出变化。 */
+    private float chatBodySize() { return Math.max(10f * uiScale, fsSp()); }
+    private float chatBarSize()  { return Math.max(9f * uiScale, lsSp() - 3f); }
+    private float chatTinySize() { return Math.max(8f * uiScale, fsSp() - 3f); }
+
     private int dp(float v) {
         float px = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v,
                 getResources().getDisplayMetrics());
@@ -4391,7 +4398,7 @@ public class MainActivity extends Activity {
 
         TextView model = new TextView(this);
         aiChatModelBtn = model;
-        aiChatModelBtn.setTextSize(Math.max(9f, m.subtitleSize - 2f));
+        aiChatModelBtn.setTextSize(chatBarSize());
         aiChatModelBtn.setTextColor(C_SUB);
         aiChatModelBtn.setGravity(Gravity.CENTER);
         aiChatModelBtn.setSingleLine(true);
@@ -4414,7 +4421,7 @@ public class MainActivity extends Activity {
         TextView think = new TextView(this);
         chatThinkBtn = think;
         think.setText(chatShowThink ? "思考 开" : "思考 关");
-        think.setTextSize(Math.max(9f, m.subtitleSize - 2f));
+        think.setTextSize(chatBarSize());
         think.setTypeface(chatShowThink ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
         think.setTextColor(chatShowThink ? C_PRIMARY : C_SUB);
         think.setGravity(Gravity.CENTER);
@@ -4443,7 +4450,7 @@ public class MainActivity extends Activity {
 
         TextView clear = new TextView(this);
         clear.setText("清空");
-        clear.setTextSize(Math.max(9f, m.subtitleSize - 2f));
+        clear.setTextSize(chatBarSize());
         clear.setTextColor(C_SUB);
         clear.setGravity(Gravity.CENTER);
         clear.setPadding(dp(8), dp(6), dp(8), dp(6));
@@ -4477,11 +4484,12 @@ public class MainActivity extends Activity {
         // 贴着屏幕最下沿：圆屏只留一点点（4dp 起），宽度由下面的圆几何另算，不会出圆
         int bottomGap = m.round ? Math.max(dp(5), Math.round(m.roundSafe * 0.55f)) : dp(4);
         aiChatBar.setPadding(0, dp(2), 0, bottomGap);
-        int barH = dp(38);
+        // 高度跟着档位走：最大档字号 16sp 时固定 38dp 会把字挤扁
+        int barH = Math.max(dp(38), Math.round(chatBarSize() * 2.6f));
 
         aiChatInputBtn = new TextView(this);
         aiChatInputBtn.setText("发消息");
-        aiChatInputBtn.setTextSize(m.subtitleSize - 1f);
+        aiChatInputBtn.setTextSize(chatBarSize());
         aiChatInputBtn.setTypeface(Typeface.DEFAULT_BOLD);
         aiChatInputBtn.setTextColor(C_PRIMARY);
         aiChatInputBtn.setGravity(Gravity.CENTER);
@@ -4495,7 +4503,7 @@ public class MainActivity extends Activity {
 
         aiChatStopBtn = new TextView(this);
         aiChatStopBtn.setText("取消");
-        aiChatStopBtn.setTextSize(m.subtitleSize - 1f);
+        aiChatStopBtn.setTextSize(chatBarSize());
         aiChatStopBtn.setGravity(Gravity.CENTER);
         aiChatStopBtn.setSingleLine(true);
         aiChatStopBtn.setPadding(dp(4), 0, dp(4), 0);
@@ -4540,7 +4548,7 @@ public class MainActivity extends Activity {
         aiChatInner.removeAllViews();
         TextView t = new TextView(this);
         t.setText("正在整理对话…");
-        t.setTextSize(m.subtitleSize - 2f);
+        t.setTextSize(chatTinySize());
         t.setTextColor(C_SUB);
         t.setGravity(Gravity.CENTER);
         t.setPadding(dp(8), dp(20), dp(8), dp(20));
@@ -4607,7 +4615,7 @@ public class MainActivity extends Activity {
             TextView hint = new TextView(this);
             hint.setText("点下面一行写问题。\n回答里提到的知识点带下划线，点一下就跳过去。\n"
                     + "回答来自你配置的接口，App 只做转发：不存盘、不上传。");
-            hint.setTextSize(m.subtitleSize - 2f);
+            hint.setTextSize(chatTinySize());
             hint.setTextColor(C_SUB);
             hint.setGravity(Gravity.CENTER);
             hint.setLineSpacing(dp(3), 1.3f);
@@ -4879,7 +4887,7 @@ public class MainActivity extends Activity {
             // 推理内容可能比正文晚到：先建一个空行占位，流式时再显形
             TextView rt = new TextView(this);
             rt.setText(msg.reasoning.length() == 0 ? "" : "思考：" + prettyReasoning(msg.reasoning));
-            rt.setTextSize(Math.max(9f, m.subtitleSize - 3f));
+            rt.setTextSize(chatTinySize());
             rt.setTextColor(C_SUB);
             rt.setLineSpacing(dp(1), 1.2f);
             rt.setVisibility(msg.reasoning.length() > 0 ? View.VISIBLE : View.GONE);
@@ -4891,7 +4899,7 @@ public class MainActivity extends Activity {
             // 思考藏起来时，生成期间只说一句「思考中…」，正文一开始就撤掉
             TextView wait = new TextView(this);
             wait.setText("思考中…");
-            wait.setTextSize(Math.max(9f, m.subtitleSize - 3f));
+            wait.setTextSize(chatTinySize());
             wait.setTextColor(C_SUB);
             LinearLayout.LayoutParams wlp = wrap();
             wlp.bottomMargin = dp(3);
@@ -4918,7 +4926,7 @@ public class MainActivity extends Activity {
             }
             body.setText(msg.bodySpan);
         }
-        body.setTextSize(m.subtitleSize - 1f);
+        body.setTextSize(chatBodySize());
         body.setTextColor(msg.err != null ? 0xFFFFB74D : C_TEXT);
         body.setLineSpacing(dp(2), 1.25f);
         box.addView(body, wrap());
@@ -4963,7 +4971,7 @@ public class MainActivity extends Activity {
         if (canFold) {
             TextView tip = new TextView(this);
             tip.setText("双击展开");
-            tip.setTextSize(Math.max(9f, m.subtitleSize - 3f));
+            tip.setTextSize(chatTinySize());
             tip.setTextColor(C_SUB);
             tip.setGravity(Gravity.CENTER);
             tip.setVisibility(msg.folded ? View.VISIBLE : View.GONE);
@@ -4982,13 +4990,13 @@ public class MainActivity extends Activity {
             relBox.setVisibility(msg.folded ? View.GONE : View.VISIBLE);
             TextView rt = new TextView(this);
             rt.setText("相关知识点");
-            rt.setTextSize(Math.max(9f, m.subtitleSize - 3f));
+            rt.setTextSize(chatTinySize());
             rt.setTextColor(C_SUB);
             relBox.addView(rt, wrap());
             for (final Node n : msg.related) {
                 TextView row = new TextView(this);
                 row.setText("› " + n.name);
-                row.setTextSize(Math.max(9f, m.subtitleSize - 2f));
+                row.setTextSize(chatBarSize());
                 row.setTextColor(C_PRIMARY);
                 row.setPadding(dp(2), dp(3), dp(2), dp(3));
                 row.setOnClickListener(new View.OnClickListener() {
@@ -5008,7 +5016,7 @@ public class MainActivity extends Activity {
         if (msg.truncated && !user && msg.err == null) {
             TextView more = new TextView(this);
             more.setText("继续");
-            more.setTextSize(Math.max(9f, m.subtitleSize - 2f));
+            more.setTextSize(chatBarSize());
             more.setTypeface(Typeface.DEFAULT_BOLD);
             more.setTextColor(C_PRIMARY);
             more.setGravity(Gravity.CENTER);
@@ -5028,7 +5036,7 @@ public class MainActivity extends Activity {
         if (msg.err != null && !user) {
             TextView retry = new TextView(this);
             retry.setText("重试");
-            retry.setTextSize(Math.max(9f, m.subtitleSize - 2f));
+            retry.setTextSize(chatBarSize());
             retry.setTypeface(Typeface.DEFAULT_BOLD);
             retry.setTextColor(C_PRIMARY);
             retry.setGravity(Gravity.CENTER);
@@ -5090,7 +5098,7 @@ public class MainActivity extends Activity {
 
         TextView t = new TextView(this);
         t.setText("问点什么");
-        t.setTextSize(m.subtitleSize);
+        t.setTextSize(chatBarSize());
         t.setTypeface(Typeface.DEFAULT_BOLD);
         t.setTextColor(Color.WHITE);
         t.setGravity(Gravity.CENTER);
@@ -5098,7 +5106,7 @@ public class MainActivity extends Activity {
 
         final EditText ed = new EditText(this);
         ed.setHint("输入问题");
-        ed.setTextSize(m.subtitleSize - 1f);
+        ed.setTextSize(chatBodySize());
         ed.setTextColor(Color.WHITE);
         ed.setHintTextColor(C_SUB);
         ed.setBackgroundDrawable(pill(C_PILL));
@@ -10954,6 +10962,7 @@ public class MainActivity extends Activity {
             sb.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF2E2E2E));
         } catch (Exception ignored) { }
         sb.setPadding(0, 0, 0, 0);
+        final boolean[] released = {false};
         sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             float cur = value;
             public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
@@ -10961,12 +10970,36 @@ public class MainActivity extends Activity {
                 cur = v;
                 val.setText(shownValue(v, unit));
                 onChange.onChanged(v);
+                released[0] = false;
             }
-            public void onStartTrackingTouch(SeekBar bar) { sliderTouching = true; }
+            public void onStartTrackingTouch(SeekBar bar) {
+                sliderTouching = true;
+                released[0] = false;
+            }
             public void onStopTrackingTouch(SeekBar bar) {
                 sliderTouching = false;
+                released[0] = true;
                 vibrate();
                 if (onRelease != null) onRelease.onReleased(cur);
+            }
+        });
+        // 有些 ROM / 手表上「点一下档位」不会走 onStopTrackingTouch，只发 ACTION_UP。
+        // 兜底 post 到下一帧再判断：onTouchListener 比 onStopTrackingTouch 先执行，
+        // 延后一帧才能让「正常松手已提交」的情况先置上 released，避免重建两次。
+        sb.setOnTouchListener(new View.OnTouchListener() {
+            public boolean onTouch(View v, MotionEvent ev) {
+                if (ev.getActionMasked() == MotionEvent.ACTION_UP) {
+                    final SeekBar bar = sb;
+                    bar.post(new Runnable() {
+                        public void run() {
+                            if (released[0]) return;
+                            released[0] = true;
+                            sliderTouching = false;
+                            if (onRelease != null) onRelease.onReleased(min + bar.getProgress() * step);
+                        }
+                    });
+                }
+                return false;   // 不消费，SeekBar 自己的拖动逻辑照常
             }
         });
         box.addView(sb, wrap());
