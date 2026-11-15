@@ -258,15 +258,19 @@ public class MainActivity extends Activity {
             "https://api.deepseek.com", "https://api.openai.com/v1", ""};
     private static final String[] API_PRESET_MODEL = {"deepseek-chat", "gpt-4o-mini", ""};
     private static final float[] API_TEMPS = {0.2f, 0.7f, 1.0f, 1.3f};
-    private static final int[] API_CTX = {4, 8, 16};
-    private static final int[] API_MAX = {256, 512, 1024, 2048};
+    private static final int API_CTX_DEFAULT = 8;        // 上下文轮数默认
+    private static final int API_CTX_MIN = 1, API_CTX_MAX = 50;
+    private static final int API_MAX_DEFAULT = 1024;     // 最大回复长度默认（用户指定）
+    private static final int API_MAX_MIN = 128, API_MAX_MAX = 32768;
     private static final String[] API_THINK = {"关闭", "标准", "深度"};
 
     private int aiApiPreset = 0;
     private String aiApiEndpoint = API_PRESET_BASE[0];   // 不带尾斜杠
     private String aiApiModel = API_PRESET_MODEL[0];
     private String aiApiSecret = "";                    // 明文只在内存，落盘走 seal()
-    private int aiApiTempIdx = 1, aiApiCtxIdx = 1, aiApiMaxIdx = 1, aiApiThinkIdx = 0;
+    private int aiApiTempIdx = 1, aiApiThinkIdx = 0;
+    /** 上下文轮数与最大回复长度：用户自己填的整数，不再是点击切档位。 */
+    private int aiApiCtx = API_CTX_DEFAULT, aiApiMax = API_MAX_DEFAULT;
     /** 拉取到的模型列表（只在内存，重进页面会重拉）。 */
     private final List<String> aiApiModels = new ArrayList<String>();
     /** 正在拉模型 / 测连接的提示；null = 空闲。 */
@@ -3416,21 +3420,13 @@ public class MainActivity extends Activity {
                         renderAiApi();
                     }
                 }), gap());
-        aiApiInner.addView(apiValueRow("上下文轮数", API_CTX[aiApiCtxIdx] + " 轮",
+        aiApiInner.addView(apiValueRow("上下文轮数", aiApiCtx + " 轮",
                 new View.OnClickListener() {
-                    public void onClick(View v) {
-                        aiApiCtxIdx = (aiApiCtxIdx + 1) % API_CTX.length;
-                        saveApiConfig();
-                        renderAiApi();
-                    }
+                    public void onClick(View v) { editApiInt("上下文轮数", 1, 50, aiApiCtx, true); }
                 }), gap());
-        aiApiInner.addView(apiValueRow("最大回复长度", API_MAX[aiApiMaxIdx] + " 字",
+        aiApiInner.addView(apiValueRow("最大回复长度", aiApiMax + " 字",
                 new View.OnClickListener() {
-                    public void onClick(View v) {
-                        aiApiMaxIdx = (aiApiMaxIdx + 1) % API_MAX.length;
-                        saveApiConfig();
-                        renderAiApi();
-                    }
+                    public void onClick(View v) { editApiInt("最大回复长度", 128, 32768, aiApiMax, false); }
                 }), gap());
         aiApiInner.addView(apiValueRow("思考强度", API_THINK[aiApiThinkIdx],
                 new View.OnClickListener() {
@@ -3440,8 +3436,9 @@ public class MainActivity extends Activity {
                         renderAiApi();
                     }
                 }), gap());
-        aiApiInner.addView(aiHint("最大回复长度太小会把公式表截断（接口按词算，中文更费）；"
-                + "公式多的回答建议 1024 以上。被截断时对话里会出现「继续」。"), wrap());
+        aiApiInner.addView(aiHint("两项都点开直接填数字：轮数越多带的历史越长、越费 token；"
+                + "最大回复长度按接口的字算（中文更费），太小会把公式和回答截断，被截断时对话里会出现「继续」。"
+                + "公式多的回答建议 1024 以上；填太大也可能被接口本身的上限挡回来。"), wrap());
         aiApiInner.addView(aiHint("温度越高越发散；思考强度是发给接口的参数，只对支持的模型生效。"
                 + "对话页顶部的「思考 开/关」只控制显不显示思考过程，两者互不影响。"), wrap());
 
@@ -3495,8 +3492,17 @@ public class MainActivity extends Activity {
         aiApiEndpoint = prefs.getString("api_endpoint", API_PRESET_BASE[aiApiPreset]);
         aiApiModel = prefs.getString("api_model", API_PRESET_MODEL[aiApiPreset]);
         aiApiTempIdx = clampIdx(prefs.getInt("api_temp", 1), API_TEMPS.length);
-        aiApiCtxIdx = clampIdx(prefs.getInt("api_ctx", 1), API_CTX.length);
-        aiApiMaxIdx = clampIdx(prefs.getInt("api_max", 1), API_MAX.length);
+        // 新版存整数；老版本存的是 {4,8,16} / {256,512,1024,2048} 的档位下标，做一次迁移
+        if (prefs.contains("api_ctx_num") || prefs.contains("api_max_num")) {
+            aiApiCtx = clampInt(prefs.getInt("api_ctx_num", API_CTX_DEFAULT),
+                    API_CTX_MIN, API_CTX_MAX, API_CTX_DEFAULT);
+            aiApiMax = clampInt(prefs.getInt("api_max_num", API_MAX_DEFAULT),
+                    API_MAX_MIN, API_MAX_MAX, API_MAX_DEFAULT);
+        } else {
+            int[] OLD_CTX = {4, 8, 16}, OLD_MAX = {256, 512, 1024, 2048};
+            aiApiCtx = OLD_CTX[clampIdx(prefs.getInt("api_ctx", 1), OLD_CTX.length)];
+            aiApiMax = OLD_MAX[clampIdx(prefs.getInt("api_max", 2), OLD_MAX.length)];
+        }
         aiApiThinkIdx = clampIdx(prefs.getInt("api_think", 0), API_THINK.length);
         // 拉取过的模型列表也存本地：不存的话杀掉重进列表就空了，顶部按钮会退化成手填框
         aiApiModels.clear();
@@ -3518,6 +3524,12 @@ public class MainActivity extends Activity {
         return (v < 0 || v >= len) ? 0 : v;
     }
 
+    /** 用户填的整数：越界就退回默认值，免得手滑填个 999999 把接口打爆。 */
+    private static int clampInt(int v, int min, int max, int def) {
+        if (v < min || v > max) return def;
+        return v;
+    }
+
     private SharedPreferences secretPrefs() {
         return getSharedPreferences(API_SECRET_PREF, Context.MODE_PRIVATE);
     }
@@ -3531,8 +3543,8 @@ public class MainActivity extends Activity {
                 .putString("api_model", aiApiModel)
                 .putString("api_models", a.toString())
                 .putInt("api_temp", aiApiTempIdx)
-                .putInt("api_ctx", aiApiCtxIdx)
-                .putInt("api_max", aiApiMaxIdx)
+                .putInt("api_ctx_num", aiApiCtx)
+                .putInt("api_max_num", aiApiMax)
                 .putInt("api_think", aiApiThinkIdx)
                 .apply();
     }
@@ -3855,8 +3867,41 @@ public class MainActivity extends Activity {
         void onText(String text);
     }
 
+    /** 上下文轮数 / 最大回复长度：自己填数字，不再是点一下换个档位。
+     *  越界直接给提示并拒绝保存，不默默改值（免得用户以为填成功了）。 */
+    private void editApiInt(String title, final int min, final int max, int cur,
+                            final boolean isCtx) {
+        apiInputDialog(title, min + "～" + max, String.valueOf(cur), false, true,
+                new ApiTextSink() {
+                    public void onText(String v) {
+                        String s = v == null ? "" : v.trim();
+                        int n;
+                        try {
+                            n = Integer.parseInt(s);
+                        } catch (Exception e) {
+                            toast("请填数字");
+                            return;
+                        }
+                        if (n < min || n > max) {
+                            toast("请填 " + min + "～" + max + " 之间");
+                            return;
+                        }
+                        if (isCtx) aiApiCtx = n;
+                        else aiApiMax = n;
+                        saveApiConfig();
+                        renderAiApi();
+                    }
+                });
+    }
+
     private void apiInputDialog(String title, String hint, String initial, boolean secret,
                                 final ApiTextSink sink) {
+        apiInputDialog(title, hint, initial, secret, false, sink);
+    }
+
+    /** digitsOnly=true 时让系统输入法切成数字键盘，并只收数字字符（键盘仍是系统输入法，不是自绘键盘）。 */
+    private void apiInputDialog(String title, String hint, String initial, boolean secret,
+                                boolean digitsOnly, final ApiTextSink sink) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(13), dp(12), dp(13), dp(8));
@@ -3882,12 +3927,29 @@ public class MainActivity extends Activity {
         ed.setHintTextColor(C_SUB);
         ed.setBackgroundDrawable(pill(C_PILL));
         ed.setPadding(dp(10), dp(8), dp(10), dp(8));
-        // 密码型不显示明文；地址/模型名用 URI 类型，避免首字母自动大写把地址写坏
+        // 密码型不显示明文；地址/模型名用 URI 类型，避免首字母自动大写把地址写坏；数字项切数字键盘。
+        // 数字键盘是系统输入法的一种布局（仍是系统键盘），再叠一层 InputFilter 兜住粘贴进来的非数字。
         ed.setInputType(secret
                 ? (android.text.InputType.TYPE_CLASS_TEXT
                 | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD)
+                : (digitsOnly
+                ? android.text.InputType.TYPE_CLASS_NUMBER
                 : (android.text.InputType.TYPE_CLASS_TEXT
-                | android.text.InputType.TYPE_TEXT_VARIATION_URI));
+                | android.text.InputType.TYPE_TEXT_VARIATION_URI)));
+        if (digitsOnly) {
+            ed.setFilters(new android.text.InputFilter[]{new android.text.InputFilter() {
+                public CharSequence filter(CharSequence source, int start, int end,
+                                           Spanned dest, int dstart, int dend) {
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = start; i < end; i++) {
+                        char c = source.charAt(i);
+                        if (c >= '0' && c <= '9') sb.append(c);
+                    }
+                    // 只保留数字；被剔掉的字符由系统丢弃，不影响用户继续输入
+                    return sb.length() == (end - start) ? null : sb.toString();
+                }
+            }});
+        }
         LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         elp.topMargin = dp(6);
@@ -5162,9 +5224,9 @@ public class MainActivity extends Activity {
         updateChatBar();
         final String model = aiApiModel;
         final float temp = API_TEMPS[aiApiTempIdx];
-        final int maxTok = API_MAX[aiApiMaxIdx];
+        final int maxTok = aiApiMax;
         final int think = aiApiThinkIdx;
-        final JSONArray ctx = chatContext(API_CTX[aiApiCtxIdx]);
+        final JSONArray ctx = chatContext(aiApiCtx);
         final ChatMsg target = chatMsgs.get(chatMsgs.size() - 1);
         Thread t = new Thread(new Runnable() {
             public void run() {
