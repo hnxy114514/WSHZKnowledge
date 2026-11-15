@@ -3498,6 +3498,18 @@ public class MainActivity extends Activity {
         aiApiCtxIdx = clampIdx(prefs.getInt("api_ctx", 1), API_CTX.length);
         aiApiMaxIdx = clampIdx(prefs.getInt("api_max", 1), API_MAX.length);
         aiApiThinkIdx = clampIdx(prefs.getInt("api_think", 0), API_THINK.length);
+        // 拉取过的模型列表也存本地：不存的话杀掉重进列表就空了，顶部按钮会退化成手填框
+        aiApiModels.clear();
+        String models = prefs.getString("api_models", "");
+        if (models.length() > 0) {
+            try {
+                JSONArray a = new JSONArray(models);
+                for (int i = 0; i < a.length(); i++) {
+                    String id = a.optString(i, "").trim();
+                    if (id.length() > 0 && !aiApiModels.contains(id)) aiApiModels.add(id);
+                }
+            } catch (Throwable ignored) { }
+        }
         aiApiSecret = apiUnseal(secretPrefs().getString(API_SECRET_KEY, ""));
         chatShowThink = prefs.getBoolean("chat_show_think", false);
     }
@@ -3511,10 +3523,13 @@ public class MainActivity extends Activity {
     }
 
     private void saveApiConfig() {
+        JSONArray a = new JSONArray();
+        for (String s : aiApiModels) a.put(s);
         prefs.edit()
                 .putInt("api_preset", aiApiPreset)
                 .putString("api_endpoint", aiApiEndpoint)
                 .putString("api_model", aiApiModel)
+                .putString("api_models", a.toString())
                 .putInt("api_temp", aiApiTempIdx)
                 .putInt("api_ctx", aiApiCtxIdx)
                 .putInt("api_max", aiApiMaxIdx)
@@ -3706,31 +3721,38 @@ public class MainActivity extends Activity {
         });
     }
 
+    /** 设置页点「模型」：模型名只有一个本地变量，改法有两种——从拉取的列表里选、或手动输入。 */
     private void pickApiModel() {
         if (aiApiModels.isEmpty()) {
-            // 还没拉过：直接给输入框，省得用户先点一次拉取
-            apiInputDialog("模型名", "如 deepseek-chat", aiApiModel, false, new ApiTextSink() {
-                public void onText(String v) {
-                    String s = v == null ? "" : v.trim();
-                    if (s.length() == 0) {
-                        toast("模型名不能为空");
-                        return;
-                    }
-                    aiApiModel = s;
-                    saveApiConfig();
-                    renderAiApi();
-                }
-            });
+            editApiModelName(null);
             return;
         }
-        showApiModelPicker();
+        showApiModelPicker(null, true);
+    }
+
+    /** 手动改模型名：只在设置页用，对话页顶部不给输入框。 */
+    private void editApiModelName(final Runnable after) {
+        apiInputDialog("模型名", "如 deepseek-chat", aiApiModel, false, new ApiTextSink() {
+            public void onText(String v) {
+                String s = v == null ? "" : v.trim();
+                if (s.length() == 0) {
+                    toast("模型名不能为空");
+                    return;
+                }
+                aiApiModel = s;
+                saveApiConfig();
+                if (after != null) after.run();
+                else renderAiApi();
+            }
+        });
     }
 
     /** 拉取到的模型列表：模型多的服务商有几十个，所以放进滚动区。 */
-    private void showApiModelPicker() { showApiModelPicker(null); }
+    private void showApiModelPicker() { showApiModelPicker(null, true); }
 
-    /** after 非空时选完调它（对话页要重绘自己，而不是设置页）；否则刷新设置页。 */
-    private void showApiModelPicker(final Runnable after) {
+    /** after 非空时选完调它（对话页要重绘自己，而不是设置页）；否则刷新设置页。
+     *  allowManual 只在设置页为 true：选择列表底部带一行「手动输入模型名」。 */
+    private void showApiModelPicker(final Runnable after, final boolean allowManual) {
         if (aiApiModels.isEmpty()) return;
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -3787,6 +3809,26 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT, m.round ? dp(150) : dp(240));
         slp.topMargin = dp(4);
         box.addView(sv, slp);
+
+        if (allowManual) {
+            TextView manual = new TextView(this);
+            manual.setText("手动输入模型名");
+            manual.setTextSize(m.subtitleSize - 1f);
+            manual.setTextColor(C_PRIMARY);
+            manual.setGravity(Gravity.CENTER);
+            manual.setPadding(dp(8), dp(7), dp(8), dp(7));
+            manual.setBackgroundDrawable(clickBg(C_PILL));
+            manual.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    vibrate();
+                    try { d.dismiss(); } catch (Throwable ignored) { }
+                    editApiModelName(after);
+                }
+            });
+            LinearLayout.LayoutParams mlp2 = wrap();
+            mlp2.topMargin = dp(4);
+            box.addView(manual, mlp2);
+        }
 
         TextView no = new TextView(this);
         no.setText("取消");
@@ -4134,11 +4176,10 @@ public class MainActivity extends Activity {
                         aiApiModels.clear();
                         aiApiModels.addAll(ids);
                         // 还没选过模型：直接把第一个填上，省得再点一次
-                        if (aiApiModel.trim().length() == 0) {
-                            aiApiModel = ids.get(0);
-                            saveApiConfig();
-                            if (screen == S_AI_API_CFG) renderAiApi();
-                        }
+                        if (aiApiModel.trim().length() == 0) aiApiModel = ids.get(0);
+                        // 列表和当前模型一起落盘：下次进来顶部按钮还能直接切
+                        saveApiConfig();
+                        if (screen == S_AI_API_CFG) renderAiApi();
                         showApiModelPicker();
                     }
                 });
@@ -5019,27 +5060,15 @@ public class MainActivity extends Activity {
         sizeDialog(d, 0.86f);
     }
 
-    /** 对话页换模型：拉过列表就弹列表，没拉过就手填。 */
+    /** 对话页顶部的模型按钮：只从已保存的列表里切，改名字统一去设置页。 */
     private void pickChatModel() {
         if (!aiApiModels.isEmpty()) {
             showApiModelPicker(new Runnable() {
                 public void run() { renderAiChat(); }
-            });
+            }, false);
             return;
         }
-        apiInputDialog("模型名", "如 deepseek-chat", aiApiModel, false, new ApiTextSink() {
-            public void onText(String v) {
-                String s = v == null ? "" : v.trim();
-                if (s.length() == 0) {
-                    toast("模型名不能为空");
-                    return;
-                }
-                aiApiModel = s;
-                saveApiConfig();
-                renderAiChat();
-            }
-        });
-        toast("还没拉取模型，可直接手填");
+        toast("还没有模型列表，去「问 AI 设置 → API AI 设置」拉取或手填");
     }
 
     private void chatSend(String q) {
