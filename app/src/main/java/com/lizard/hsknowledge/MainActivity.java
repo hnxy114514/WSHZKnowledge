@@ -4484,8 +4484,9 @@ public class MainActivity extends Activity {
         // 贴着屏幕最下沿：圆屏只留一点点（4dp 起），宽度由下面的圆几何另算，不会出圆
         int bottomGap = m.round ? Math.max(dp(5), Math.round(m.roundSafe * 0.55f)) : dp(4);
         aiChatBar.setPadding(0, dp(2), 0, bottomGap);
-        // 高度跟着档位走：最大档字号 16sp 时固定 38dp 会把字挤扁
-        int barH = Math.max(dp(38), Math.round(chatBarSize() * 2.6f));
+        // 高度就是 38dp：dp() 内部已经乘了 uiScale，跟着显示大小一起放大，
+        // 最大档时 38dp*1.4 足以容纳 16sp 的字，不需要再按字号算一遍（单位也不同，别混）。
+        int barH = dp(38);
 
         aiChatInputBtn = new TextView(this);
         aiChatInputBtn.setText("发消息");
@@ -4494,7 +4495,6 @@ public class MainActivity extends Activity {
         aiChatInputBtn.setTextColor(C_PRIMARY);
         aiChatInputBtn.setGravity(Gravity.CENTER);
         aiChatInputBtn.setSingleLine(true);
-        aiChatInputBtn.setPadding(dp(4), 0, dp(4), 0);   // 贴下沿时按钮窄，内边距吃太多会裁字
         aiChatInputBtn.setPadding(dp(4), 0, dp(4), 0);   // 贴下沿时按钮窄，内边距吃太多会裁字
         aiChatInputBtn.setBackgroundDrawable(clickBg(0xFF14384A));
         aiChatInputBtn.setOnClickListener(new View.OnClickListener() {
@@ -4506,7 +4506,6 @@ public class MainActivity extends Activity {
         aiChatStopBtn.setTextSize(chatBarSize());
         aiChatStopBtn.setGravity(Gravity.CENTER);
         aiChatStopBtn.setSingleLine(true);
-        aiChatStopBtn.setPadding(dp(4), 0, dp(4), 0);
         aiChatStopBtn.setPadding(dp(4), 0, dp(4), 0);
         aiChatStopBtn.setTextColor(0xFFFFB74D);
         aiChatStopBtn.setBackgroundDrawable(clickBg(C_PILL));
@@ -10992,7 +10991,8 @@ public class MainActivity extends Activity {
                     final SeekBar bar = sb;
                     bar.post(new Runnable() {
                         public void run() {
-                            if (released[0]) return;
+                            // Activity 已经销毁就别再重建界面（否则会在 finishing 的窗口上 setContentView）
+                            if (!alive() || released[0]) return;
                             released[0] = true;
                             sliderTouching = false;
                             if (onRelease != null) onRelease.onReleased(min + bar.getProgress() * step);
