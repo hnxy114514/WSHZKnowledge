@@ -26,10 +26,10 @@ TREE = [
             {"name": '词性与句子成分',
              "body": """**十大词类：名、动、形、副、代、数、冠、介、连、感叹**；句子成分主要是主、谓、宾、表、定、状、补。
 对应关系：**名词/代词作主语、宾语、表语；动词作谓语；形容词作定语或表语；副词修饰动词、形容词或全句**。
-**判断词性要结合句法位置**，这是语法填空有提示词时的第一步：
-- **冠词、形容词或物主代词之后 → 名词**，并注意单复数。
-- **系动词之后 → 形容词**；**修饰动词或整句 → 副词**。
-- **介词之后 → 名词、代词或动名词**。
+判断词性要结合句法位置，这是语法填空有提示词时的第一步：
+- 冠词、形容词或物主代词之后 → 名词，并注意单复数。
+- 系动词之后 → 形容词；修饰动词或整句 → 副词。
+- 介词之后 → 名词、代词或动名词。
 **形容词与副词混用、名词漏加复数、谓语动词漏第三人称单数**，是最高频的三处失分。
 与「常见后缀与词性判断」分工：那条靠词缀判断，本条靠句子结构判断，两者可互相验证。"""},
             {"name": '常见前缀的含义',
@@ -118,19 +118,19 @@ while 引导的从句多用进行时；两个动作同时进行都用过去进�
 **与现在完成时的分界：一般过去时只说「发生在过去」，不交代与现在的关系；现在完成时必须体现「对现在的影响」或「持续到现在」**。
 **used to do 表示过去常常而现已不再**；be used to doing 是「习惯于」，别混。"""},
             {"name": '将来进行时',
-             "body": """结构：**will be + 现在分词**。
-两条用法：**将来某时刻正在进行的动作**（At 8 tomorrow I will be studying）、**按计划安排将发生**（We will be meeting at the airport）。
+             "body": """结构：will be + 现在分词。
+两条用法：将来某时刻正在进行的动作（At 8 tomorrow I will be studying）、按计划安排将发生（We will be meeting at the airport）。
 **与一般将来时的区别：将来进行时强调「正在」的画面感，语气也更委婉**（Will you be using the car? 比 Will you use the car? 客气）。
 **临时决定用 will do，不用 will be doing**。
 常见标志：**at this time tomorrow、at 8 next Monday、all day tomorrow**。
-**时间状语从句中仍用一般现在时表将来**（When you arrive, I will be waiting）。"""},
+时间状语从句中仍用一般现在时表将来（When you arrive, I will be waiting）。"""},
             {"name": '过去将来时',
-             "body": """结构：**would + 动词原形**（也可用 was/were going to）。
-用法：**站在过去某个时间点看将来**（He said he would come）。
-三类场景：**宾语从句（said/told/thought + would do）**、**间接引语**、**过去条件句的主句**（If I had time, I would go）。
+             "body": """结构：would + 动词原形（也可用 was/were going to）。
+用法：站在过去某个时间点看将来（He said he would come）。
+三类场景：**宾语从句（said/told/thought + would do）**、间接引语、过去条件句的主句（If I had time, I would go）。
 对应关系：**will→would，is going to→was going to，shall→should**。
 **判断标志：主句是过去时，从句说的是「在那之后」的事，就用过去将来时**。
-**would 还可表过去习惯**（He would sit for hours），要看语境区分。"""},
+would 还可表过去习惯（He would sit for hours），要看语境区分。"""},
             {"name": '时态的一致性',
              "body": '主从句时态要呼应。\n**主句过去时，从句用过去时态**。\n主句现在时，从句根据实际用时态。\n客观真理用一般现在时，即使主句是过去时。\n时态一致是语法的重要规则。\n宾语从句注意陈述语序与时态配合。'},
             {"name": '将来完成时',
@@ -146,11 +146,11 @@ while 引导的从句多用进行时；两个动作同时进行都用过去进�
             {"name": '动名词',
              "body": '形式：doing、being done、having done。\n可作主语、宾语、表语、定语。\n**介词后必须用动名词**。\n常见只接动名词的动词：enjoy、finish、practise、mind、avoid。\n动名词作主语时谓语用单数。'},
             {"name": '分词',
-             "body": """**现在分词 doing 表主动或进行；过去分词 done 表被动或完成**。
-- **作定语**：单个分词前置（a sleeping baby），分词短语后置（the boy standing there）。
-- **作状语**：**逻辑主语必须与句子主语一致**（× Walking home, the rain started）。
-- **作宾补**：**see sb doing（正在进行）vs see sb do（全过程）**；have sth done（让别人做）。
-- **表感受与特征**：**interesting（事物特征）vs interested（人的感受）**，同类还有 exciting/excited、tiring/tired。
+             "body": """现在分词 doing 表主动或进行；过去分词 done 表被动或完成。
+- 作定语：单个分词前置（a sleeping baby），分词短语后置（the boy standing there）。
+- 作状语：**逻辑主语必须与句子主语一致**（× Walking home, the rain started）。
+- 作宾补：see sb doing（正在进行）vs see sb do（全过程）；have sth done（让别人做）。
+- 表感受与特征：**interesting（事物特征）vs interested（人的感受）**，同类还有 exciting/excited、tiring/tired。
 **判断用 doing 还是 done：看逻辑主语与该动词是主动还是被动关系**。"""},
             {"name": '独立主格与with复合结构',
              "body": '独立主格：名词/代词+分词/不定式/形容词，与主句无语法连接。\n**with 复合结构：with+宾语+宾补，常作伴随状语**。\n示例：With the work finished, he went home。\n这种结构中宾补与宾语有逻辑关系。\n是写作提分的有效句式。'},
@@ -161,9 +161,9 @@ while 引导的从句多用进行时；两个动作同时进行都用过去进�
             {"name": '非谓语动词作宾语',
              "body": """只接不定式：**want、hope、decide、plan、expect、refuse、manage、promise、agree、offer**。
 只接动名词：**enjoy、finish、mind、avoid、suggest、practise、admit、consider、look forward to**。
-两者都可但意义不同：**remember/forget to do（还没做）vs doing（做过了）**；**stop to do（停下来去做）vs stop doing（停止做）**；**try to do（努力做）vs try doing（试着做）**；**regret to do（遗憾要告知）vs regret doing（后悔做过）**。
+两者都可但意义不同：remember/forget to do（还没做）vs doing（做过了）；stop to do（停下来去做）vs stop doing（停止做）；try to do（努力做）vs try doing（试着做）；**regret to do（遗憾要告知）vs regret doing（后悔做过）**。
 介词后一律用动名词：be interested in doing、succeed in doing、prevent sb from doing。
-**allow/advise/permit + doing，但 + sb to do**（allow doing / allow sb to do），这是高频考点。"""},
+allow/advise/permit + doing，但 + sb to do（allow doing / allow sb to do），这是高频考点。"""},
             {"name": '非谓语动词作状语',
              "body": '非谓语动词作状语表示时间、原因、条件、伴随等。\n现在分词作状语表主动，过去分词作状语表被动。\n不定式作状语常表目的、结果。\n**逻辑主语要与句子主语一致**。\n独立主格结构有自己的逻辑主语，如 The work done, he left。'},
             {"name": '非谓语动词作主语',
@@ -186,13 +186,13 @@ while 引导的从句多用进行时；两个动作同时进行都用过去进�
         ]},
         {"name": '2.3 从句', "children": [
             {"name": '定语从句',
-             "body": """限制性定语从句：**紧跟先行词、无逗号、不可省略**，删掉句子意思不完整。
+             "body": """限制性定语从句：紧跟先行词、无逗号、不可省略，删掉句子意思不完整。
 非限制性定语从句：**用逗号隔开、可删、不能用 that**，只作补充说明。
 关系代词：**who（人，主格）、whom（人，宾格）、whose（所属）、which（物）、that（人或物，限定时用）**。
-关系副词：**when=in/on which、where=in/at which、why=for which**。
-**介词后只能用 whom 或 which**，不能用 that/who。
+关系副词：when=in/on which、where=in/at which、why=for which。
+介词后只能用 whom 或 which，不能用 that/who。
 **只能用 that 的场合：先行词被 all/only/the first/最高级修饰，或先行词既有人又有物**。
-**判 which 还是 where：看从句缺不缺主语或宾语——缺就用 which，不缺就用 where**。"""},
+判 which 还是 where：看从句缺不缺主语或宾语——缺就用 which，不缺就用 where。"""},
             {"name": '同位语从句与定语从句的区别',
              "body": """**同位语从句说明先行词的内容，定语从句修饰先行词**。
 **关键区别在 that 是否作成分**：同位语从句的 that 不作任何成分、只起连接作用；定语从句的 that 必须充当主语或宾语。
@@ -211,15 +211,15 @@ while 引导的从句多用进行时；两个动作同时进行都用过去进�
 **主将从现：时间与条件状语从句中用一般现在时表将来**（When he comes, I will tell him）。
 **although 与 but 不能连用，because 与 so 不能连用**，这是最高频的中式英语错误。"""},
             {"name": '名词性从句的语序与引导词',
-             "body": """名词性从句四种：主语从句、宾语从句、表语从句、同位语从句，**一律用陈述语序（主语＋谓语）**。
+             "body": """名词性从句四种：主语从句、宾语从句、表语从句、同位语从句，一律用陈述语序（主语＋谓语）。
 三类引导词：
-- **that**：无实义、不作成分；**只在宾语从句中可省，主语/表语/同位语从句中不可省**。
-- **whether / if**：表「是否」，不作成分。**介词后、句首主语从句、紧跟 or not、后接不定式，只能用 whether**。
-- **连接代词/副词**：what、who、which、when、where、why、how，**在从句中必须充当成分**。
+- that：无实义、不作成分；只在宾语从句中可省，主语/表语/同位语从句中不可省。
+- whether / if：表「是否」，不作成分。介词后、句首主语从句、紧跟 or not、后接不定式，只能用 whether。
+- 连接代词/副词：what、who、which、when、where、why、how，**在从句中必须充当成分**。
 
-**what 与 that 的分水岭：从句缺主语/宾语/表语用 what，成分齐全用 that**。
+what 与 that 的分水岭：从句缺主语/宾语/表语用 what，成分齐全用 that。
 **what = the thing that，本身含先行词，前面不能再有名词**。
-**it 作形式主语**：It is + adj./n. + that 从句，避免头重脚轻（It is clear that he was right.）。
+it 作形式主语：It is + adj./n. + that 从句，避免头重脚轻（It is clear that he was right.）。
 **同位语从句解释抽象名词的内容（news、fact、idea、belief、promise），that 不作成分**；定语从句的 that 必须作成分。"""},
         ]},
         {"name": '2.4 特殊句式', "children": [
@@ -236,54 +236,54 @@ while 引导的从句多用进行时；两个动作同时进行都用过去进�
 **as 引导让步状语从句要倒装表语或状语**（Young as he is, he knows a lot.）。
 **only 修饰主语时不倒装**（Only he knows it.）。"""},
             {"name": '强调句与省略',
-             "body": """**强调句：It is/was + 被强调部分 + that/who + 句子其余部分**。
+             "body": """强调句：It is/was + 被强调部分 + that/who + 句子其余部分。
 强调人可用 who 或 that，**强调时间、地点、原因等一律用 that**，不用 when / where / why。
-**检验方法：去掉 It is/was 和 that，剩下能还原成完整句子才是强调句**。
-**强调谓语用 do/does/did + 动词原形**（He did come yesterday.）。
+检验方法：去掉 It is/was 和 that，剩下能还原成完整句子才是强调句。
+强调谓语用 do/does/did + 动词原形（He did come yesterday.）。
 **not…until 的强调式：It is/was not until…that…，that 后不再用否定**。
 
 省略三处常见：
-- **状语从句中「主语＋be」可省**（When (he was) asked, he kept silent.），条件是主从主语一致且含 be。
-- **不定式保留 to、省去后面动词**（I'd like to, but…）。
-- **比较结构与并列句省去重复成分**（He runs faster than I (do).）。
+- 状语从句中「主语＋be」可省（When (he was) asked, he kept silent.），条件是主从主语一致且含 be。
+- 不定式保留 to、省去后面动词（I'd like to, but…）。
+- 比较结构与并列句省去重复成分（He runs faster than I (do).）。
 **省略不能造成歧义，被省成分必须能从上下文唯一还原**。"""},
             {"name": 'it 的用法与反义疑问',
              "body": """it 四类用法：
-- **形式主语**：It is + adj./n. + to do / that 从句（It is important to keep calm.）。
-- **形式宾语**：think/find/make + it + 宾补 + to do / that（I find it hard to believe.）。
-- **指时间、天气、距离、环境**：It is 5 o'clock. / It is raining.
-- **强调句中的 it** 无实义，见「强调句与省略」。
+- 形式主语：It is + adj./n. + to do / that 从句（It is important to keep calm.）。
+- 形式宾语：think/find/make + it + 宾补 + to do / that（I find it hard to believe.）。
+- 指时间、天气、距离、环境：It is 5 o'clock. / It is raining.
+- 强调句中的 it 无实义，见「强调句与省略」。
 
-**反义疑问：前肯后否、前否后肯，助动词与时态与前句一致**。
+反义疑问：前肯后否、前否后肯，助动词与时态与前句一致。
 - **含 never、hardly、seldom、little、few、nothing 视为否定，后面用肯定**。
 - **I think/believe + 宾语从句，疑问部分与从句一致**；主语不是第一人称时与主句一致。
 - **祈使句用 will you；Let's… 用 shall we；Let us… 用 will you**。
-- **there be 句型用 be there**（There is a book, isn't there?）。
-- **must 表推测按实际时态反问**（He must be tired, isn't he?）。"""},
+- there be 句型用 be there（There is a book, isn't there?）。
+- must 表推测按实际时态反问（He must be tired, isn't he?）。"""},
             {"name": '虚拟语气的用法',
              "body": """**核心规则：与事实相反时，时态整体向前推一步**。
-- **与现在相反**：if + 过去式（be 一律用 were），主句 **would/could/might + do**。
-- **与过去相反**：if + had done，主句 **would/could/might + have done**。
-- **与将来相反**：if + were to do / should do / 过去式，主句 **would/could/might + do**。
+- 与现在相反：if + 过去式（be 一律用 were），主句 would/could/might + do。
+- 与过去相反：if + had done，主句 would/could/might + have done。
+- 与将来相反：if + were to do / should do / 过去式，主句 would/could/might + do。
 
-**错综时间条件句：从句与主句各按自己的时间定形式**（If you had studied harder, you would be in a better school now.）。
-**省略 if 时把 had/were/should 提前构成倒装**（Were I you, I would…）。
+错综时间条件句：从句与主句各按自己的时间定形式（If you had studied harder, you would be in a better school now.）。
+省略 if 时把 had/were/should 提前构成倒装（Were I you, I would…）。
 **suggest、demand、insist、require、order 表建议要求命令，从句用 (should) + do，should 可省**。
 **wish / if only / as if / would rather 后的从句同样按时态前推**。
-**It's (high) time + 从句用过去式**（It's time we left.）。"""},
+It's (high) time + 从句用过去式（It's time we left.）。"""},
             {"name": '主谓一致的规则',
              "body": """三条原则，按顺序判：
-- **语法一致**：主语的单复数决定谓语。
-- **意义一致**：**family、team、class、audience 等集合名词，指整体用单数、指成员用复数**。
-- **就近一致**：**either…or、neither…nor、not only…but also、or、there be 连接主语时，谓语与最近的主语一致**。
+- 语法一致：主语的单复数决定谓语。
+- **意义一致**：family、team、class、audience 等集合名词，指整体用单数、指成员用复数。
+- 就近一致：**either…or、neither…nor、not only…but also、or、there be 连接主语时，谓语与最近的主语一致**。
 
 高频考点：
-- **不定式、动名词、主语从句作主语，谓语用单数**。
-- **and 连接两个名词指同一人/物时用单数**（The writer and teacher is…）；**each/every/many a + 单数名词用单数**。
+- 不定式、动名词、主语从句作主语，谓语用单数。
+- and 连接两个名词指同一人/物时用单数（The writer and teacher is…）；each/every/many a + 单数名词用单数。
 - **「分数 / 百分数 / the rest / most / some / all + of + 名词」谓语随 of 后的名词**。
-- **a number of + 复数（谓语复数）；the number of + 复数（谓语单数）**。
-- **with、as well as、together with、besides 引出的是附加成分，不影响谓语**（Tom as well as his friends is…）。
-- **more than one + 单数名词，谓语用单数**。"""},
+- a number of + 复数（谓语复数）；the number of + 复数（谓语单数）。
+- with、as well as、together with、besides 引出的是附加成分，不影响谓语（Tom as well as his friends is…）。
+- more than one + 单数名词，谓语用单数。"""},
             {"name": '省略句的用法',
              "body": """**省略的前提：被省成分能从上下文唯一还原，不产生歧义**。
 四类固定省略：
@@ -297,32 +297,32 @@ while 引导的从句多用进行时；两个动作同时进行都用过去进�
 **省略后检查剩下成分是否仍搭配**：介词不能丢、时态与单复数不能串。
 **不定式的完成式保留 to have**（—Have you finished? —I hope to have.）。"""},
             {"name": '祈使句',
-             "body": """**祈使句省略主语 you，以动词原形开头**，表命令、请求、建议、劝告。
-否定式：**句首加 Don't 或 Never**（Don't be late.）；**强调式在动词前加 Do**（Do be careful.）。
-**Let 型祈使句**：Let's + 动词原形（含对方）；Let us / Let him + 动词原形。
+             "body": """祈使句省略主语 you，以动词原形开头，表命令、请求、建议、劝告。
+否定式：句首加 Don't 或 Never（Don't be late.）；强调式在动词前加 Do（Do be careful.）。
+Let 型祈使句：Let's + 动词原形（含对方）；Let us / Let him + 动词原形。
 **「祈使句 + and/or + 陈述句」相当于条件句**：
-- **祈使句 + and + 将来时**：Work hard, and you will pass.（= If you work hard…）
-- **祈使句 + or + 将来时**：Hurry up, or you'll be late.（= If you don't…）
+- 祈使句 + and + 将来时：Work hard, and you will pass.（= If you work hard…）
+- 祈使句 + or + 将来时：Hurry up, or you'll be late.（= If you don't…）
 
-**无动词祈使句**：This way, please. / No smoking. / Hands up.
+无动词祈使句：This way, please. / No smoking. / Hands up.
 **祈使句的反义疑问用 will you，Let's 用 shall we**。
 **陈述句、疑问句改祈使句要去掉主语和助动词，只留动词原形**。"""},
             {"name": '感叹句',
              "body": """两种结构：
 - **What + (a/an) + adj. + n. + 主语 + 谓语！**（What a beautiful flower it is!）
-- **How + adj./adv. + 主语 + 谓语！**（How beautiful the flower is!）
-**感叹句用陈述语序，不倒装**。
+- How + adj./adv. + 主语 + 谓语！（How beautiful the flower is!）
+感叹句用陈述语序，不倒装。
 **选择标准只有一条：What 修饰名词，How 修饰形容词或副词**。
-**不可数名词与复数名词前不加 a/an**：What fine weather! / What beautiful flowers!
+不可数名词与复数名词前不加 a/an：What fine weather! / What beautiful flowers!
 常见省略：What a pity! / How nice!
 **易错：How 后面不能直接跟名词**（× How a beautiful flower）。"""},
             {"name": 'there be 与省略句',
-             "body": """**there be 表「存在」，be 与后面第一个名词一致（就近原则）**：There is a book and two pens.
-**可与情态动词、seem、happen、used to 连用**：there seems to be / there must be / there used to be。
-**there be 的时态、疑问、否定都由 be 承担**：There isn't any water. / Is there…?
+             "body": """there be 表「存在」，be 与后面第一个名词一致（就近原则）：There is a book and two pens.
+可与情态动词、seem、happen、used to 连用：there seems to be / there must be / there used to be。
+there be 的时态、疑问、否定都由 be 承担：There isn't any water. / Is there…?
 **there be 与 have 的分界：there be 表存在，have 表所属**，不能混用（× There has a book.）。
 **there be + 主语 + doing / to do / done** 作后置定语，注意主动被动。
-**省略句**：When (he was) asked, he kept silent. / I like it better than she (does).
+省略句：When (he was) asked, he kept silent. / I like it better than she (does).
 **so do I / neither (nor) do I 表「也 / 也不」，助动词与前句保持一致**。"""},
         ]},
     ]},
@@ -356,18 +356,18 @@ while 引导的从句多用进行时；两个动作同时进行都用过去进�
              "body": '阅读理解干扰项有常见特征。\n偷换概念、张冠李戴。\n以偏概全、无中生有。\n过度推断、绝对化表述。\n**识别干扰项有助于排除错误选项**。\n选择与原文意思最相符的选项。'},
             {"name": '阅读理解的长难句分析',
              "body": """三步拆句：
-1. **数谓语动词**：一句话有几个谓语，就有几个分句。
-2. **定主干**：主语 + 谓语 + 宾语或表语，其余全是修饰。
-3. **剥修饰**：定语从句、状语从句、分词短语、插入语，逐层挂回主干。
+1. 数谓语动词：一句话有几个谓语，就有几个分句。
+2. 定主干：主语 + 谓语 + 宾语或表语，其余全是修饰。
+3. 剥修饰：定语从句、状语从句、分词短语、插入语，逐层挂回主干。
 四个断句信号：**that/which/who 引导定语从句，because/although/when 引导状语从句，逗号后常是插入语，and/but/or 连接并列成分**。
 **主语后跟一长串修饰时，先把修饰整体括起来，句子立刻变短**。
-**读长句的目标不是翻译每个词，而是分清「谁做了什么」**。"""},
+读长句的目标不是翻译每个词，而是分清「谁做了什么」。"""},
             {"name": '阅读理解的题文顺序',
              "body": """两种策略，按题型选：
-- **先题后文**：先看题干圈关键词，带着问题扫读定位，**适合细节题、数字题**。
-- **先文后题**：通读把握结构再答题，**适合主旨题、标题题、态度题**。
+- 先题后文：先看题干圈关键词，带着问题扫读定位，适合细节题、数字题。
+- 先文后题：通读把握结构再答题，适合主旨题、标题题、态度题。
 细节题：**回原文定位 + 识别同义替换**（正确项几乎不原词照抄，而是换说法）。
-主旨题：**看首段、末段与每段首句**，警惕只覆盖一段内容的「以偏概全」选项。
+主旨题：看首段、末段与每段首句，警惕只覆盖一段内容的「以偏概全」选项。
 **错误项四类：偷换概念、无中生有、范围扩大或缩小、正话反说**。
 **时间分配：一篇不超过 7 分钟，卡住先跳过，回头再定位**。"""},
             {"name": '七选五的解题步骤',
@@ -383,10 +383,10 @@ while 引导的从句多用进行时；两个动作同时进行都用过去进�
             {"name": '语法填空',
              "body": '有提示词：注意词性转换与形式变化。\n无提示词：多考冠词、介词、连词、代词。\n**括号内动词要判断作谓语还是非谓语**。\n名词注意单复数，形容词注意比较级。\n大小写与拼写错误一律不得分。'},
             {"name": '短文改错',
-             "body": """短文改错共约 10 处错误，**分布通常是 1 处多词、1 处缺词、8 处错词**，改动方式只有加、删、改三种。
-高频考点五类：**冠词、介词、时态、主谓一致、非谓语**；另有代词指代、形容词副词混用、连词逻辑。
+             "body": """短文改错共约 10 处错误，分布通常是 1 处多词、1 处缺词、8 处错词，改动方式只有加、删、改三种。
+高频考点五类：冠词、介词、时态、主谓一致、非谓语；另有代词指代、形容词副词混用、连词逻辑。
 四步做题：**通读全文抓大意与时态 → 逐句找错 → 按上述类别逐项复查 → 复读检查是否通顺**。
-**一致性检查最出活**：时态是否通篇一致、代词指代是否明确、主谓是否一致、逻辑连词是否与句意相符。
+一致性检查最出活：时态是否通篇一致、代词指代是否明确、主谓是否一致、逻辑连词是否与句意相符。
 **每句一般只有一处错误**，一句话改两处就要重新判断；改动不能改变原意，也不能只加词不删词。
 修改符号要规范：**漏词用 ∧ 补上、多词用 \\ 划掉、错词在下方写出正确词**。"""},
             {"name": '完形填空的复现技巧',
@@ -462,18 +462,18 @@ while 引导的从句多用进行时；两个动作同时进行都用过去进�
         {"name": '4.1 应用文写作', "children": [
             {"name": '常见应用文体裁',
              "body": """- 书信：**Dear Sir/Madam → 三段（说明来意、展开细节、期待回复）→ Yours sincerely, Li Hua**。
-- 通知：**标题 Notice 居中**，正文交代「何事、何时、何地、参加人、要求」，落款单位与日期。
+- 通知：标题 Notice 居中，正文交代「何事、何时、何地、参加人、要求」，落款单位与日期。
 - 演讲稿：**称呼 → 主题句 → 两三个论证（举例或数据）→ 号召收尾**，多用 we 与呼告。
-- 电子邮件：**主题行要具体**（Application for the Volunteer Program），正文一段一件事，结尾礼貌收束。
-- 日记：**日期、星期、天气 → 正文 → 感受**，主要用过去时。
+- 电子邮件：主题行要具体（Application for the Volunteer Program），正文一段一件事，结尾礼貌收束。
+- 日记：日期、星期、天气 → 正文 → 感受，主要用过去时。
 **共同要求：格式分不能丢（称呼、落款、日期），要点齐全比辞藻更重要**；字数不足时补细节，不要重复空话。"""},
             {"name": '评分要点',
              "body": """五条评分维度：
-- **内容要点齐全**：覆盖题目要求的全部信息点，**漏一个要点就降档**。
-- **词汇与语法**：准确优先，**高级表达适当加分但不强求**。
-- **连贯性**：靠衔接词与指代保持顺畅。
-- **得体性**：称呼与语气符合文体和对象。
-- **书写与字数**：一般 80 词左右，**少于要求会扣分**。
+- 内容要点齐全：覆盖题目要求的全部信息点，漏一个要点就降档。
+- 词汇与语法：准确优先，**高级表达适当加分但不强求**。
+- 连贯性：靠衔接词与指代保持顺畅。
+- 得体性：称呼与语气符合文体和对象。
+- 书写与字数：一般 80 词左右，少于要求会扣分。
 **提分优先级：要点齐全 > 语法正确 > 表达高级**，顺序不能颠倒。
 **检查清单：时态、主谓一致、名词单复数、拼写**，这四项占失分的大半。"""},
             {"name": '书信类应用文格式',
@@ -513,11 +513,11 @@ while 引导的从句多用进行时；两个动作同时进行都用过去进�
 **句式多样性的判断标准：一篇里至少有三种不同结构**。"""},
             {"name": '倡议书的写作要点',
              "body": """结构四段：
-1. **标题**：倡仪书／A Letter of Appeal，或直接写主题（Let's Protect Our Campus）。
-2. **称呼与背景**：说明为什么要倡议（现状 + 问题），**用数据或现象增强说服力**。
-3. **具体倡议**：**分点写（Firstly/Secondly/Finally），每点一个可执行动作**。
-4. **号召与落款**：呼吁行动 + 署名与日期。
-**语言要有感染力：多用 we、祈使句、情态动词 should/must**。
+1. 标题：倡仪书／A Letter of Appeal，或直接写主题（Let's Protect Our Campus）。
+2. 称呼与背景：说明为什么要倡议（现状 + 问题），用数据或现象增强说服力。
+3. 具体倡议：**分点写（Firstly/Secondly/Finally），每点一个可执行动作**。
+4. 号召与落款：呼吁行动 + 署名与日期。
+语言要有感染力：多用 we、祈使句、情态动词 should/must。
 **倡议内容必须可执行**（「随手关灯」比「爱护环境」有效）。
 **格式分不能丢：标题、称呼、落款、日期**。"""},
             {"name": '投诉信的写法',
