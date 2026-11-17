@@ -215,10 +215,11 @@ def walk(nodes, subj, path):
                         check_text('%s（%s·%s）' % (where, bn, ln.get('tag') or '-'),
                                    ln.get('text') or '')
 
-                # 译文块：每条原文去掉角标后，必须能在正文里按顺序找到，防止切句漏句/错位
+                # 译文块：每条原文去掉角标后，必须能在正文里按顺序找到，防止切句漏句/错位。
+                # 正文的 \n 只是排版（诗词可逐句换行），比对时必须忽略，否则换个换行方式就误报。
                 if '译文' in bn:
                     pos = 0
-                    body_cmp = strip_pinyin(body)
+                    body_cmp = strip_pinyin(body).replace('\n', '')
                     for it in items:
                         lines = it.get('lines') or []
                         src = ''
@@ -229,7 +230,7 @@ def walk(nodes, subj, path):
                         if not src:
                             add('译文组缺原文行', '%s：%s' % (where, bn))
                             continue
-                        plain = strip_pinyin(re.sub(r'\^\{[^}]*\}', '', src).strip())
+                        plain = strip_pinyin(re.sub(r'\^\{[^}]*\}', '', src).strip()).replace('\n', '')
                         k = body_cmp.find(plain, pos)
                         if k < 0:
                             add('译文原文对不上正文（顺序或字句不符）',

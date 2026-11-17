@@ -28,11 +28,11 @@ def strip_pinyin(t):
 
 def check_groups(name, body, groups):
     """每组原文去掉角标、去掉拼音括号后，必须能在正文里按顺序找到。"""
-    body = strip_pinyin(body)
+    body = strip_pinyin(body).replace('\n', '')   # 换行只是排版，比对时忽略
     pos = 0
     bad = []
     for i, (src, _t, _n) in enumerate(groups, 1):
-        plain = strip_pinyin(re.sub(r'\^\{[^}]*\}', '', src)).strip()
+        plain = strip_pinyin(re.sub(r'\^\{[^}]*\}', '', src)).strip().replace('\n', '')
         k = body.find(plain, pos)
         if k < 0:
             bad.append((i, plain[:26]))
