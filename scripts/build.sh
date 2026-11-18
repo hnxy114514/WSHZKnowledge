@@ -27,6 +27,9 @@ echo "== 1. 生成知识库（subjects → assets/data）=="
 cd "$PROJ/tools"
 python build_authored.py
 
+echo "== 1.5 注释体检（译文块的 ①②③ 编号与落点，有问题直接中断）=="
+python "$PROJ/tools/check_notes.py" || { echo "注释编号有问题，构建中止"; exit 1; }
+
 echo "== 2. 清理 =="
 python - "$BUILD" "$OUT" <<'PY'
 import os, shutil, sys, time
