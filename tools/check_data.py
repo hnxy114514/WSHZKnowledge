@@ -228,7 +228,8 @@ def walk(nodes, subj, path):
                                 src = ln.get('text') or ''
                                 break
                         if not src:
-                            add('译文组缺原文行', '%s：%s' % (where, bn))
+                            # 没有「原文」tag 的组是例题组（合并块里译文在前、例题在后），
+                            # 例题组只校验题干/答案，不参与译文对正文的校验。
                             continue
                         plain = strip_pinyin(re.sub(r'\^\{[^}]*\}', '', src).strip()).replace('\n', '')
                         k = body_cmp.find(plain, pos)

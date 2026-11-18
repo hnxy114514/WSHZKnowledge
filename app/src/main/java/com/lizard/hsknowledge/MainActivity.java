@@ -7663,9 +7663,14 @@ public class MainActivity extends Activity {
             for (final ExtraBlock blk : curExtras) {
                 if (blk.items.isEmpty()) continue;
                 TextView exBtn = new TextView(this);
-                exBtn.setText(blk.unit.length() > 0
-                        ? blk.name + " · " + blk.items.size() + " " + blk.unit
-                        : blk.name + " · " + blk.items.size());
+                // 按钮文字 = 「块名 · 组数 单位」。unit 留空的块（如把译文和例题合并成的
+                // 「例题和译文」）只写块名：它的组里既有「一句原文」又有「一道题」，
+                // 数字没有意义，写上去反而看不懂。
+                if (blk.unit.length() == 0) {
+                    exBtn.setText(blk.name);
+                } else {
+                    exBtn.setText(blk.name + " · " + blk.items.size() + " " + blk.unit);
+                }
                 exBtn.setTextSize(m.subtitleSize);
                 exBtn.setTypeface(Typeface.DEFAULT_BOLD);
                 exBtn.setTextColor(0xFF1A242E);
