@@ -86,17 +86,23 @@ def check_text(where, s):
                     break
             j += 1
         n1 = cnt == 1
-        d = 0
-        while j < len(s):
-            if s[j] == '\\':
-                j += 2; continue
-            if s[j] == '{': d += 1
-            elif s[j] == '}':
-                d -= 1
-                if d == 0:
-                    n2 = True
-                    break
+        # 第二组必须紧挨着第一组（中间只允许空格）。原来是从第一组结束后「往后随便找一个 {…}」，
+        # 于是 \frac{a^{m}{n}}=ⁿ\sqrt{a^{m}} 这种漏写一组的会被后面 \sqrt 的花括号蒙混过关
+        # （v3.12.8 实测漏掉了这一条，故收紧）。
+        while j < len(s) and s[j] == ' ':
             j += 1
+        d = 0
+        if j < len(s) and s[j] == '{':
+            while j < len(s):
+                if s[j] == '\\':
+                    j += 2; continue
+                if s[j] == '{': d += 1
+                elif s[j] == '}':
+                    d -= 1
+                    if d == 0:
+                        n2 = True
+                        break
+                j += 1
         if not (n1 and n2):
             add('frac 参数不完整', '%s：%s' % (where, s[:70]))
     # 6) 残留未转换的上标字符（说明 latexify 没跑到或手写了奇怪字符）

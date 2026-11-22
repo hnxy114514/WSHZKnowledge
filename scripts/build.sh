@@ -54,6 +54,11 @@ fi
 echo "== 1.5 注释体检（译文块的 ①②③ 编号与落点，有问题直接中断）=="
 python "$PROJ/tools/check_notes.py" || { echo "注释编号有问题，构建中止"; exit 1; }
 
+# 预编译 App 直接读的二进制缓存：手表上解析 1.47MB JSON 要 2.6 秒，读这个只要几百毫秒。
+# 缓存头里带着 versionCode，所以每次构建都要重做（约 0.5 秒），不能跟着数据一起跳过。
+echo "== 1.6 生成二进制缓存 =="
+python "$PROJ/tools/gen_cache.py"
+
 echo "== 2. 清理 =="
 python - "$BUILD" "$OUT" <<'PY'
 import os, shutil, sys, time
@@ -137,7 +142,17 @@ with zipfile.ZipFile(base, 'r') as zin, zipfile.ZipFile(out, 'w', zipfile.ZIP_DE
         for f in sorted(fs):
             full = os.path.join(dp, f)
             rel = os.path.relpath(full, assets).replace('\\', '/')
-            zout.write(full, 'assets/' + rel)
+            arc = 'assets/' + rel
+            if rel == 'kb_cache.bin':
+                # 不压缩：整包 deflate 的话，App 读它要先解压 1.35 MB，手表上要一两秒；
+                # 直接 STORED 就是顺序读取，代价是 APK 大一点。
+                zi = zipfile.ZipInfo(arc, date_time=(2026, 1, 1, 0, 0, 0))
+                zi.compress_type = zipfile.ZIP_STORED
+                zi.external_attr = 0o644 << 16
+                with open(full, 'rb') as fh:
+                    zout.writestr(zi, fh.read())
+            else:
+                zout.write(full, arc)
             n += 1
 print('assembled', os.path.getsize(out), 'bytes, assets files:', n)
 PY

@@ -88,8 +88,13 @@ import android.widget.Toast;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.BufferedReader;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.FileInputStream;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.io.RandomAccessFile;
@@ -165,19 +170,51 @@ public class MainActivity extends Activity {
     }
     static class Node {
         String id, name;
-        String body = "";                       // 叶子正文（单段，多行用换行）
+        // 正文懒解码：v3.12.8 实测启动 2455ms 里绝大部分是 new String 解 1.3MB 中文。
+        // 缓存读入时先留原始字节，第一次真正要显示时才转成 String，列表/搜索不受影响。
+        String body;                            // null = 还没解码；空正文解码后是 ""
+        byte[] bodyRaw;
         List<Node> children = new ArrayList<Node>();
+        // 附加内容（例题/译文）同理：启动不建这四千多个对象，进详情页才解析。
         List<ExtraBlock> extras = new ArrayList<ExtraBlock>();
+        byte[] extrasRaw;                       // 非空 = 还没解析
+        String marksCache;                      // 列表行标记，构建时算好，免得为了一个「例」触发解析
         int star; String img, d;
         String daily;                          // 非空 = 每日一句入口（phil/poem），句子走接口
         Node parent; Subject subj;
         int savedY = -1;                        // 离开时记下列表位置，返回时恢复
         boolean isLeaf() { return children.isEmpty(); }
+
+        /** 正文：第一次用到才解码。 */
+        String body() {
+            if (body == null) {
+                body = (bodyRaw == null) ? "" : new String(bodyRaw, java.nio.charset.StandardCharsets.UTF_8);
+                bodyRaw = null;                 // 解完就把字节扔掉，别占双份
+            }
+            return body;
+        }
+
+        /** 附加内容：第一次用到才解析成对象。 */
+        List<ExtraBlock> extras() {
+            if (extrasRaw != null) {
+                byte[] raw = extrasRaw;
+                extrasRaw = null;
+                try {
+                    extras = readExtrasFrom(new DataInputStream(new java.io.ByteArrayInputStream(raw)));
+                } catch (Exception e) {
+                    extras = new ArrayList<ExtraBlock>();
+                }
+            }
+            return extras;
+        }
+
         /** 列表行显示的短标记，由数据里的 mark 汇总（例 → 「（例）」），界面不自造文案。 */
         String marks() {
+            if (marksCache != null) return marksCache;
             LinkedHashSet<String> set = new LinkedHashSet<String>();
-            for (ExtraBlock b : extras) if (b.mark != null && b.mark.length() > 0) set.add(b.mark);
-            return TextUtils.join("/", set);
+            for (ExtraBlock b : extras()) if (b.mark != null && b.mark.length() > 0) set.add(b.mark);
+            marksCache = TextUtils.join("/", set);
+            return marksCache;
         }
         /** 面包屑/收藏页显示的完整路径，由父链现算，不写死层数。
          *  节点建好后父子关系不再变，所以算一次存起来：列表滚动时每行都要用，别反复拼。 */
@@ -782,10 +819,13 @@ public class MainActivity extends Activity {
         final View splash = bootSplash;
         bootSplash = null;
         bootHost = null;
-        root.getViewTreeObserver().addOnPreDrawListener(
+        // 固定注册时的观察者引用，回调里也从它移除：边暂停边 detach 时再 getViewTreeObserver()
+        // 可能拿到另一个实例，remove 会抛 "This ViewTreeObserver is not alive"（11-10 的崩溃栈）。
+        final android.view.ViewTreeObserver splashVto = root.getViewTreeObserver();
+        splashVto.addOnPreDrawListener(
                 new android.view.ViewTreeObserver.OnPreDrawListener() {
                     public boolean onPreDraw() {
-                        root.getViewTreeObserver().removeOnPreDrawListener(this);
+                        try { splashVto.removeOnPreDrawListener(this); } catch (Throwable ignored) { }
                         // 开屏淡出 + 轻微放大，主界面同时从 0.98 回到 1：两层一起动才有「揭开」的感觉
                         root.setScaleX(0.98f);
                         root.setScaleY(0.98f);
@@ -978,6 +1018,257 @@ public class MainActivity extends Activity {
     }
 
     /** 递归解析节点：有 children 就是分组，否则是叶子（正文只有一个 body 字段）。 */
+    // ---------- 二进制缓存（v3.12.8）：解析一次，之后启动直接读 ----------
+    // 手表上 JSON 词法分析占了大头（2.6 秒），而建 Node 对象只需几百毫秒。
+    // 把整棵树按固定顺序写成二进制，下次启动跳过词法分析直接建对象。
+    // 换版本（versionCode 变）或读失败都回退到 JSON，最坏只是慢，不会崩。
+
+    private static final int CACHE_MAGIC = 0x485a4b34;   // "HZK4"（正文/附加内容存字节，懒解码）
+
+    private File kbCacheFile() {
+        return new File(getFilesDir(), "kb_cache.bin");
+    }
+
+    /** 读缓存：先读 APK 里预生成的那份（构建时就做好了，首次安装也快），
+     *  再读本地目录（同一版本内解析过一次后落的），都没有才走 JSON。 */
+    private boolean loadFromCache() {
+        try {
+            if (loadCacheFrom(getAssets().open("kb_cache.bin"))) {
+                dropStaleLocalCache();   // APK 里那份能用，本地旧版本的缓存就没必要占 1.35MB
+                return true;
+            }
+        } catch (Throwable ignored) { }
+        File f = kbCacheFile();
+        if (!f.exists() || f.length() < 64) return false;
+        try {
+            return loadCacheFrom(new FileInputStream(f));
+        } catch (Throwable e) {
+            return false;
+        }
+    }
+
+    /** 清掉版本对不上的本地缓存；同版本的留着（assets 读失败时它是第二道保险）。 */
+    private void dropStaleLocalCache() {
+        File f = kbCacheFile();
+        if (!f.exists()) return;
+        DataInputStream in = null;
+        try {
+            in = new DataInputStream(new BufferedInputStream(new FileInputStream(f)));
+            int magic = in.readInt();
+            int ver = in.readInt();
+            if (magic != CACHE_MAGIC || ver != appVersionCode()) f.delete();
+        } catch (Throwable e) {
+            f.delete();                  // 读不出来就是坏的，别留着
+        } finally {
+            try { if (in != null) in.close(); } catch (Exception ignored) { }
+        }
+    }
+
+    /** 读缓存；任何异常都清空半截数据并返回 false。
+     *  先把整个文件读进内存再解析，两段分别计时——手表上「读」和「建对象」谁是大头，
+     *  日志里一眼能看出（曾经以为瓶颈在 JSON 词法，实测是别的）。 */
+    private boolean loadCacheFrom(InputStream raw) {
+        long t0 = System.currentTimeMillis();
+        byte[] all;
+        try {
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream(1536 * 1024);
+            byte[] buf = new byte[32 * 1024];
+            int n;
+            while ((n = raw.read(buf)) > 0) bos.write(buf, 0, n);
+            raw.close();
+            all = bos.toByteArray();
+        } catch (Throwable e) {
+            try { raw.close(); } catch (Exception ignored) { }
+            return false;
+        }
+        long tRead = System.currentTimeMillis() - t0;
+        long t1 = System.currentTimeMillis();
+        DataInputStream in = new DataInputStream(new java.io.ByteArrayInputStream(all));
+        try {
+            if (in.readInt() != CACHE_MAGIC) return false;
+            if (in.readInt() != appVersionCode()) return false;   // 换了版本就作废
+            int subjN = in.readInt();
+            for (int i = 0; i < subjN; i++) {
+                Subject s = new Subject();
+                s.key = rStr(in);
+                s.name = rStr(in);
+                int roots = in.readInt();
+                for (int j = 0; j < roots; j++) s.roots.add(readNodeFromCache(in, null, s));
+                subjects.add(s);
+                subjectMap.put(s.key, s);
+            }
+            log("BOOT", "缓存读取 " + tRead + "ms（" + (all.length / 1024) + "KB）· 建对象 "
+                    + (System.currentTimeMillis() - t1) + "ms");
+            return true;
+        } catch (Throwable e) {
+            // 文件损坏 / 格式对不上：把读了一半的清掉，让调用方走 JSON
+            subjects.clear();
+            subjectMap.clear();
+            nodeById.clear();
+            return false;
+        }
+    }
+
+    private Node readNodeFromCache(DataInputStream in, Node parent, Subject s) throws Exception {
+        Node n = new Node();
+        n.parent = parent;
+        n.subj = s;
+        n.id = rStr(in);
+        n.name = rStr(in);
+        if (in.readByte() == 1) {
+            n.bodyRaw = rBytes(in);          // 只留字节，等真正显示再解码（启动最耗时的一步就在这）
+            n.daily = rStr(in);
+            n.star = in.readInt();
+            n.img = rStr(in);
+            n.d = rStr(in);
+            n.marksCache = rStr(in);
+            int exLen = in.readInt();
+            if (exLen > 0) {
+                byte[] ex = new byte[exLen];
+                in.readFully(ex);
+                n.extrasRaw = ex;            // 附加内容同样拖延到进详情页再解析
+            }
+        } else {
+            int cn = in.readInt();
+            for (int i = 0; i < cn; i++) n.children.add(readNodeFromCache(in, n, s));
+        }
+        if (n.id.length() > 0) {
+            nodeById.put(stableKey(n.id), n);
+            nodeById.put(n.id, n);
+        }
+        return n;
+    }
+
+    /** 从缓存里的一段字节解析附加内容（block 序列）。 */
+    static List<ExtraBlock> readExtrasFrom(DataInputStream in) throws Exception {
+        int bn = in.readInt();
+        List<ExtraBlock> list = new ArrayList<ExtraBlock>();
+        for (int i = 0; i < bn; i++) {
+            ExtraBlock b = new ExtraBlock();
+            b.name = rStr(in);
+            b.unit = rStr(in);
+            b.mark = rStr(in);
+            int itn = in.readInt();
+            for (int j = 0; j < itn; j++) {
+                ExtraItem it = new ExtraItem();
+                int ln = in.readInt();
+                for (int k = 0; k < ln; k++) {
+                    ExtraLine l = new ExtraLine();
+                    l.tag = rStr(in);
+                    l.text = rStr(in);
+                    l.tone = rStr(in);
+                    it.lines.add(l);
+                }
+                b.items.add(it);
+            }
+            list.add(b);
+        }
+        return list;
+    }
+
+    /** 写缓存。任何失败都只是删掉临时文件，下次照旧走 JSON。 */
+    private void writeKbCache() {
+        File tmp = new File(getFilesDir(), "kb_cache.tmp");
+        DataOutputStream out = null;
+        try {
+            out = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(tmp)));
+            out.writeInt(CACHE_MAGIC);
+            out.writeInt(appVersionCode());
+            out.writeInt(subjects.size());
+            for (Subject s : subjects) {
+                wStr(out, s.key);
+                wStr(out, s.name);
+                out.writeInt(s.roots.size());
+                for (Node n : s.roots) writeNodeToCache(out, n);
+            }
+            out.flush();
+            out.close();
+            out = null;
+            File f = kbCacheFile();
+            if (f.exists()) f.delete();
+            if (!tmp.renameTo(f)) tmp.delete();
+        } catch (Throwable e) {
+            try { if (out != null) out.close(); } catch (Exception ignored) { }
+            tmp.delete();
+        }
+    }
+
+    private void writeNodeToCache(DataOutputStream o, Node n) throws Exception {
+        wStr(o, n.id);
+        wStr(o, n.name);
+        if (n.isLeaf()) {
+            o.writeByte(1);
+            wStr(o, n.body());          // 写缓存时正文一定已解码（来自 JSON 解析路径）
+            wStr(o, n.daily);
+            o.writeInt(n.star);
+            wStr(o, n.img);
+            wStr(o, n.d);
+            wStr(o, n.marks());
+            byte[] ex = extrasBytes(n);
+            o.writeInt(ex.length);
+            o.write(ex);
+        } else {
+            o.writeByte(0);
+            o.writeInt(n.children.size());
+            for (Node c : n.children) writeNodeToCache(o, c);
+        }
+    }
+
+    /** 把附加内容序列化成一段字节（格式与 readExtrasFrom 对应）。 */
+    private byte[] extrasBytes(Node n) throws Exception {
+        List<ExtraBlock> list = n.extras();
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        DataOutputStream d = new DataOutputStream(bos);
+        d.writeInt(list.size());
+        for (ExtraBlock b : list) {
+            wStr(d, b.name);
+            wStr(d, b.unit);
+            wStr(d, b.mark);
+            d.writeInt(b.items.size());
+            for (ExtraItem it : b.items) {
+                d.writeInt(it.lines.size());
+                for (ExtraLine l : it.lines) {
+                    wStr(d, l.tag);
+                    wStr(d, l.text);
+                    wStr(d, l.tone);
+                }
+            }
+        }
+        d.flush();
+        return bos.toByteArray();
+    }
+
+    /** writeUTF 不接受 null。 */
+    private String nn(String s) {
+        return s == null ? "" : s;
+    }
+
+    /** 写一个字符串：4 字节长度 + 标准 UTF-8 字节。
+     *  不用 DataOutputStream.writeUTF——它是 modified UTF-8（\0 和增补字符编码不同），
+     *  构建脚本用 Python 预生成缓存时对不上；自己定格式两边都能精确复刻。 */
+    static void wStr(DataOutputStream o, String s) throws Exception {
+        byte[] b = (s == null ? "" : s).getBytes("UTF-8");
+        o.writeInt(b.length);
+        o.write(b);
+    }
+
+    static String rStr(DataInputStream in) throws Exception {
+        int n = in.readInt();
+        if (n < 0 || n > 4 * 1024 * 1024) throw new Exception("cache: bad string len " + n);
+        byte[] b = new byte[n];
+        in.readFully(b);
+        return new String(b, "UTF-8");
+    }
+
+    /** 读原始字节，不当字符串解码（正文和附加内容走这里，省掉启动时的大头开销）。 */
+    static byte[] rBytes(DataInputStream in) throws Exception {
+        int n = in.readInt();
+        if (n < 0 || n > 4 * 1024 * 1024) throw new Exception("cache: bad bytes len " + n);
+        byte[] b = new byte[n];
+        in.readFully(b);
+        return b;
+    }
+
     private Node parseNode(JSONObject no, Node parent, Subject s) {
         Node n = new Node();
         n.id = no.optString("id", "");
@@ -1036,6 +1327,9 @@ public class MainActivity extends Activity {
         return n;
     }
 
+    /** 全量解析：把整科文件读成 JSONObject 再递归建 Node。
+     *  v3.12.8 试过改成 JsonReader 流式读，实测在这台手表上反而更慢（2830ms vs 2608ms），
+     *  已回退。要再提速请走「二进制缓存」那条路，别重复试流式。 */
     private Subject parseSubject(JSONObject so) throws Exception {
         Subject s = new Subject();
         s.key = so.optString("s", "");
@@ -1081,6 +1375,14 @@ public class MainActivity extends Activity {
     private void loadData() {
         try {
             nodeById.clear();
+            long tStart = System.currentTimeMillis();
+            // 先试二进制缓存：命中就不用碰 JSON（换版本后自动失效）
+            if (loadFromCache()) {
+                buildHits();
+                log("BOOT", "走缓存 " + (System.currentTimeMillis() - tStart) + "ms · 科目 " + subjects.size()
+                        + " · 分组 " + allGroups.size() + " · 叶子 " + allHits.size());
+                return;
+            }
             JSONObject orderObj = readJsonAsset("data/order.json");
             JSONArray orderArr = orderObj.getJSONArray("order");
             StringBuilder cost = new StringBuilder();   // 各科解析耗时，写进日志方便定位
@@ -1096,6 +1398,7 @@ public class MainActivity extends Activity {
                     so.put("s", key);
                     so.put("name", name);
                     Subject s = parseSubject(so);
+                    if (s.roots.isEmpty()) continue;
                     subjects.add(s);
                     subjectMap.put(s.key, s);
                     cost.append(name).append(' ').append(System.currentTimeMillis() - tOne).append("ms ");
@@ -1104,6 +1407,15 @@ public class MainActivity extends Activity {
             long tHits = System.currentTimeMillis();
             buildHits();
             log("BOOT", "各科解析 " + cost + "| buildHits " + (System.currentTimeMillis() - tHits) + "ms");
+            // 流式解析的自检：这三个数必须和构建日志的「科目 9 / 分组 342 / 叶子 1572」一致
+            log("BOOT", "解析统计：科目 " + subjects.size() + " · 分组 " + allGroups.size()
+                    + " · 叶子 " + allHits.size());
+            // 万一解析逻辑出问题，宁可明确报错也不让用户对着空白主页发愣
+            if (subjects.isEmpty() || allHits.isEmpty()) {
+                loadError = "知识库没读出来（科目 " + subjects.size() + "，条目 " + allHits.size() + "）";
+            } else {
+                writeKbCache();          // 解析成功就落缓存，下次启动直接读
+            }
         } catch (Exception ex) {
             // 现在是在子线程读数据，不能直接弹 Toast（无 Looper），记下来回主线程再提示
             loadError = String.valueOf(ex.getMessage());
@@ -1274,7 +1586,8 @@ public class MainActivity extends Activity {
 
         // 正文区高度贴合实际字数：内容短就刚好放下（不滚动、下面也不空一大块），
         // 内容长才封顶到 maxH 再滚动。等弹窗真正布局完在量 body 的真实高度（此时宽度是真实的）。
-        box.getViewTreeObserver().addOnGlobalLayoutListener(
+        final android.view.ViewTreeObserver dlgVto = box.getViewTreeObserver();
+        dlgVto.addOnGlobalLayoutListener(
                 new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
                     public void onGlobalLayout() {
                         int want = body.getMeasuredHeight() + dp(6);   // 多 6dp，避免行距/标点的误差裁掉末行
@@ -1284,9 +1597,7 @@ public class MainActivity extends Activity {
                             sc.requestLayout();
                         }
                         // 只量一次：正文高度不会变了，量完就撤监听，免得改高度触发重布局又回调
-                        try {
-                            box.getViewTreeObserver().removeOnGlobalLayoutListener(this);
-                        } catch (Exception ignored) { }
+                        try { dlgVto.removeOnGlobalLayoutListener(this); } catch (Throwable ignored) { }
                     }
                 });
     }
@@ -7292,7 +7603,7 @@ public class MainActivity extends Activity {
     private void openNode(final Node n) {
         if (n.daily != null && n.daily.length() > 0) { openDaily(n, S_NODE); return; }
         if (n.isLeaf()) {
-            openDetail(n.name, n.body, n.path(), S_NODE, n.img, n.extras, n.id);
+            openDetail(n.name, n.body(), n.path(), S_NODE, n.img, n.extras(), n.id);
             return;
         }
         navStack.add(n);
@@ -7317,7 +7628,7 @@ public class MainActivity extends Activity {
         nodeEntryDepth = chain.size();
         renderNodes();
         if (n.isLeaf()) {
-            openDetail(n.name, n.body, n.path(), back, n.img, n.extras, n.id);
+            openDetail(n.name, n.body(), n.path(), back, n.img, n.extras(), n.id);
         } else {
             showScreen(S_NODE);
         }
@@ -7388,7 +7699,7 @@ public class MainActivity extends Activity {
             if (q.length() == 0) { shownNodes.add(n); continue; }
             if (n.name.contains(q)) { shownNodes.add(n); continue; }
             if (n.isLeaf()) {
-                if (n.body.contains(q)) shownNodes.add(n);
+                if (n.body().contains(q)) shownNodes.add(n);
             } else {
                 // 分组：名字没命中时，若它的后代有命中的也列出来
                 if (subtreeMatches(n, q)) shownNodes.add(n);
@@ -7404,7 +7715,7 @@ public class MainActivity extends Activity {
         for (Node c : n.children) {
             if (c.name.contains(q)) return true;
             if (c.isLeaf()) {
-                if (c.body.contains(q)) return true;
+                if (c.body().contains(q)) return true;
             } else if (subtreeMatches(c, q)) return true;
         }
         return false;
@@ -7433,7 +7744,7 @@ public class MainActivity extends Activity {
         }
         int leafTotal = 0;
         for (Node n : allHits) {
-            String blob = (n.name + " " + (n.body == null ? "" : n.body)).toLowerCase();
+            String blob = (n.name + " " + n.body()).toLowerCase();
             if (!blob.contains(ql)) continue;
             leafTotal++;
             if (searchHits.size() < HIT_LIMIT) searchHits.add(n);

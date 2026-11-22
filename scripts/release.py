@@ -158,6 +158,10 @@ def main():
     if pre:
         print("== 预发布：写 cloud/beta.json（只提交这一个文件）==")
         write_beta_file(token, ver, tag)
+        # build.sh 里的 build_authored 会按 manifest 把 version.json 写成当前（预发布）版本，
+        # 但预发布绝不能动它——普通用户拿 version.json 做兜底，指到 test 版就会被动升级。
+        # 这里直接恢复成已提交的正式版内容，工作区不留脏值。
+        subprocess.call(["git", "checkout", "--", "cloud/version.json"])
         print("   普通用户查 /releases/latest 看不到这一版；只有开了「接收测试版」的机器能收到。")
         print("   测好之后跑：python scripts/release.py --promote")
     else:
