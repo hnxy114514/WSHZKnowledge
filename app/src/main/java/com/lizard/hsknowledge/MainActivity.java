@@ -1449,46 +1449,61 @@ public class MainActivity extends Activity {
     }
 
     /** 直连失败时换支持 API 转发的镜像取 release 信息。
-     *  测试通道（设置里的「接收测试版」）打开时改查整个列表，能拿到 GitHub 上标了「预发布」的包；
-     *  关着时仍走 /releases/latest —— 这个接口服务端就排除预发布和草稿，普通用户永远看不到测试包。 */
+     *  正式版通道永远都查；测试开关只是「多给两个候选」，不能比正式版还差——
+     *  否则正式版比缓存里的预发布新时，开了测试版的人反而收不到更新。 */
     private JSONObject fetchLatestRelease() throws Exception {
         // 必须带时间戳参数：镜像普遍缓存 /releases/latest，不带的话刚发版也会拿回上一个版本
         String q = "?nocache=" + System.currentTimeMillis();
-        // 列表按创建时间倒序（GitHub 保证），第一条就是最新的那条；草稿的资产下不了，跳过
-        if (betaChannel) {
-            // 两条通道都试，取版本号高的那个：
-            // ① beta.json —— 几十字节、raw 镜像覆盖最广，但 raw 有几分钟 CDN 缓存，刚发完可能还是上一个；
-            // ② Release 列表 —— 实时，但 20KB 且未认证有额度限制，手表上经常连不上。
-            // 单用任何一条都会漏，合起来才稳。
-            String btag = fetchBetaTag();
-            String atag = "";
-            try {
-                String lu = RELEASES_LIST_API + "?per_page=1&nocache=" + System.currentTimeMillis();
-                JSONArray arr = new JSONArray(fetchApiText(lu, 8000, 15000));
-                for (int i = 0; i < arr.length(); i++) {
-                    JSONObject o = arr.optJSONObject(i);
-                    if (o != null && !o.optBoolean("draft", false)) {
-                        atag = o.optString("tag_name", "");
-                        break;
-                    }
-                }
-            } catch (Exception e) {
-                log("UPD", "Release 列表查询失败：" + e);
-            }
-            String best = btag;
-            if (atag.length() > 0 && (best.length() == 0 || compareSemver(atag, best) > 0)) best = atag;
-            if (best.length() > 0) {
-                try {
-                    JSONObject o = new JSONObject();
-                    o.put("tag_name", best);
-                    betaFetchFailed = false;
-                    return o;
-                } catch (Exception ignored) { }
-            }
-            // 两条都没拿到才认输，并让手动检查时把话说清楚
-            betaFetchFailed = true;
+        JSONObject normal = null;
+        Exception last = null;
+        try {
+            normal = new JSONObject(fetchApiText(RELEASES_API + q));
+        } catch (Exception e) {
+            last = e;
         }
-        return new JSONObject(fetchApiText(RELEASES_API + q));
+        if (!betaChannel) {
+            if (normal != null) return normal;
+            throw (last == null) ? new Exception("无法连接更新服务器") : last;
+        }
+
+        // 测试通道：候选有三个，取版本号最高的那个
+        // ① 正式版 latest（最稳，且带更新说明）；② Release 列表第一条（实时，可能含预发布）；
+        // ③ beta.json（几十字节、raw 镜像，但有几分钟 CDN 缓存，只在前两个都拿不到时才靠它）。
+        JSONObject best = normal;
+        String bestTag = (normal == null) ? "" : normal.optString("tag_name", "");
+        JSONObject listTop = null;
+        try {
+            String lu = RELEASES_LIST_API + "?per_page=1&nocache=" + System.currentTimeMillis();
+            JSONArray arr = new JSONArray(fetchApiText(lu, 8000, 15000));
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o != null && !o.optBoolean("draft", false)) {
+                    listTop = o;
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            log("UPD", "Release 列表查询失败：" + e);
+        }
+        if (listTop != null) {
+            String t = listTop.optString("tag_name", "");
+            if (best == null || compareSemver(t, bestTag) > 0) {
+                best = listTop;
+                bestTag = t;
+            }
+        }
+        String btag = fetchBetaTag();
+        if (btag.length() > 0 && (best == null || compareSemver(btag, bestTag) > 0)) {
+            try {
+                JSONObject o = new JSONObject();
+                o.put("tag_name", btag);
+                best = o;
+                bestTag = btag;
+            } catch (Exception ignored) { }
+        }
+        betaFetchFailed = (best == null);
+        if (best == null) throw (last == null) ? new Exception("无法获取版本号") : last;
+        return best;
     }
 
     /** 依次走「启动时测出的最优通道 → 各镜像」取一段 GitHub API 文本。 */

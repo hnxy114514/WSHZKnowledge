@@ -161,11 +161,13 @@ def main():
         print("   普通用户查 /releases/latest 看不到这一版；只有开了「接收测试版」的机器能收到。")
         print("   测好之后跑：python scripts/release.py --promote")
     else:
-        # 正式版不该再指向预发布：删掉标记，后面 push_version 会把它一起提交
-        beta_path = os.path.join("cloud", "beta.json")
-        if os.path.isfile(beta_path):
-            os.remove(beta_path)
-            print("已删除 cloud/beta.json（正式版不再指向预发布）")
+        # 正式版不删 beta.json，而是写成当前正式版：raw 有几分钟 CDN 缓存，
+        # 删掉之后缓存里还会返回上一个 pre 的 tag（那个 Release 已经删了，下载必然 404）。
+        # 写成正式版 tag 后，缓存新旧都指向一个存在的包。
+        print("== 更新 cloud/beta.json 指向正式版 ==")
+        with open(os.path.join("cloud", "beta.json"), "w", encoding="utf-8") as f:
+            json.dump({"version": ver, "tag": tag}, f, ensure_ascii=False)
+        print("   cloud/beta.json ->", tag, "（随第 6 步一起提交）")
 
         print("== 4. 刷新感谢名单静态备份 ==")
         refresh_thanks()
