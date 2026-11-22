@@ -3,7 +3,15 @@
 """一键发布：构建 APK → 创建 GitHub Release → 上传 APK。
 
 用法（在 Git Bash 中）：
-    GITHUB_TOKEN=你的PAT KS_PASS=签名密码 python release.py "本次更新的说明"
+    GITHUB_TOKEN=你的PAT KS_PASS=签名密码 python release.py "本次更新的说明"          正式版
+    GITHUB_TOKEN=你的PAT KS_PASS=签名密码 python release.py --pre "预发布说明"        预发布（只给自己测）
+    GITHUB_TOKEN=你的PAT python release.py --promote                               把当前版本的预发布转正
+
+预发布与正式版的区别（App 端只看 /releases/latest，这个接口服务端就排除预发布）：
+    --pre      建 Release 时标 prerelease=True，且不写 cloud/version.json、不提交推送。
+               普通用户永远收不到；只有把设置里「接收测试版」打开的机器才查得到。
+    --promote  不重新构建、不重新上传，只把那条 Release 的 prerelease 改成 False，
+               再写 version.json 并提交推送。用户拿到的就是你测过的那个包。
 """
 
 import json
@@ -57,10 +65,12 @@ def main():
     if not token:
         print("请先设置环境变量 GITHUB_TOKEN")
         sys.exit(1)
-    if not ks_pass:
-        print("请先设置环境变量 KS_PASS")
-        sys.exit(1)
-    note = sys.argv[1] if len(sys.argv) > 1 else ""
+    # 只把非 -- 开头的参数当更新说明，否则 --pre 会被当成说明写进 Release
+    argv = [a for a in sys.argv[1:] if not a.startswith("--")]
+    flags = [a for a in sys.argv[1:] if a.startswith("--")]
+    pre = "--pre" in flags
+    promote = "--promote" in flags
+    note = argv[0] if argv else ""
 
     text = open(MANIFEST, encoding="utf-8").read()
     m = re.search(r'android:versionName="([^"]+)"', text)
@@ -70,14 +80,26 @@ def main():
     ver = m.group(1)
     tag = "v" + ver
 
+    if pre and promote:
+        print("--pre 和 --promote 只能选一个")
+        sys.exit(1)
+    # 转正不需要构建，也就不需要签名密码：它只改那条已上传的 Release
+    if promote:
+        print("== 转正 %s ==" % tag)
+        promote_release(token, ver, tag)
+        return
+    if not ks_pass:
+        print("请先设置环境变量 KS_PASS")
+        sys.exit(1)
+
     print("== 1. 构建 %s ==" % tag)
     subprocess.check_call(["bash", "scripts/build.sh"], env={**os.environ, "KS_PASS": ks_pass})
 
-    print("== 2. 创建 Release %s ==" % tag)
+    print("== 2. 创建 Release %s%s ==" % (tag, "（预发布）" if pre else ""))
     payload = json.dumps({
         "tag_name": tag, "target_commitish": "main", "name": tag,
         "body": "%s - %s" % (tag, note) if note else tag,
-        "draft": False, "prerelease": False,
+        "draft": False, "prerelease": pre,
     }).encode("utf-8")
     st, data = http(API + "/releases", "POST", payload, {"Content-Type": "application/json"})
     rel = json.loads(data)
@@ -97,17 +119,59 @@ def main():
         print("上传 APK 失败:", up.get("message"))
         sys.exit(1)
 
-    print("== 4. 刷新感谢名单静态备份 ==")
-    refresh_thanks()
+    if pre:
+        print("== 预发布：跳过感谢名单 / version.json / 提交 ==")
+        print("   普通用户查 /releases/latest 看不到这一版；只有开了「接收测试版」的机器能收到。")
+        print("   测好之后跑：python scripts/release.py --promote")
+    else:
+        print("== 4. 刷新感谢名单静态备份 ==")
+        refresh_thanks()
 
-    print("== 5. 写入版本标记 ==")
-    write_version_file(ver, tag)
+        print("== 5. 写入版本标记 ==")
+        write_version_file(ver, tag)
 
-    print("== 6. 提交版本标记 ==")
-    push_version(token, tag)
+        print("== 6. 提交版本标记 ==")
+        push_version(token, tag)
 
     print("== 完成 ==")
     print("下载直链:", up.get("browser_download_url"))
+    print("Release 页: https://github.com/%s/releases/tag/%s" % (REPO, tag))
+
+
+def promote_release(token, ver, tag):
+    """把已有的预发布转成正式版，不重新构建、不重新上传。
+
+    用户拿到的就是自测过的那一个 APK；之后新用户/老用户才第一次看到这个版本。
+    """
+    st, data = http(API + "/releases/tags/" + tag)
+    if st >= 400:
+        print("找不到 Release %s：%s" % (tag, json.loads(data).get("message")))
+        sys.exit(1)
+    rel = json.loads(data)
+    rid = rel.get("id")
+    if not rid:
+        print("Response 里没有 release id，转正中止")
+        sys.exit(1)
+    print("Release id = %s，当前 prerelease = %s" % (rid, rel.get("prerelease")))
+
+    st, data = http(API + "/releases/" + str(rid), "PATCH",
+                    json.dumps({"prerelease": False}).encode("utf-8"),
+                    {"Content-Type": "application/json"})
+    if st >= 400:
+        print("转正失败：", json.loads(data).get("message"))
+        sys.exit(1)
+    print("已转正：%s" % tag)
+
+    print("== 刷新感谢名单静态备份 ==")
+    refresh_thanks()
+
+    print("== 写入版本标记 ==")
+    write_version_file(ver, tag)
+
+    print("== 提交版本标记 ==")
+    push_version(token, tag)
+
+    print("== 完成 ==")
     print("Release 页: https://github.com/%s/releases/tag/%s" % (REPO, tag))
 
 

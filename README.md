@@ -2,7 +2,7 @@
 
 > 信息更新时间：2026-11-17 14:32（诗词逐句换行与海水性质后同步校对）
 > 校对时间：2026-11-19 01:20（对照当前代码逐节核对：屏幕数 23、切页显示时序、列表缓存与定位、右滑路径、`rebuildUi` 标记、发版脚本直连、问 AI 知识点推荐、思考开关、感谢名单分页与标签规则、API 模型列表持久化、译文流程与进度统计、对话参数自由输入、网页暗色、显示调节重做、问 AI 字号基准、生物实验条目、例行体检、诗词换行、海水性质、重点标注密度、译文与例题分块、注释编号体检、题库质量清理与全覆盖）
-> 复核时间：2026-11-23 00:55（v3.12.2 接手复核：数据链 342 分组 / 1572 叶子 / 1914 编号、注释 728 组 1406 条全过；必背 60 篇 927 组译文 + 402 道例题、889 个空，单空均值 5.77 字、最长 15 字；`build.sh` 出包与签名正常。本次把语文扩展数据的旧稿与旧落盘脚本归档到 `tools/legacy/`，本文件中相关表述已同步，详见该目录 README）
+> 复核时间：2026-11-23 01:20（v3.12.3：新增 S_ORDER「首页科目排序」页、设置页「接收测试版」开关、`release.py --pre/--promote` 预发布通道；数据链仍是 342 分组 / 1572 叶子 / 1914 编号，注释 728 组 1406 条；必背 60 篇 927 组译文 + 402 道例题；语文扩展数据的旧稿已归档 `tools/legacy/`）
 > 这两个时间只用来**辅助**判断本文档是否可能过时；内容是否仍成立、某段是否适用于眼前问题，请以当前代码与实际运行为准，自己判断。
 
 面向手表（腕上穿戴设备）的高中九科知识点汇总 App。内置语文、数学、英语、物理、化学、生物、政治、历史、地理九门科目的知识清单与配图，支持行内数学公式排版（分数、根号、上下角标、向量可嵌套）与人工标注的重点高亮，并具备基于 GitHub Release 的 APK 覆盖更新。
@@ -56,7 +56,7 @@ WSHZKnowledge/
 │   └── thanks.json                     感谢名单的静态备份（API 全不通时 App 读它）
 ├── local/                             本地私密文件（凭据、keystore、备忘），已被 .gitignore 排除
 ├── scripts/build.sh                   无 Gradle 构建脚本（aapt2 + javac + d8 + apksigner）
-├── scripts/release.py                 一键发布：构建 + 创建 Release + 上传 APK + 写 cloud/version.json + 刷新 cloud/thanks.json
+├── scripts/release.py                 一键发布：构建 + 创建 Release + 上传 APK + 写 cloud/version.json + 刷新 cloud/thanks.json（`--pre` 预发布 / `--promote` 转正）
 │                                      （curl 走 `--noproxy '*'` + `--resolve` 钉真实 IP 直连，绕过本机 hosts 劫持/坏代理）
 ├── 编号规则.md                         递归节点编号规则（日期段在最前 + 日期继承流程）
 ├── .gitignore                          排除签名密钥、产物、缓存、归档
@@ -353,7 +353,9 @@ KS_PASS=你的签名密码 ./build.sh
 ### 一键发布（构建 + Release + 上传 APK）
 
 ```bash
-GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更新的说明"
+GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更新的说明"        # 正式版
+GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py --pre "预发布说明"     # 预发布，只给自己测
+GITHUB_TOKEN=你的PAT python release.py --promote                                 # 把当前版本的预发布转正
 ```
 
 脚本会：
@@ -361,6 +363,15 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
 2. 调用 `build.sh` 重新构建；
 3. 在 GitHub 创建 `v1.3.1` 标签的 Release；
 4. 上传 APK 并打印直链。
+
+**预发布（`--pre`）**：Release 标成 `prerelease=True`，并且**不写** `cloud/version.json`、**不提交推送**。
+App 查的 `/releases/latest` 由 GitHub 服务端排除预发布，所以普通用户永远收不到这一版；
+只有设置里把「接收测试版」打开的机器才会去查 `/releases` 列表、拿到它。
+测完没问题再 `--promote`：只把那条 Release 的 `prerelease` 改成 `False`、写 `version.json`、提交推送，
+**不重新构建也不重新上传**——用户拿到的就是你自测过的那个 APK。
+
+> 版本号要一轮一轮往上加（`compareSemver` 只比三段数字，同号不会提示更新）。
+> 预发布期间源码改动还没提交，`--promote` 时会一起 `git add -A` 提交并在 `main` 上推送。
 
 ---
 
@@ -384,6 +395,10 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
   1. `api.github.com/.../releases/latest`，失败换能转发 API 的镜像；
   2. 同时读静态文件 `cloud/version.json`（`release.py` 发版时按 `versionName` 自动写入并提交推送）；
   3. **两边交叉比对，取更新的那个**。镜像普遍缓存 API 响应，只信 API 会在刚发完版时拿回上一个版本。
+- **测试通道**（设置页「接收测试版」，默认关闭）：打开后第 1 步改查 `api.github.com/.../releases` 列表
+  （`per_page=5`，按创建时间倒序取第一条非草稿，**含预发布**）；列表口不通就回退 `latest`，
+  一个测试开关不该把更新检查整个搞挂。关着时行为与以前完全一致。
+  这是「自己能收到预发布、普通用户收不到」的唯一实现方式——`/releases/latest` 由 GitHub 服务端排除预发布，改不了。
 - API 请求一律带 `?nocache=<当前毫秒>` 穿透镜像缓存；Release 资源名必须与 tag 对得上才采用其下载地址，否则按 tag 拼 URL。
 - 用 `versionName` 与最新 tag 做语义化比较（`compareSemver`，按三段数字比）。
 - 有新版 → 先申请「安装未知应用」权限 → 下载 APK → 触发覆盖安装。
@@ -546,9 +561,9 @@ enterApp()：buildUi() 建主界面（setContentView 换掉开屏）→ 定首�
   它是 `setContentView` 的第一份内容，主界面建好后被 `setContentView(root)` 顶掉。
 - 窗口底色全程是 `C_BG`（纯黑），换内容不会白闪。
 
-### 界面骨架：22 个「屏幕」叠在一个 FrameLayout 里
+### 界面骨架：24 个「屏幕」叠在一个 FrameLayout 里
 
-`buildUi()` 建一个 `root`（FrameLayout），往里 add 23 个 `newScreen()`（LinearLayout，位置 `fp()` 铺满），
+`buildUi()` 建一个 `root`（FrameLayout），往里 add 24 个 `newScreen()`（LinearLayout，位置 `fp()` 铺满），
 同一时刻只有一个 `VISIBLE`。切页不是跳 Activity，而是在 `showScreen()` 里把目标页先隐藏、渲染 + 定位完成后
 再淡入显示（见「打开 / 返回页面的过程」），这样中间不会露出空页面或黑底。
 
@@ -579,19 +594,22 @@ enterApp()：buildUi() 建主界面（setContentView 换掉开屏）→ 定首�
 | 20 | S_AI_API_CFG | API AI 设置 | `buildAiApiScreen()` → `renderAiApi()` |
 | 21 | S_AI_WEB_CFG | DeepSeek 网页版设置 | `buildAiWebCfgScreen()` → `renderAiWebCfg()` |
 | 22 | S_AI_CHAT | API AI 对话 | `buildAiChatScreen()` → `renderAiChat()` |
+| 23 | S_ORDER | 首页科目排序（设置页的子页） | `buildOrderScreen()` → `renderOrder()` |
 
-`SCREEN_COUNT = 23`。五个地方必须同步改，漏一个就会错位或崩：
-① 常量与 `SCREEN_COUNT`；② `showScreen()` 里的 `screens[]` 数组（**下标即常量值**）；
+`SCREEN_COUNT = 24`。六处必须同步改，漏一处就会错位或崩：
+① 常量与 `SCREEN_COUNT`；② `showScreen()` 里**两个** `View[]` 数组——右滑分支的 `ss` 和正常分支的 `screens`
+（**下标即常量值**，只改一个的话，右滑返回会取到错页甚至越界）；
 ③ `screenView(s)` 的 switch；④ `currentScreenView(s)` 的 switch（右滑预览用）；
-⑤ `backTarget()`（返回去哪）与 `showScreen()` 里的渲染分支。
+⑤ `backTarget()`（返回去哪）与 `showScreen()` 里的渲染分支；
+⑥ `scrollOf(s)`（不写就不记滚动位置，从这一页返回时会弹回顶端）。
 `svOf(s)` 只对有列表的页返回 `SvList`，没有列表的页（例如问 AI）走 `default: null` 就是对的，不用加。
 
 ### 加一屏的完整步骤
 
-1. 在常量后面加 `S_XXX = 23`，`SCREEN_COUNT` 改 24；
+1. 在常量后面加 `S_XXX = 24`，`SCREEN_COUNT` 改 25；
 2. `buildUi()` 里 `xxxScreen = newScreen(); ... root.addView(xxxScreen, fp());`；
-3. `screens[]` 数组末尾加 `xxxScreen`（顺序必须和常量值一致）；
-4. `screenView()` / `currentScreenView()` 各加一个 `case S_XXX:`；`svOf()` 只有列表页才需要加；
+3. **两个** `View[]` 数组末尾都加 `xxxScreen`（`showScreen()` 的右滑分支 `ss` 与正常分支 `screens`，顺序必须和常量值一致）；
+4. `screenView()` / `currentScreenView()` 各加一个 `case S_XXX:`；`svOf()` 只有列表页才需要加；`scrollOf()` 凡是有滚动容器的都要加；
 5. `backTarget()` 里写返回去哪，`showScreen()` 里加 `else if (s == S_XXX) renderXxx();`；
 6. 需要从主页进就在 `buildSubjectScreen()` 加一行入口。
 

@@ -126,6 +126,8 @@ public class MainActivity extends Activity {
 
     private static final String REPO = "hnxy114514/WSHZKnowledge";
     private static final String RELEASES_API = "https://api.github.com/repos/" + REPO + "/releases/latest";
+    /** 测试通道用：整个 Release 列表（GitHub 的 latest 接口会排除预发布，列表不会）。 */
+    private static final String RELEASES_LIST_API = "https://api.github.com/repos/" + REPO + "/releases";
     private static final String RELEASE_DL = "https://github.com/" + REPO + "/releases/download/";
     /** 国内直连 GitHub 不稳，逐个尝试以下加速镜像（前缀 + 原地址）。顺序即实测优先级。 */
     private static final String[] MIRRORS = {
@@ -205,8 +207,9 @@ public class MainActivity extends Activity {
             S_SEARCH = 4, S_FEEDBACK = 5, S_MYFEEDBACK = 6, S_PROFILE = 7,
             S_CHANGELOG = 8, S_ABOUT = 9, S_DISPLAY = 10, S_TODAY = 11,
             S_EXTRA = 12, S_FAV = 13, S_HIST = 14, S_FAV_SUB = 15, S_DAILY = 16, S_SENT = 17,
-            S_AI_WEB = 18, S_AI_HUB = 19, S_AI_API_CFG = 20, S_AI_WEB_CFG = 21, S_AI_CHAT = 22;
-    private static final int SCREEN_COUNT = 23;
+            S_AI_WEB = 18, S_AI_HUB = 19, S_AI_API_CFG = 20, S_AI_WEB_CFG = 21, S_AI_CHAT = 22,
+            S_ORDER = 23;
+    private static final int SCREEN_COUNT = 24;
     private int screen = S_SUBJECT;
     private Subject curSubject;
     /** 从科目根走到当前所在的分组节点；空 = 正在看某科目的顶层节点。 */
@@ -423,7 +426,7 @@ public class MainActivity extends Activity {
     private LinearLayout subjectScreen, nodeScreen, detailScreen, settingsScreen, searchScreen, extraScreen;
     private SvList subjectList, nodeList, searchList;
     private TextView listTitle, detailTitle, detailPath, searchTitle, extraTitle, extraPath, extraKind;
-    private TextView detailBackBtn, settingsBackBtn, extraBackBtn;
+    private TextView detailBackBtn, settingsBackBtn, extraBackBtn, orderBackBtn;
     private EditText itemSearchBox, gSearchBox;
     private ScrollView detailScroll, settingsScroll, extraScroll;
     private LinearLayout detailInner, settingsInner, extraInner;
@@ -491,6 +494,9 @@ public class MainActivity extends Activity {
     // 显示调节（字号 / 界面缩放，带实时预览）
     private LinearLayout displayScreen, displayInner;
     private ScrollView displayScroll;
+    // 首页科目排序（设置页的子页）
+    private LinearLayout orderScreen, orderInner;
+    private ScrollView orderScroll;
 
     // 收藏与历史记录（都按节点稳定编号记在本地）
     private LinearLayout favScreen, histScreen, favSubScreen;
@@ -611,6 +617,8 @@ public class MainActivity extends Activity {
     private boolean swipeBack = true;
     // 交互震动反馈（设置里可关）
     private boolean haptic = true;
+    // 测试通道：开启后更新检查把 GitHub 上的「预发布」也算进来（设置里可开，默认关）
+    private boolean betaChannel = false;
     private long lastVibrate = 0;           // 节流：避免连点狂震
     private boolean swipeTracking = false;
     private boolean swipeActive = false;     // 已进入拖动返回
@@ -690,6 +698,7 @@ public class MainActivity extends Activity {
         m = new Metrics();
         swipeBack = prefs.getBoolean("swipe_back", true);
         haptic = prefs.getBoolean("haptic", true);
+        betaChannel = prefs.getBoolean("beta_channel", false);
         aiMode = prefs.getString("ai_mode", "web");
         loadApiConfig();
         // 没有 WebView 就自动改用 API 模式（网页版在这台设备上根本打不开）
@@ -1408,19 +1417,38 @@ public class MainActivity extends Activity {
         return RELEASE_DL + tag + "/HZKnowledge-" + tag + ".apk";
     }
 
-    /** 直连失败时换支持 API 转发的镜像取 release 信息。 */
+    /** 直连失败时换支持 API 转发的镜像取 release 信息。
+     *  测试通道（设置里的「接收测试版」）打开时改查整个列表，能拿到 GitHub 上标了「预发布」的包；
+     *  关着时仍走 /releases/latest —— 这个接口服务端就排除预发布和草稿，普通用户永远看不到测试包。 */
     private JSONObject fetchLatestRelease() throws Exception {
-        Exception last = null;
         // 必须带时间戳参数：镜像普遍缓存 /releases/latest，不带的话刚发版也会拿回上一个版本
         String q = "?nocache=" + System.currentTimeMillis();
+        // 列表按创建时间倒序（GitHub 保证），第一条就是最新的那条；草稿的资产下不了，跳过
+        if (betaChannel) {
+            try {
+                String lu = RELEASES_LIST_API + "?per_page=5&nocache=" + System.currentTimeMillis();
+                JSONArray arr = new JSONArray(fetchApiText(lu));
+                for (int i = 0; i < arr.length(); i++) {
+                    JSONObject o = arr.optJSONObject(i);
+                    if (o != null && !o.optBoolean("draft", false)) return o;
+                }
+            } catch (Exception ignored) { }
+            // 列表口不通就退回 latest：一个测试开关不该把「检查更新」整个搞挂
+        }
+        return new JSONObject(fetchApiText(RELEASES_API + q));
+    }
+
+    /** 依次走「启动时测出的最优通道 → 各镜像」取一段 GitHub API 文本。 */
+    private String fetchApiText(String fullUrl) throws Exception {
+        Exception last = null;
         // 先走启动时测出来的最优通道，多数情况一步就中
         try {
-            return new JSONObject(httpGetText(apiBase() + RELEASES_API + q, 5000, 6000));
+            return httpGetText(apiBase() + fullUrl, 5000, 6000);
         } catch (Exception e) { last = e; }
         for (int i = 0; i <= API_MIRRORS.length; i++) {
-            String u = (i == 0) ? RELEASES_API : API_MIRRORS[i - 1] + RELEASES_API;
+            String u = (i == 0) ? fullUrl : API_MIRRORS[i - 1] + fullUrl;
             try {
-                return new JSONObject(httpGetText(u + q, 5000, 6000));
+                return httpGetText(u, 5000, 6000);
             } catch (Exception e) {
                 last = e;
             }
@@ -2308,6 +2336,11 @@ public class MainActivity extends Activity {
         displayScreen = newScreen();
         buildDisplayScreen();
         root.addView(displayScreen, fp());
+
+        // 科目排序：从设置页点进来，单独一页放列表，设置页不再被 9 行排序挤长
+        orderScreen = newScreen();
+        buildOrderScreen();
+        root.addView(orderScreen, fp());
 
         todayScreen = newScreen();
         buildTodayScreen();
@@ -5848,6 +5881,7 @@ public class MainActivity extends Activity {
             case S_DETAIL: return detailScroll;
             case S_EXTRA: return extraScroll;
             case S_SETTINGS: return settingsScroll;
+            case S_ORDER: return orderScroll;
             case S_AI_HUB: return aiHubScroll;
             case S_AI_API_CFG: return aiApiScroll;
             case S_AI_WEB_CFG: return aiWebCfgScroll;
@@ -8840,6 +8874,24 @@ public class MainActivity extends Activity {
         updHint.setGravity(Gravity.CENTER);
         updHint.setPadding(dp(4), dp(3), dp(4), dp(2));
         settingsInner.addView(updHint, wrap());
+
+        // 测试通道：默认关。关着时查 /releases/latest，服务端就不返回预发布，
+        // 普通用户永远看不到测试包；只有自己开这一项，才把列表里的预发布也算进更新。
+        settingsInner.addView(toggleRow("接收测试版", betaChannel, new View.OnClickListener() {
+            public void onClick(View v) {
+                betaChannel = !betaChannel;
+                prefs.edit().putBoolean("beta_channel", betaChannel).apply();
+                renderSettings();
+            }
+        }), wrap());
+        TextView betaHint = new TextView(this);
+        betaHint.setText("开启后可收到预发布版本（发布前自测用），默认关闭。");
+        betaHint.setTextSize(m.subtitleSize - 2f);
+        betaHint.setTextColor(C_SUB);
+        betaHint.setGravity(Gravity.CENTER);
+        betaHint.setPadding(dp(4), dp(2), dp(4), dp(4));
+        settingsInner.addView(betaHint, wrap());
+
         TextView fbEntry = new TextView(this);
         fbEntry.setText("反馈与建议");
         fbEntry.setTextSize(m.backSize);
@@ -8901,16 +8953,32 @@ public class MainActivity extends Activity {
         });
         settingsInner.addView(profEntry, wrap());
 
+        // 排序单独一页：设置页只留一个入口，不再把 9 行排序堆在这里
+        TextView orderEntry = new TextView(this);
+        orderEntry.setText("首页科目排序");
+        orderEntry.setTextSize(m.backSize);
+        orderEntry.setTextColor(C_PRIMARY);
+        orderEntry.setGravity(Gravity.CENTER);
+        orderEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
+        orderEntry.setBackground(clickBg(C_PILL));
+        applyIcon(orderEntry, "ic_sort", C_PRIMARY, 15);
+        orderEntry.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                showScreen(S_ORDER);
+            }
+        });
+        LinearLayout.LayoutParams orderLp = wrap();
+        orderLp.topMargin = dp(6);
+        settingsInner.addView(orderEntry, orderLp);
+
         TextView orderHint = new TextView(this);
-        orderHint.setText("主页科目顺序，点 ↑↓ 调整。");
+        orderHint.setText("调整主页科目的先后顺序。");
         orderHint.setTextSize(m.subtitleSize - 2f);
         orderHint.setTextColor(C_SUB);
         orderHint.setGravity(Gravity.CENTER);
         orderHint.setPadding(dp(4), dp(2), dp(4), dp(4));
         settingsInner.addView(orderHint, wrap());
-        for (int idx = 0; idx < orderKeys.size(); idx++) {
-            settingsInner.addView(orderRow(idx), wrap());
-        }
 
         // 记录日志开关：点击后由 toggleRow 自己震动，这里只处理状态切换。
         // 上面是排序行（一行挨一行没有外边距），这里要自己留出间隔，否则两块会贴在一起
@@ -9059,9 +9127,8 @@ public class MainActivity extends Activity {
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(8), dp(4), dp(8), dp(4));
-        row.setBackgroundDrawable(pill(C_CARD));
-        LinearLayout.LayoutParams rlp = wrap();
-        rlp.bottomMargin = dp(4);
+        // 行自己不画底色、也不留行距：圆角底由 renderOrder 的外层容器统一给。
+        // 每行各画一个圆角卡片会排成一摞独立胶囊，上下又不相连，看着很碎。
 
         TextView nm = new TextView(this);
         nm.setText((idx + 1) + ". " + name);
@@ -9233,7 +9300,7 @@ public class MainActivity extends Activity {
                     searchScreen, feedbackScreen, mineScreen, profileScreen, changelogScreen, aboutScreen,
                     displayScreen, todayScreen, extraScreen, favScreen, histScreen, favSubScreen,
                     dailyScreen, sentScreen, aiWebScreen, aiHubScreen, aiApiScreen, aiWebCfgScreen,
-                    aiChatScreen};
+                    aiChatScreen, orderScreen};
             screen = s;
             for (int i = 0; i < ss.length; i++) {
                 if (i == s) continue;
@@ -9269,12 +9336,12 @@ public class MainActivity extends Activity {
         ScrollView leavingSc = scrollOf(screen);
         if (leavingSc != null) savedScrollY[screen] = leavingSc.getScrollY();
         screen = s;
-        // 顺序必须与 S_* 常量一一对应（0..15）
+        // 顺序必须与 S_* 常量一一对应（0..23）
         View[] screens = {subjectScreen, nodeScreen, detailScreen, settingsScreen,
                 searchScreen, feedbackScreen, mineScreen, profileScreen, changelogScreen, aboutScreen,
                 displayScreen, todayScreen, extraScreen, favScreen, histScreen, favSubScreen,
                 dailyScreen, sentScreen, aiWebScreen, aiHubScreen, aiApiScreen, aiWebCfgScreen,
-                aiChatScreen};
+                aiChatScreen, orderScreen};
         View target = screens[s];
         boolean shown = target.getVisibility() == View.VISIBLE && target.getAlpha() > 0.95f
                 && Math.abs(target.getTranslationX()) < dp(4);
@@ -9353,6 +9420,9 @@ public class MainActivity extends Activity {
         } else if (s == S_SETTINGS) {
             renderSettings();
             scrollToTop(settingsScroll);   // 进这一页从顶部开始；页内改排序/开关由 renderSettings 自己保位
+        } else if (s == S_ORDER) {
+            renderOrder();
+            scrollToTop(orderScroll);
         } else if (s == S_SEARCH) {
             // 关键词没变就不重设数据，返回时列表位置不会跳回顶部
             String q = gSearchBox.getText().toString().trim();
@@ -9569,6 +9639,7 @@ public class MainActivity extends Activity {
         if (screen == S_EXTRA) return S_DETAIL;
         if (screen == S_NODE) return S_SUBJECT;   // 栈空时才到这里（有栈已被 nodeBack 处理）
         if (screen == S_SETTINGS) return S_SUBJECT;
+        if (screen == S_ORDER) return S_SETTINGS;
         if (screen == S_SEARCH) return S_SUBJECT;
         if (screen == S_FEEDBACK) return S_SETTINGS;
         if (screen == S_MYFEEDBACK) return S_FEEDBACK;
@@ -9614,6 +9685,7 @@ public class MainActivity extends Activity {
             case S_AI_API_CFG: return aiApiScreen;
             case S_AI_WEB_CFG: return aiWebCfgScreen;
             case S_AI_CHAT: return aiChatScreen;
+            case S_ORDER: return orderScreen;
             default: return null;
         }
     }
@@ -9741,6 +9813,7 @@ public class MainActivity extends Activity {
             case S_AI_API_CFG: return aiApiScreen;
             case S_AI_WEB_CFG: return aiWebCfgScreen;
             case S_AI_CHAT: return aiChatScreen;
+            case S_ORDER: return orderScreen;
             default: return subjectScreen;
         }
     }
@@ -10862,6 +10935,56 @@ public class MainActivity extends Activity {
         displayScreen.addView(displayScroll, lw());
     }
 
+    /** 首页科目排序页：设置页只留一个入口，9 行排序单独放一页。 */
+    private void buildOrderScreen() {
+        orderBackBtn = makeBack("‹ 返回", new View.OnClickListener() {
+            public void onClick(View v) { goBack(S_SETTINGS); }
+        });
+        orderScroll = new OverScrollScrollView(this);
+        orderScroll.setVerticalScrollBarEnabled(false);
+        roundPadScroll(orderScroll);
+        orderInner = new LinearLayout(this);
+        orderInner.setOrientation(LinearLayout.VERTICAL);
+        orderScroll.addView(orderInner);
+        orderScreen.addView(orderScroll, lw());
+    }
+
+    /** 画排序页。改顺序只重画这一页，主页靠 markSubjectsDirty 标记，回去时再重建。 */
+    private void renderOrder() {
+        int keepY = (orderInner.getChildCount() > 0) ? orderScroll.getScrollY() : -1;
+        orderInner.removeAllViews();
+        if (overDist() > 0) orderInner.addView(makeScrollSpacer());
+        orderInner.addView(orderBackBtn, wrapM());
+        orderInner.addView(pageTitle("首页科目排序"), wrap());
+        orderInner.addView(grayTip("点 ▲▼ 调顺序，改完主页立即生效。"), wrap());
+
+        // 9 行连成一块：外层一个圆角底，行自己不画圆角、不留缝，行间只加一条细分隔线
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setBackgroundDrawable(pill(C_CARD));
+        for (int idx = 0; idx < orderKeys.size(); idx++) {
+            if (idx > 0) box.addView(orderDivider());
+            box.addView(orderRow(idx));
+        }
+        LinearLayout.LayoutParams blp = wrap();
+        blp.topMargin = dp(6);
+        orderInner.addView(box, blp);
+        if (keepY >= 0) scrollToY(orderScroll, keepY);   // 上下挪动后保住位置，不弹回顶端
+        else scrollToTop(orderScroll);
+    }
+
+    /** 连排列表里的分隔线：1 像素，左右留缩进，比卡片底色亮一档。 */
+    private View orderDivider() {
+        View v = new View(this);
+        v.setBackgroundColor(0xFF242424);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, Math.max(1, dp(1) / 2));
+        lp.leftMargin = dp(10);
+        lp.rightMargin = dp(10);
+        v.setLayoutParams(lp);
+        return v;
+    }
+
     private float curTitleSize() {
         return titleSizeSp > 0 ? titleSizeSp : (m.round ? 15f : 17f);
     }
@@ -10965,7 +11088,10 @@ public class MainActivity extends Activity {
             sb.setThumbTintList(ColorStateList.valueOf(C_PRIMARY));
             sb.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF2E2E2E));
         } catch (Exception ignored) { }
-        sb.setPadding(0, 0, 0, 0);
+        // 左右各留出半个 thumb 的宽度：SeekBar 默认把圆点画在控件边界上，
+        // padding 为 0 时滑到最左/最右，圆点会有一半被它自己的边界裁掉（看着像被卡片边缘切了）。
+        int thumbPad = dp(9);
+        sb.setPadding(thumbPad, 0, thumbPad, 0);
         final boolean[] released = {false};
         sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             float cur = value;
