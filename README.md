@@ -2,6 +2,7 @@
 
 > 信息更新时间：2026-11-17 14:32（诗词逐句换行与海水性质后同步校对）
 > 校对时间：2026-11-19 01:20（对照当前代码逐节核对：屏幕数 23、切页显示时序、列表缓存与定位、右滑路径、`rebuildUi` 标记、发版脚本直连、问 AI 知识点推荐、思考开关、感谢名单分页与标签规则、API 模型列表持久化、译文流程与进度统计、对话参数自由输入、网页暗色、显示调节重做、问 AI 字号基准、生物实验条目、例行体检、诗词换行、海水性质、重点标注密度、译文与例题分块、注释编号体检、题库质量清理与全覆盖）
+> 复核时间：2026-11-23 00:55（v3.12.2 接手复核：数据链 342 分组 / 1572 叶子 / 1914 编号、注释 728 组 1406 条全过；必背 60 篇 927 组译文 + 402 道例题、889 个空，单空均值 5.77 字、最长 15 字；`build.sh` 出包与签名正常。本次把语文扩展数据的旧稿与旧落盘脚本归档到 `tools/legacy/`，本文件中相关表述已同步，详见该目录 README）
 > 这两个时间只用来**辅助**判断本文档是否可能过时；内容是否仍成立、某段是否适用于眼前问题，请以当前代码与实际运行为准，自己判断。
 
 面向手表（腕上穿戴设备）的高中九科知识点汇总 App。内置语文、数学、英语、物理、化学、生物、政治、历史、地理九门科目的知识清单与配图，支持行内数学公式排版（分数、根号、上下角标、向量可嵌套）与人工标注的重点高亮，并具备基于 GitHub Release 的 APK 覆盖更新。
@@ -15,7 +16,7 @@ WSHZKnowledge/
 ├── app/                              Android 工程
 │   ├── src/main/
 │   │   ├── java/com/lizard/hsknowledge/
-│   │   │   ├── MainActivity.java        UI + 数学排版引擎 + 更新 + 反馈（单文件，约 8300 行）
+│   │   │   ├── MainActivity.java        UI + 数学排版引擎 + 更新 + 反馈（单文件，13036 行）
 │   │   │   ├── OverScrollScrollView.java 圆屏内容过滚滚动容器（列表与正文共用，方屏过滚为 0）
 │   │   │   └── ApkFileProvider.java     APK 覆盖安装用的 ContentProvider
 │   │   ├── assets/
@@ -29,7 +30,7 @@ WSHZKnowledge/
 │   │   ├── chinese.py / math.py / english.py /
 │   │   ├── physics.py / chem.py / bio.py /
 │   │   ├── politics.py / history.py / geography.py
-│   │   └── ext_bipei60.py / ext_zuowen.py   语文扩展内容（必背 60 篇、作文素材），由 chinese.py 加载
+│   │   └── （语文的必背 60 篇、作文素材已整块内联在 chinese.py；旧的 ext_*.py 归档在 tools/legacy/）
 │   ├── build_authored.py               构建数据：递归 TREE → assets/data/nodes（含去重、分数化、定稿、编号 v3）
 │   ├── check_data.py                   数据体检：编号/标题/正文/加粗/LaTeX/附加块（只读，构建后跑一次）
 │   ├── check_notes.py                  注释体检：「译文」块里 ①②③ 的编号体系、词条落点、先后顺序（只读）
@@ -45,7 +46,9 @@ WSHZKnowledge/
 │       ├── img_gen/                    配图生成（common.py + 每张图一个脚本 + gen_all.py）
 │       ├── make_icon.py                生成应用图标（表盘 + Emoji 书本，输出 5 个 dpi）
 │       ├── emoji_src/open_book.png     图标用的书本 Emoji 源图（Fluent Emoji, MIT）
-│       └── hl_kit.py                   批量标重点辅助（export 缺标条目 / apply 回写）
+│       ├── hl_kit.py                   批量标重点辅助（export 缺标条目 / apply 回写）
+│       ├── ext_bipei60.py / ext_zuowen.py  语文扩展数据的旧稿（正文已并入 chinese.py，改这里不进 App）
+│       └── apply_trans.py              必背 60 篇译文的旧落盘脚本（写向上面那份旧稿，已封存）
 │
 ├── cloud/
 │   ├── version.json                    更新兜底用的版本号（App 拉不到 GitHub API 时读它）
@@ -72,9 +75,9 @@ WSHZKnowledge/
 ## 数据流（一条链路）
 
 ```
-tools/subjects/*.py  （九科递归节点树，人工维护，只写内容不写编号）
-  └ chinese.py 末尾用 _load_ext() 把 ext_bipei60.py（必背 60 篇全文）
-    与 ext_zuowen.py（作文素材：人物 60 / 语段 60 / 每日一句入口）拼进对应板块
+tools/subjects/*.py  （九科递归节点树，人工维护，只写内容不写编号；每科一个文件）
+  └ 语文的特殊板块也在 chinese.py 里：2.4 必背 60 篇（正文 + 译文 + 例题）、
+    4.3 作文素材（人物 60 / 语段 60 / 每日一句）。v3.12.0 起不再外挂 ext_*.py
         │  build_authored.py（唯一格式；源文件里不写 id / 日期 / star）
         ▼
 app/src/main/assets/data/*.json  （每科一份 nodes 递归树，构建时生成）
@@ -265,9 +268,10 @@ python gen_all.py                           # 需要全部重生成时跑这个
    词条写「字」不写整句，并列字词用「、」连（如「日、月：名词作状语」）。
 4. 写完跑 `python tools/build_authored.py` + `python tools/check_data.py` + `python tools/check_notes.py`：
    `check_data.py` 校验结构与「原文能否按顺序对上正文」，`check_notes.py` 查注释编号与落点。
-5. 给整篇补译文时别手写 extra：把逐句译文写进 `build/_review/trans_<篇名>.py` 的 `GROUPS`，
-   用 `python tools/apply_trans.py <文件>` 预演（它先校验切句对不对得上正文，不对就拒绝写入），
-   通过后再加 `--write` 落盘。完整流程见《工作技巧》第 152 条。
+5. 补译文**直接改 `tools/subjects/chinese.py`** 里该篇的 `"extra"`（`"译文"` 块的 `items`），一行一组三行。
+   v3.12.0 起 `chinese.py` 不再加载 `ext_*.py`，旧的 `python tools/apply_trans.py <文件>` 落盘链
+   已归档到 `tools/legacy/`（它写向 `legacy/ext_bipei60.py`，写了也不进 App），别再照旧流程走。
+   改完照样跑第 4 条的三个体检。历史流程（v3.6～v3.11 期间用它写译文）见《工作技巧》第 152 条。
 
 ---
 
@@ -288,7 +292,8 @@ python gen_all.py                           # 需要全部重生成时跑这个
    ```
 
    科目 key 用源文件名：`chinese` / `math` / `english` / `physics` / `chem` / `bio` / `politics` / `history` / `geography`，
-   语文扩展内容（必背 60 篇、作文素材）在 `ext_zuowen`、`ext_bipei60`。
+   语文的必背 60 篇、作文素材也都在 `chinese` 里（v3.12.0 起 `ext_bipei60`、`ext_zuowen` 已并入 `chinese.py`，
+   旧文件归档在 `tools/legacy/`，改它们不会生效）。
 4. 落盘：`python tools/apply_review.py build/_review/editN.txt`（预演）→ 加 `--write` 真正写入。
    它会自动把正文里的 `\` 转义成 `\\`（源文件不是 raw 字符串），
    并把 `tools/ids.json` 里该条的**日期段改成当天**（序号不动），这样「今日新增」能看到这批改动。
@@ -507,7 +512,7 @@ GITHUB_TOKEN=你的PAT KS_PASS=你的签名密码 python release.py "本次更�
 ## App 端实现地图（不读代码先看这一节）
 
 Android 端只有 **一个 Activity、三个 Java 文件**：
-`MainActivity.java`（约 8300 行，界面、排版引擎、联网、更新、本地存储全在里面）、
+`MainActivity.java`（13036 行，界面、排版引擎、联网、更新、本地存储全在里面）、
 `OverScrollScrollView.java`（圆屏内容过滚的滚动容器，列表和正文共用；方屏过滚距离为 0）、
 `ApkFileProvider.java`（把下载好的安装包以 content:// 交给系统安装器）。
 没有第三方 UI 库，**没有 XML 布局**，除主题与开屏底图外的所有界面都是代码里 new 出来的 View。
@@ -986,7 +991,7 @@ Node {
   名句现在只在 2.4 每篇的例题里按题出现。
   **诗词曲 39 首正文逐句换行**（v3.9.0，#53）：在句号 / 问号 / 叹号后断行，
   如《虞美人》「春花秋月何时了？/ 往事知多少。/ …」；文言文保持原段落不拆。
-  注意 `check_data.py` 与 `apply_trans.py` 比对译文原文时**忽略正文换行**——
+  注意 `check_data.py` 比对译文原文时**忽略正文换行**（已归档的 `apply_trans.py` 也是这么比的）——
   换行只是排版，否则诗词一换行译文就误报对不上。
   **60 篇每篇都有一个「译文 · N 句」块，也都有「例题 · N 道」块**（v3.12.1 拆回两个按钮）：
   - 译文组三行：原文 / 译文（高考直译口径）/ 注释（只注难词）。
@@ -1001,17 +1006,18 @@ Node {
        共补 188 题（`tools/bei60_more_q.py` 人工录入，`python tools/apply_more_q.py` 校验，`--write` 落盘）。
     **v3.12.0 曾用 `realmorro369-arch/ChineseExam` 补足题量，v3.12.1 全部删掉**——
     那批是「概括内容 → 默写整段」，答案动辄七八十字（如《石钟山记》118 字），是默写整段，不是理解性默写。
-    现在 402 道题 890 个空，单空平均 5.8 字、最长 15 字，符合高考口径。
+    现在 402 道题 889 个空，单空平均 5.77 字、最长 15 字，符合高考口径。
   - 手录题的**唯一硬门槛**：答案每一空必须逐字出现在该篇正文里（`tools/apply_more_q.py` 去注音、去标点后比对），
     对不上就报错跳过。网上抄来的题异文很多——「契阔谈讌」库里是「䜩」、「胡越」库里是「吴越」、
     「鳏寡孤独」库里是「矜、寡、孤、独」——宁可少一条，不能把错字带进背诵库。
     每条题都写清出处（如「2025·山东聊城·二模」「2024届·湖北鄂东南省级学校联盟·高三二模」）。
   - 不拿挖空题冒充，也不自己编题；找不到真题的篇目就留着空。
-  进度（v3.12.2）：60 篇译文齐全（927 组原文、注释 732 组共 1406 条），
+  进度（v3.12.2）：60 篇译文齐全（927 组原文、其中 728 组带注释、注释条目 1406 条），
   例题 402 道覆盖全部 60 篇（最少 3 道、中位 5 道、最多 25 道）；
   文言文 20 篇、诗词曲 40 篇都做了，诗词按一联一组切分。
-  补译文的完整操作步骤见《工作技巧》第 152 条：`build/_review/trans_*.py` 人工写 →
-  `apply_trans.py` 预演校验切句 → `--write` 落盘 → `build_authored.py` + `check_data.py`。
+  补译文现在**直接改 `chinese.py`**（v3.12.0 起不再外挂 ext_*.py）；
+  旧的落盘链 `build/_review/trans_*.py` → `apply_trans.py` 预演 → `--write` 已随脚本归档到
+  `tools/legacy/`，只能在 `legacy/ext_bipei60.py` 那份旧稿上生效，不会再进 App。历史步骤见《工作技巧》第 152 条。
 - **作文素材**：语文「第四板块 写作 › 4.3 作文素材」，三部分：
   - 人物素材 60 条：一人一条，同一人物的多件事迹合并进同一条，标题写成「人物名·他做的事」，
     正文分【事迹】【常用主题】两段，方便直接搬进议论文。

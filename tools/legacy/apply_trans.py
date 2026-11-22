@@ -1,12 +1,20 @@
 # -*- coding: utf-8 -*-
-"""把人工写好的译文数据写进源文件（只做机械落盘，不改一个字）。
+"""【已归档，v3.12.2 起不再参与构建】必背 60 篇译文的旧落盘脚本。
+
+60 篇译文已全部写完并内联进 tools/subjects/chinese.py（927 组，v3.12.0 起），
+chinese.py 不再加载 ext_*.py，所以这个脚本写进去的内容**不会进 App**。
+保留它只是为了查当年「切句校验」的写法；真要改译文，直接改 chinese.py 里对应篇目的
+"extra"（"译文" 块的 items），改完跑 build_authored.py + check_data.py + check_notes.py。
+
+把人工写好的译文数据写进源文件（只做机械落盘，不改一个字）。
 
 数据文件里要导出 GROUPS：
     GROUPS = [("师说（韩愈）", SHISHUO), ...]     # 篇名与源码里的 name 完全一致
 
 每组是 (原文, 译文, 注释)，原文里的难词用 ^{①} 标角标；注释为空就不生成注释行。
 
-用法：python tools/apply_trans.py build/_review/trans_bx2.py [--write]
+用法：python tools/legacy/apply_trans.py build/_review/trans_bx2.py [--write]
+（目标文件是本目录的 ext_bipei60.py，那份是旧稿：60 篇里只有 22 篇有译文、0 篇有例题。）
 """
 import importlib.util
 import io
@@ -14,7 +22,7 @@ import os
 import re
 import sys
 
-SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'subjects', 'ext_bipei60.py')
+SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ext_bipei60.py')
 
 
 
@@ -67,7 +75,7 @@ def node_body(src, name):
 
 def main():
     if len(sys.argv) < 2:
-        print('用法：python tools/apply_trans.py <数据文件> [--write]')
+        print('用法：python tools/legacy/apply_trans.py <数据文件> [--write]')
         return
     path = sys.argv[1]
     write = '--write' in sys.argv
