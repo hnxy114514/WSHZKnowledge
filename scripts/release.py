@@ -20,8 +20,15 @@ import re
 import ssl
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
+
+T0 = time.time()
+
+
+def elapsed():
+    return "%.1fs" % (time.time() - T0)
 
 REPO = "hnxy114514/WSHZKnowledge"
 API = "https://api.github.com/repos/" + REPO
@@ -54,6 +61,20 @@ def http(url, method="GET", data=None, headers=None):
     except ValueError:
         code = 0
     return code, out[:idx]
+
+
+def bump_pre(ver):
+    """推到下一个测试版号：3.12.5 → 3.12.5pre1，3.12.5pre1 → 3.12.5pre2。
+
+    每轮测试号都要往上走：compareSemver 在 App 端会先比三段数字、再比 pre 序号，
+    同号不会提示更新，不递增的话第二轮的包根本收不到。
+    """
+    m = re.match(r'^(.*?)pre(\d+)$', ver, re.I)
+    if m:
+        return "%spre%d" % (m.group(1), int(m.group(2)) + 1)
+    if "pre" in ver.lower():
+        return "%spre1" % re.sub(r'[.\-_ ]?pre\d*$', '', ver, flags=re.I)
+    return "%spre1" % ver
 
 
 def main():
@@ -92,8 +113,21 @@ def main():
         print("请先设置环境变量 KS_PASS")
         sys.exit(1)
 
+    if pre:
+        # 每轮测试版号自动 +1：manifest 写 3.12.5 → 这轮发 3.12.5pre1，再发就是 pre2
+        new_ver = bump_pre(ver)
+        t2 = re.sub(r'android:versionName="[^"]*"', 'android:versionName="%s"' % new_ver, text)
+        mc = re.search(r'android:versionCode="(\d+)"', t2)
+        new_code = int(mc.group(1)) + 1
+        t2 = re.sub(r'android:versionCode="\d+"', 'android:versionCode="%d"' % new_code, t2)
+        with open(MANIFEST, "w", encoding="utf-8") as f:
+            f.write(t2)
+        ver, tag = new_ver, "v" + new_ver
+        print("测试版版本号：%s（versionCode %d）" % (ver, new_code))
+
     print("== 1. 构建 %s ==" % tag)
     subprocess.check_call(["bash", "scripts/build.sh"], env={**os.environ, "KS_PASS": ks_pass})
+    print("   构建完成，累计 %s" % elapsed())
 
     print("== 2. 创建 Release %s%s ==" % (tag, "（预发布）" if pre else ""))
     payload = json.dumps({
@@ -107,6 +141,7 @@ def main():
         print("创建 Release 失败:", rel.get("message"))
         sys.exit(1)
     upload_url = rel["upload_url"].split("{")[0]
+    print("   建 Release 完成，累计 %s" % elapsed())
 
     print("== 3. 上传 APK ==")
     apk_name = "HZKnowledge-%s.apk" % tag
@@ -118,31 +153,78 @@ def main():
     if st >= 400:
         print("上传 APK 失败:", up.get("message"))
         sys.exit(1)
+    print("   上传 %d KB 完成，累计 %s" % (len(apk_data) // 1024, elapsed()))
 
     if pre:
-        print("== 预发布：跳过感谢名单 / version.json / 提交 ==")
+        print("== 预发布：写 cloud/beta.json（只提交这一个文件）==")
+        write_beta_file(token, ver, tag)
         print("   普通用户查 /releases/latest 看不到这一版；只有开了「接收测试版」的机器能收到。")
         print("   测好之后跑：python scripts/release.py --promote")
     else:
+        # 正式版不该再指向预发布：删掉标记，后面 push_version 会把它一起提交
+        beta_path = os.path.join("cloud", "beta.json")
+        if os.path.isfile(beta_path):
+            os.remove(beta_path)
+            print("已删除 cloud/beta.json（正式版不再指向预发布）")
+
         print("== 4. 刷新感谢名单静态备份 ==")
         refresh_thanks()
+        print("   感谢名单完成，累计 %s" % elapsed())
 
         print("== 5. 写入版本标记 ==")
         write_version_file(ver, tag)
 
         print("== 6. 提交版本标记 ==")
         push_version(token, tag)
+        print("   提交推送完成，累计 %s" % elapsed())
 
-    print("== 完成 ==")
+    print("== 完成（总耗时 %s）==" % elapsed())
     print("下载直链:", up.get("browser_download_url"))
     print("Release 页: https://github.com/%s/releases/tag/%s" % (REPO, tag))
 
 
-def promote_release(token, ver, tag):
-    """把已有的预发布转成正式版，不重新构建、不重新上传。
+def delete_release(token, tag):
+    """删掉一条 Release（GitHub 的 tag 会保留，不影响历史）。"""
+    st, data = http(API + "/releases/tags/" + tag)
+    if st >= 400:
+        print("预发布 %s 不存在，跳过删除" % tag)
+        return
+    rid = json.loads(data).get("id")
+    st, data = http(API + "/releases/" + str(rid), "DELETE")
+    if st >= 300:
+        try:
+            msg = json.loads(data).get("message")
+        except Exception:
+            msg = data[:120]
+        print("删除预发布失败：", msg)
+    else:
+        print("已删除预发布 %s（tag 保留）" % tag)
 
-    用户拿到的就是自测过的那一个 APK；之后新用户/老用户才第一次看到这个版本。
+
+def promote_release(token, ver, tag):
+    """把预发布转正。
+
+    版本号带 pre 的（如 3.12.5pre）：先去掉后缀、删掉带 pre 的那条 Release，
+    再按正常流程重新构建并发正式版——线上版本号不能带 pre，用户看着别扭。
+    版本号不带后缀的：只把 prerelease 改成 False，不重打包，测过的包直接给用户。
     """
+    if "pre" in ver.lower():
+        clean = re.sub(r'[-. _]?pre\d*$', '', ver, flags=re.I)
+        if clean == ver:
+            print("版本号带 pre 但去不掉后缀：%s，请先手动改 AndroidManifest.xml" % ver)
+            sys.exit(1)
+        print("预发布 %s → 正式版 %s" % (ver, clean))
+        text = open(MANIFEST, encoding="utf-8").read()
+        text = text.replace('android:versionName="%s"' % ver,
+                            'android:versionName="%s"' % clean)
+        with open(MANIFEST, "w", encoding="utf-8") as f:
+            f.write(text)
+        delete_release(token, tag)
+        # 去掉 --promote 后回到正常发版流程：构建 → 建正式 Release → 上传 → 写版本号 → 提交推送
+        sys.argv = [a for a in sys.argv if a != "--promote"]
+        main()
+        return
+
     st, data = http(API + "/releases/tags/" + tag)
     if st >= 400:
         print("找不到 Release %s：%s" % (tag, json.loads(data).get("message")))
@@ -173,6 +255,28 @@ def promote_release(token, ver, tag):
 
     print("== 完成 ==")
     print("Release 页: https://github.com/%s/releases/tag/%s" % (REPO, tag))
+
+
+def write_beta_file(token, ver, tag):
+    """预发布专用：把 tag 写进 cloud/beta.json，并且只提交这一个文件。
+
+    App 的测试通道读的就是它（raw 通道、几十字节），比查 GitHub 的 Release 列表稳得多
+    ——列表 20KB、未认证每小时 60 次额度，手表上经常超时或撞限流。
+    预发布期间源码改动仍然不提交，等正式发版时一起提交；这个文件在正式发版时会被删掉。
+    """
+    path = os.path.join("cloud", "beta.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"version": ver, "tag": tag}, f, ensure_ascii=False)
+    print("   cloud/beta.json ->", tag)
+    url = "https://%s@github.com/%s.git" % (token, REPO)
+    subprocess.call(["git", "add", "cloud/beta.json"])
+    rc = subprocess.call(["git", "commit", "-m", "预发布 %s" % tag])
+    if rc != 0:
+        print("   beta.json 内容没变，跳过提交")
+        return
+    rc = subprocess.call(["git", "push", url, "main"])
+    if rc != 0:
+        print("   beta.json 推送失败（测试通道会退回 API 列表），可稍后手动 push")
 
 
 def refresh_thanks():

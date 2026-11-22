@@ -143,6 +143,9 @@ public class MainActivity extends Activity {
     };
     private static final String VERSION_JSON_RAW =
             "https://raw.githubusercontent.com/" + REPO + "/main/cloud/version.json";
+    /** 预发布通道的版本标记：只有发预发布时才有这个文件，正式版会删掉。 */
+    private static final String BETA_JSON_RAW =
+            "https://raw.githubusercontent.com/" + REPO + "/main/cloud/beta.json";
     private static final String APK_FILE = "update.apk";
     private static final String APK_AUTHORITY = "com.lizard.hsknowledge.fileprovider";
     private static final int C_TEXT = 0xFFE8E8E8;    // 正文
@@ -283,7 +286,7 @@ public class MainActivity extends Activity {
     // ---- API 对话页（S_AI_CHAT）----
     private LinearLayout aiChatScreen, aiChatInner, aiChatBar;
     private ScrollView aiChatScroll;
-    private TextView aiChatModelBtn, aiChatInputBtn, aiChatStopBtn;
+    private TextView aiChatModelBtn, aiChatInputBtn;
     private int aiChatBack = S_SUBJECT;
     /** 会话只在内存里：退出 App 就清空，不写盘、不上传。 */
     private final List<ChatMsg> chatMsgs = new ArrayList<ChatMsg>();
@@ -619,6 +622,10 @@ public class MainActivity extends Activity {
     private boolean haptic = true;
     // 测试通道：开启后更新检查把 GitHub 上的「预发布」也算进来（设置里可开，默认关）
     private boolean betaChannel = false;
+    /** 这次测试通道有没有查失败（只用于给用户一句明确提示，不参与判断）。 */
+    private boolean betaFetchFailed = false;
+    /** 哪些屏幕的内容已经建过。重页面改成首次进入才建，启动时不再一口气建 22 个（v3.12.6）。 */
+    private final boolean[] screenBuilt = new boolean[SCREEN_COUNT];
     private long lastVibrate = 0;           // 节流：避免连点狂震
     private boolean swipeTracking = false;
     private boolean swipeActive = false;     // 已进入拖动返回
@@ -699,6 +706,9 @@ public class MainActivity extends Activity {
         swipeBack = prefs.getBoolean("swipe_back", true);
         haptic = prefs.getBoolean("haptic", true);
         betaChannel = prefs.getBoolean("beta_channel", false);
+        // 日志开关也必须落盘：手表内存小，切后台常被回收，重进后开关自己变回「关」，
+        // 用户就永远攒不出一份完整日志（踩过）。这里恢复后由第一条 BOOT 日志新建文件。
+        logEnabled = prefs.getBoolean("log_enabled", false);
         aiMode = prefs.getString("ai_mode", "web");
         loadApiConfig();
         // 没有 WebView 就自动改用 API 模式（网页版在这台设备上根本打不开）
@@ -798,11 +808,17 @@ public class MainActivity extends Activity {
     private void bootLoad() {
         new Thread(new Runnable() {
             public void run() {
+                long t0 = System.currentTimeMillis();
                 cleanupOldApk();     // 装完新版本后把遗留的安装包删掉
+                long t1 = System.currentTimeMillis();
                 loadData();
+                long t2 = System.currentTimeMillis();
                 loadMarks();
                 loadOrderKeys();
                 loadDailyMem();      // 上次取到的句子（重启后先拿它垫上，不至于一片空白）
+                long t3 = System.currentTimeMillis();
+                log("BOOT", "cleanup " + (t1 - t0) + "ms · loadData " + (t2 - t1)
+                        + "ms · marks/order/daily " + (t3 - t2) + "ms");
                 runOnUiThread(new Runnable() {
                     public void run() { bootFinish(); }
                 });
@@ -823,7 +839,9 @@ public class MainActivity extends Activity {
     /** 建界面、定首屏、挂后台任务。开屏在这里被主界面替换。 */
     private void enterApp() {
         if (isFinishing() || isDestroyed()) return;
+        long tBuild = System.currentTimeMillis();
         buildUi();               // 有开屏容器时，root 是垫在开屏下面加进去的
+        long tBuildEnd = System.currentTimeMillis();
         boolean tuned = prefs.getBoolean("display_tuned", false);
         if (!tuned) tuningFirstRun = true;
         skipPageAnim = true;     // 首屏直接显示，不做淡入（开屏还在上面盖着）
@@ -833,6 +851,9 @@ public class MainActivity extends Activity {
             showScreen(S_SUBJECT);
         }
         hideBootSplash();
+        // 启动耗时打点：开日志后这几行会进日志文件，反馈时能直接带出来
+        log("BOOT", "buildUi " + (tBuildEnd - tBuild) + "ms · 首屏就绪 " + (System.currentTimeMillis() - tBuildEnd)
+                + "ms · 自启动共 " + (System.currentTimeMillis() - bootStart) + "ms");
         if (loadError != null) {
             toast("数据加载失败：" + loadError);
             loadError = null;
@@ -1062,8 +1083,10 @@ public class MainActivity extends Activity {
             nodeById.clear();
             JSONObject orderObj = readJsonAsset("data/order.json");
             JSONArray orderArr = orderObj.getJSONArray("order");
+            StringBuilder cost = new StringBuilder();   // 各科解析耗时，写进日志方便定位
             for (int i = 0; i < orderArr.length(); i++) {
                 try {
+                    long tOne = System.currentTimeMillis();
                     JSONObject oe = orderArr.getJSONObject(i);
                     String key = oe.optString("s", "");
                     String name = oe.optString("name", key);
@@ -1075,9 +1098,12 @@ public class MainActivity extends Activity {
                     Subject s = parseSubject(so);
                     subjects.add(s);
                     subjectMap.put(s.key, s);
+                    cost.append(name).append(' ').append(System.currentTimeMillis() - tOne).append("ms ");
                 } catch (Exception ignored) { }
             }
+            long tHits = System.currentTimeMillis();
             buildHits();
+            log("BOOT", "各科解析 " + cost + "| buildHits " + (System.currentTimeMillis() - tHits) + "ms");
         } catch (Exception ex) {
             // 现在是在子线程读数据，不能直接弹 Toast（无 Looper），记下来回主线程再提示
             loadError = String.valueOf(ex.getMessage());
@@ -1101,7 +1127,12 @@ public class MainActivity extends Activity {
                     final String remoteTag = rel.tag;
                     if (compareSemver(local, remoteTag) >= 0) {
                         progressHide();
-                        if (!silent) toast("已是最新版 v" + local);
+                        if (!silent) {
+                            // 开了测试通道却查不到预发布时要把话说清楚，否则用户只会以为「没有新版」
+                            toast((betaChannel && betaFetchFailed)
+                                    ? "测试通道没连上，已按正式版判断：v" + local + " 是最新"
+                                    : "已是最新版 v" + local);
+                        }
                         return;
                     }
                     final String url = rel.apkUrl;
@@ -1425,30 +1456,57 @@ public class MainActivity extends Activity {
         String q = "?nocache=" + System.currentTimeMillis();
         // 列表按创建时间倒序（GitHub 保证），第一条就是最新的那条；草稿的资产下不了，跳过
         if (betaChannel) {
+            // 两条通道都试，取版本号高的那个：
+            // ① beta.json —— 几十字节、raw 镜像覆盖最广，但 raw 有几分钟 CDN 缓存，刚发完可能还是上一个；
+            // ② Release 列表 —— 实时，但 20KB 且未认证有额度限制，手表上经常连不上。
+            // 单用任何一条都会漏，合起来才稳。
+            String btag = fetchBetaTag();
+            String atag = "";
             try {
-                String lu = RELEASES_LIST_API + "?per_page=5&nocache=" + System.currentTimeMillis();
-                JSONArray arr = new JSONArray(fetchApiText(lu));
+                String lu = RELEASES_LIST_API + "?per_page=1&nocache=" + System.currentTimeMillis();
+                JSONArray arr = new JSONArray(fetchApiText(lu, 8000, 15000));
                 for (int i = 0; i < arr.length(); i++) {
                     JSONObject o = arr.optJSONObject(i);
-                    if (o != null && !o.optBoolean("draft", false)) return o;
+                    if (o != null && !o.optBoolean("draft", false)) {
+                        atag = o.optString("tag_name", "");
+                        break;
+                    }
                 }
-            } catch (Exception ignored) { }
-            // 列表口不通就退回 latest：一个测试开关不该把「检查更新」整个搞挂
+            } catch (Exception e) {
+                log("UPD", "Release 列表查询失败：" + e);
+            }
+            String best = btag;
+            if (atag.length() > 0 && (best.length() == 0 || compareSemver(atag, best) > 0)) best = atag;
+            if (best.length() > 0) {
+                try {
+                    JSONObject o = new JSONObject();
+                    o.put("tag_name", best);
+                    betaFetchFailed = false;
+                    return o;
+                } catch (Exception ignored) { }
+            }
+            // 两条都没拿到才认输，并让手动检查时把话说清楚
+            betaFetchFailed = true;
         }
         return new JSONObject(fetchApiText(RELEASES_API + q));
     }
 
     /** 依次走「启动时测出的最优通道 → 各镜像」取一段 GitHub API 文本。 */
     private String fetchApiText(String fullUrl) throws Exception {
+        return fetchApiText(fullUrl, 5000, 6000);
+    }
+
+    /** 同上，超时可指定：Release 列表比 latest 大十倍（20KB vs 2KB），手表上得给宽一点。 */
+    private String fetchApiText(String fullUrl, int connectMs, int readMs) throws Exception {
         Exception last = null;
         // 先走启动时测出来的最优通道，多数情况一步就中
         try {
-            return httpGetText(apiBase() + fullUrl, 5000, 6000);
+            return httpGetText(apiBase() + fullUrl, connectMs, readMs);
         } catch (Exception e) { last = e; }
         for (int i = 0; i <= API_MIRRORS.length; i++) {
             String u = (i == 0) ? fullUrl : API_MIRRORS[i - 1] + fullUrl;
             try {
-                return httpGetText(u, 5000, 6000);
+                return httpGetText(u, connectMs, readMs);
             } catch (Exception e) {
                 last = e;
             }
@@ -1472,6 +1530,27 @@ public class MainActivity extends Activity {
             } catch (Exception e) { last = e; }
         }
         throw (last == null) ? new Exception("无法获取版本号") : last;
+    }
+
+    /** 测试通道的版本号：读仓库里的 cloud/beta.json。
+     *  为什么不用 API 列表：列表响应 20KB 左右、未认证每小时只有 60 次额度，
+     *  手表网络下经常超时或撞限流（用户看到的就是「测试通道没连上」）。
+     *  beta.json 只有几十字节、走 raw 镜像（覆盖最广），成功率和正式版号那条路一样。
+     *  拿不到返回空串，调用方再退回 API 列表。 */
+    private String fetchBetaTag() {
+        String q = "?nocache=" + System.currentTimeMillis();
+        List<String> cands = new ArrayList<String>();
+        addNoDup(cands, rawBase());
+        addNoDup(cands, "");
+        for (int i = 0; i < Math.min(3, MIRRORS.length); i++) addNoDup(cands, MIRRORS[i]);
+        for (String base : cands) {
+            try {
+                JSONObject o = new JSONObject(httpGetText(base + BETA_JSON_RAW + q, 5000, 7000));
+                String tag = o.optString("tag", "");
+                if (tag.length() > 0) return tag.startsWith("v") || tag.startsWith("V") ? tag : "v" + tag;
+            } catch (Exception ignored) { }
+        }
+        return "";
     }
 
     private void addNoDup(List<String> list, String v) {
@@ -1780,7 +1859,27 @@ public class MainActivity extends Activity {
             if (x[i] < y[i]) return -1;
             if (x[i] > y[i]) return 1;
         }
-        return 0;
+        // 三段一样，再看测试版序号：3.12.5pre2 比 3.12.5pre1 新，但都比正式版 3.12.5 旧。
+        // 不比这一段的话，连着发 pre1/pre2 时 App 会认为「已是最新」，测试版根本收不到。
+        int p = preIndex(a), q = preIndex(b);
+        if (p == 0 && q == 0) return 0;
+        if (p == 0) return 1;                  // a 是正式版 → 比 b 的测试版新
+        if (q == 0) return -1;
+        return (p < q) ? -1 : (p > q ? 1 : 0);
+    }
+
+    /** 取版本号里的测试版序号（3.12.5pre2 → 2），不是测试版返回 0。 */
+    private int preIndex(String v) {
+        if (v == null) return 0;
+        String s = v.toLowerCase();
+        int i = s.indexOf("pre");
+        if (i < 0) return 0;
+        int j = i + 3, n = 0;
+        while (j < s.length() && s.charAt(j) >= '0' && s.charAt(j) <= '9') {
+            n = n * 10 + (s.charAt(j) - '0');
+            j++;
+        }
+        return n > 0 ? n : 1;                  // 只写 pre 不带数字，按 pre1 算
     }
 
     /** 同一个版本下载过一次就直接复用，不再重复下载。 */
@@ -2117,6 +2216,7 @@ public class MainActivity extends Activity {
     /** 开启日志记录：先落一条启动信息，方便定位版本与设备。 */
     private void startLogging() {
         logEnabled = true;
+        prefs.edit().putBoolean("log_enabled", true).apply();
         log("APP", "开始记录日志 · 版本 " + appVersion() + "（build " + appVersionCode() + "）· "
                 + Build.MODEL + " · Android " + Build.VERSION.RELEASE + " · " + (m.round ? "圆屏" : "方屏"));
     }
@@ -2125,6 +2225,7 @@ public class MainActivity extends Activity {
     private void stopLogging() {
         if (logEnabled) log("APP", "停止记录日志");
         logEnabled = false;
+        prefs.edit().putBoolean("log_enabled", false).apply();
     }
 
     /** 全局崩溃捕获：只在日志开启时写堆栈，其余情况交给系统默认处理。 */
@@ -2285,6 +2386,7 @@ public class MainActivity extends Activity {
     // ================= UI =================
     private void buildUi() {
         getWindow().setBackgroundDrawable(new ColorDrawable(C_BG));
+        java.util.Arrays.fill(screenBuilt, false);   // 新树里所有页面都要重新按需构建
         bubbleView = null;        // 旧 root 连同旧气泡一起被替换，这里只清引用
         root = new FrameLayout(this);
         root.setBackgroundColor(C_BG);
@@ -2309,7 +2411,6 @@ public class MainActivity extends Activity {
         root.addView(extraScreen, fp());
         root.addView(settingsScreen, fp());
         root.addView(searchScreen, fp());
-        buildFeedbackScreen();
         root.addView(feedbackScreen, fp());
 
         mineScreen = newScreen();
@@ -2322,28 +2423,22 @@ public class MainActivity extends Activity {
         root.addView(mineScreen, fp());
 
         profileScreen = newScreen();
-        buildProfileScreen();
         root.addView(profileScreen, fp());
 
         changelogScreen = newScreen();
-        buildChangelogScreen();
         root.addView(changelogScreen, fp());
 
         aboutScreen = newScreen();
-        buildAboutScreen();
         root.addView(aboutScreen, fp());
 
         displayScreen = newScreen();
-        buildDisplayScreen();
         root.addView(displayScreen, fp());
 
         // 科目排序：从设置页点进来，单独一页放列表，设置页不再被 9 行排序挤长
         orderScreen = newScreen();
-        buildOrderScreen();
         root.addView(orderScreen, fp());
 
         todayScreen = newScreen();
-        buildTodayScreen();
         root.addView(todayScreen, fp());
 
         // 收藏 / 最近浏览：都是 SvList，圆屏占位与过滚跟其他列表一致
@@ -2484,19 +2579,14 @@ public class MainActivity extends Activity {
 
         // 问 AI：网页页 + 三个设置子页，都不读知识点数据
         aiWebScreen = newScreen();
-        buildAiWebScreen();
         root.addView(aiWebScreen, fp());
         aiHubScreen = newScreen();
-        buildAiHubScreen();
         root.addView(aiHubScreen, fp());
         aiApiScreen = newScreen();
-        buildAiApiScreen();
         root.addView(aiApiScreen, fp());
         aiWebCfgScreen = newScreen();
-        buildAiWebCfgScreen();
         root.addView(aiWebCfgScreen, fp());
         aiChatScreen = newScreen();
-        buildAiChatScreen();
         root.addView(aiChatScreen, fp());
 
         // 因为缺 WebView 自动切过模式：界面铺好之后提示一句，别在启动瞬间被开屏盖住
@@ -3902,10 +3992,26 @@ public class MainActivity extends Activity {
         sv.setVerticalScrollBarEnabled(false);
         sv.addView(list, wrap());
         tuneDialogScroll(sv, list);   // 滚动时整块重绘，否则窗口只刷脏区、留下残影
-        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, m.round ? dp(150) : dp(240));
+        final int pickMaxH = m.round ? dp(150) : dp(240);
+        final LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, pickMaxH);
         slp.topMargin = dp(4);
         box.addView(sv, slp);
+        // 只有两三个模型时不该留一大片空白：等弹窗显示、内容布局完再量一次高度，
+        // 比上限小就按内容收缩（模型多的时候仍然封顶在 pickMaxH，可以滚）。
+        d.setOnShowListener(new DialogInterface.OnShowListener() {
+            public void onShow(DialogInterface dlg) {
+                list.post(new Runnable() {
+                    public void run() {
+                        int h = list.getHeight();
+                        if (h > 0 && h < pickMaxH) {
+                            slp.height = h + dp(2);
+                            sv.setLayoutParams(slp);
+                        }
+                    }
+                });
+            }
+        });
 
         if (allowManual) {
             TextView manual = new TextView(this);
@@ -4512,49 +4618,32 @@ public class MainActivity extends Activity {
         // 这样两个按钮都贴着屏幕下沿、完整可见，也不需要滚动。
         aiChatBar = new LinearLayout(this);
         aiChatBar.setOrientation(LinearLayout.HORIZONTAL);
-        aiChatBar.setGravity(Gravity.CENTER_VERTICAL);
+        aiChatBar.setGravity(Gravity.CENTER);   // 按钮改成按内容宽度后必须水平居中，否则贴左边
 
         // 贴着屏幕最下沿：圆屏只留一点点（4dp 起），宽度由下面的圆几何另算，不会出圆
         int bottomGap = m.round ? Math.max(dp(5), Math.round(m.roundSafe * 0.55f)) : dp(4);
         aiChatBar.setPadding(0, dp(2), 0, bottomGap);
-        // 高度就是 38dp：dp() 内部已经乘了 uiScale，跟着显示大小一起放大，
-        // 最大档时 38dp*1.4 足以容纳 16sp 的字，不需要再按字号算一遍（单位也不同，别混）。
-        int barH = dp(38);
+        // 高度交给内容自己算（字号 + 上下 6dp 内边距），和顶部「思考 / 清空」完全一致。
+        // 原来固定 38dp、按 2:1 铺满整行，看着像一条色块，比上面那排按钮大一圈。
+        int barH = LinearLayout.LayoutParams.WRAP_CONTENT;
 
+        // 一个按钮就够：平时是「发消息」，生成中就地变成「取消」，点它中断。
+        // 以前是两个按钮并排（2:1），既占地方又多一个状态，没必要。
         aiChatInputBtn = new TextView(this);
-        aiChatInputBtn.setText("发消息");
         aiChatInputBtn.setTextSize(chatBarSize());
-        aiChatInputBtn.setTypeface(Typeface.DEFAULT_BOLD);
-        aiChatInputBtn.setTextColor(C_PRIMARY);
         aiChatInputBtn.setGravity(Gravity.CENTER);
         aiChatInputBtn.setSingleLine(true);
-        aiChatInputBtn.setPadding(dp(4), 0, dp(4), 0);   // 贴下沿时按钮窄，内边距吃太多会裁字
-        aiChatInputBtn.setBackgroundDrawable(clickBg(0xFF14384A));
+        aiChatInputBtn.setPadding(dp(14), dp(6), dp(14), dp(6));
         aiChatInputBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { vibrate(); chatAskInput(); }
-        });
-
-        aiChatStopBtn = new TextView(this);
-        aiChatStopBtn.setText("取消");
-        aiChatStopBtn.setTextSize(chatBarSize());
-        aiChatStopBtn.setGravity(Gravity.CENTER);
-        aiChatStopBtn.setSingleLine(true);
-        aiChatStopBtn.setPadding(dp(4), 0, dp(4), 0);
-        aiChatStopBtn.setTextColor(0xFFFFB74D);
-        aiChatStopBtn.setBackgroundDrawable(clickBg(C_PILL));
-        aiChatStopBtn.setVisibility(View.GONE);
-        aiChatStopBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 vibrate();
-                chatStop();
+                if (chatBusy) chatStop();
+                else chatAskInput();
             }
         });
-
-        // 比例 2:1（发消息 : 取消）。取消隐藏时，发消息自动吃满整行。
-        aiChatBar.addView(aiChatInputBtn, new LinearLayout.LayoutParams(0, barH, 2f));
-        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(0, barH, 1f);
-        slp.leftMargin = dp(6);
-        aiChatBar.addView(aiChatStopBtn, slp);
+        aiChatBar.addView(aiChatInputBtn,
+                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, barH));
+        updateChatBar();     // 文案 / 配色按当前状态先摆好
 
         // 按圆几何限制整条宽度：按钮下沿离屏幕底 bottomGap 时，圆在该高度只剩 2*sqrt(2Rd-d^2) 宽
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
@@ -5102,11 +5191,18 @@ public class MainActivity extends Activity {
     }
 
     private void updateChatBar() {
-        if (aiChatStopBtn == null) return;
-        aiChatStopBtn.setVisibility(chatBusy ? View.VISIBLE : View.GONE);
-        if (aiChatInputBtn != null) {
+        if (aiChatInputBtn == null) return;
+        // 一个按钮两种身份：平时「发消息」（主色实底），生成中「取消」（灰底橙字）
+        if (chatBusy) {
+            aiChatInputBtn.setText("取消");
+            aiChatInputBtn.setTextColor(0xFFFFB74D);
+            aiChatInputBtn.setTypeface(Typeface.DEFAULT);
+            aiChatInputBtn.setBackgroundDrawable(clickBg(C_PILL));
+        } else {
             aiChatInputBtn.setText("发消息");
-            aiChatInputBtn.setTextColor(chatBusy ? C_SUB : C_PRIMARY);
+            aiChatInputBtn.setTextColor(C_PRIMARY);
+            aiChatInputBtn.setTypeface(Typeface.DEFAULT_BOLD);
+            aiChatInputBtn.setBackgroundDrawable(clickBg(0xFF14384A));
         }
     }
 
@@ -5682,7 +5778,7 @@ public class MainActivity extends Activity {
                 aiWebDark = !aiWebDark;
                 prefs.edit().putBoolean("ai_web_dark", aiWebDark).apply();
                 // 夜间模式是建 WebView 时定下来的，改开关必须重建网页视图才生效
-                try { buildAiWebScreen(); } catch (Throwable ignored) { }
+                try { buildAiWebScreen(); screenBuilt[S_AI_WEB] = true; } catch (Throwable ignored) { }
                 renderAiWebCfg();
                 toast(aiWebDark ? "已切到暗色，重新进入问 AI 生效" : "已恢复网页原样");
             }
@@ -8885,7 +8981,7 @@ public class MainActivity extends Activity {
             }
         }), wrap());
         TextView betaHint = new TextView(this);
-        betaHint.setText("开启后可收到预发布版本（发布前自测用），默认关闭。");
+        betaHint.setText("收到预发布版本，自测用。");
         betaHint.setTextSize(m.subtitleSize - 2f);
         betaHint.setTextColor(C_SUB);
         betaHint.setGravity(Gravity.CENTER);
@@ -8927,6 +9023,7 @@ public class MainActivity extends Activity {
         aiEntry.setGravity(Gravity.CENTER);
         aiEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
         aiEntry.setBackground(clickBg(C_PILL));
+        applyIcon(aiEntry, "ic_ai", C_PRIMARY, 15);
         aiEntry.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 vibrate();
@@ -9142,7 +9239,7 @@ public class MainActivity extends Activity {
                 if (idx <= 0) return;
                 String k = orderKeys.remove(idx);
                 orderKeys.add(idx - 1, k);
-                saveOrderKeys(); markSubjectsDirty(); renderSettings();
+                saveOrderKeys(); markSubjectsDirty(); renderOrder();   // 排序页自己重画，别去重画设置页
             }
         });
         TextView dn = orderBtn("▼", idx < orderKeys.size() - 1, new View.OnClickListener() {
@@ -9150,7 +9247,7 @@ public class MainActivity extends Activity {
                 if (idx >= orderKeys.size() - 1) return;
                 String k = orderKeys.remove(idx);
                 orderKeys.add(idx + 1, k);
-                saveOrderKeys(); markSubjectsDirty(); renderSettings();
+                saveOrderKeys(); markSubjectsDirty(); renderOrder();   // 排序页自己重画，别去重画设置页
             }
         });
 
@@ -9289,9 +9386,34 @@ public class MainActivity extends Activity {
         e.apply();
     }
 
+    /** 首次进入某页时才建它的内容。
+     *  启动时把 20 多个页面全建一遍要一两秒（WebView、AI 对话、显示调节都不轻），
+     *  而首屏只用得到主页 —— 其余等真正点进去再建，那点开销分摊到每次点击上就感觉不到。
+     *  只延后「内容」，屏幕本身仍由 buildUi 一次性 newScreen 并 addView，screens[] 下标不变。 */
+    private void ensureScreenBuilt(int s) {
+        if (s < 0 || s >= SCREEN_COUNT || screenBuilt[s]) return;
+        screenBuilt[s] = true;
+        switch (s) {
+            case S_FEEDBACK: buildFeedbackScreen(); break;
+            case S_PROFILE: buildProfileScreen(); break;
+            case S_CHANGELOG: buildChangelogScreen(); break;
+            case S_ABOUT: buildAboutScreen(); break;
+            case S_DISPLAY: buildDisplayScreen(); break;
+            case S_ORDER: buildOrderScreen(); break;
+            case S_TODAY: buildTodayScreen(); break;
+            case S_AI_WEB: buildAiWebScreen(); break;
+            case S_AI_HUB: buildAiHubScreen(); break;
+            case S_AI_API_CFG: buildAiApiScreen(); break;
+            case S_AI_WEB_CFG: buildAiWebCfgScreen(); break;
+            case S_AI_CHAT: buildAiChatScreen(); break;
+            default: break;
+        }
+    }
+
     // ================= 页面切换（带动画） =================
     private void showScreen(int s) {
         final int old = screen;
+        ensureScreenBuilt(s);     // 懒建的页在这里补上内容，后面的渲染分支才不会拿到空容器
         // 右滑返回：preparePrev 已经把「要退回的那一页」渲染好、摆在离开时的滚动位置并露出来了。
         // 这条路径只做可见性确认，绝不重新 bind / 重新定位，否则列表会被清空重载（闪一下）或弹回顶端。
         if (swipeNavigating) {
@@ -10953,7 +11075,6 @@ public class MainActivity extends Activity {
     private void renderOrder() {
         int keepY = (orderInner.getChildCount() > 0) ? orderScroll.getScrollY() : -1;
         orderInner.removeAllViews();
-        if (overDist() > 0) orderInner.addView(makeScrollSpacer());
         orderInner.addView(orderBackBtn, wrapM());
         orderInner.addView(pageTitle("首页科目排序"), wrap());
         orderInner.addView(grayTip("点 ▲▼ 调顺序，改完主页立即生效。"), wrap());
@@ -10969,6 +11090,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams blp = wrap();
         blp.topMargin = dp(6);
         orderInner.addView(box, blp);
+        padInner(orderInner);      // 圆屏上下各留 25% 屏高：不放的话最后一行滑不到屏幕中间，点不着
         if (keepY >= 0) scrollToY(orderScroll, keepY);   // 上下挪动后保住位置，不弹回顶端
         else scrollToTop(orderScroll);
     }
@@ -11057,6 +11179,7 @@ public class MainActivity extends Activity {
         box.setBackgroundDrawable(pill(C_CARD));
         LinearLayout.LayoutParams blp = wrap();
         blp.bottomMargin = dp(5);
+        box.setLayoutParams(blp);   // 必须挂到自身上：调用方若再传 wrap() 就会把这个间距覆盖掉
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
@@ -11207,7 +11330,7 @@ public class MainActivity extends Activity {
                     public void onReleased(float v) {
                         applyDisplayChange(S_DISPLAY);   // 松手就地重建，整页按新比例重排
                     }
-                }), wrap());
+                }));
         displayInner.addView(aiHint("调大后文字、按钮、间距、图标一起变大，适合手指粗或看不清的人；"
                 + "表盘小的机型建议别超过「较大」。"), wrap());
 
@@ -11241,25 +11364,25 @@ public class MainActivity extends Activity {
                     public void onChanged(float v) { fontSizeSp = v; }
                 }, new OnFloatRelease() {
                     public void onReleased(float v) { applyDisplayChange(S_DISPLAY); }
-                }), wrap());
+                }));
         advBox.addView(sliderRow("列表字号", listSizeSp, 12, 20, 1, "sp",
                 new OnFloatChange() {
                     public void onChanged(float v) { listSizeSp = v; }
                 }, new OnFloatRelease() {
                     public void onReleased(float v) { applyDisplayChange(S_DISPLAY); }
-                }), wrap());
+                }));
         advBox.addView(sliderRow("标题字号", curTitleSize(), 13, 26, 1, "sp",
                 new OnFloatChange() {
                     public void onChanged(float v) { titleSizeSp = v; }
                 }, new OnFloatRelease() {
                     public void onReleased(float v) { applyDisplayChange(S_DISPLAY); }
-                }), wrap());
+                }));
         advBox.addView(sliderRow("说明小字", curSubSize(), 9, 16, 1, "sp",
                 new OnFloatChange() {
                     public void onChanged(float v) { subSizeSp = v; }
                 }, new OnFloatRelease() {
                     public void onReleased(float v) { applyDisplayChange(S_DISPLAY); }
-                }), wrap());
+                }));
 
         // ---- 网页版单独说明：它是第三方网页，显示大小管不到 ----
         displayInner.addView(aiHint("问 AI 的网页版是第三方网页，字号由网页自己控制；"
@@ -13112,35 +13235,61 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) { }
     }
 
+    /** 个人主页头像：每次都向 GitHub 要新的，网络没拿到才退回本地缓存。
+     *  以前是「缓存命中就直接用、且永不过期」，换了头像也一直显示注册时那张（手表上特别明显）；
+     *  这里只走官方源，不挂镜像——镜像会缓存别人的头像或旧图，宁可这次不显示。 */
     private Bitmap loadAvatarBitmap(String url, String login) {
+        File cache = new File(getFilesDir(), "avatar_" + (login == null || login.length() == 0 ? "me" : login) + ".png");
         try {
-            File cache = new File(getFilesDir(), "avatar_" + (login == null || login.length() == 0 ? "me" : login) + ".png");
+            if (url != null && url.length() > 0) {
+                List<String> cand = new ArrayList<String>();
+                cand.add(url);                                                     // avatars.githubusercontent.com/...
+                if (login != null && login.length() > 0) {
+                    cand.add("https://github.com/" + login + ".png?size=200");     // 官方入口 302 到 avatars，多一条官方路
+                }
+                for (String u : cand) {
+                    byte[] data = httpGetBytesQuiet(u);
+                    if (data == null || data.length < 512) continue;
+                    Bitmap src = BitmapFactory.decodeByteArray(data, 0, data.length);
+                    if (src == null || src.getWidth() < 8) continue;
+                    try {
+                        FileOutputStream fos = new FileOutputStream(cache);
+                        fos.write(data);
+                        fos.close();
+                    } catch (Exception ignored) { }
+                    return circleCrop(src);
+                }
+            }
+            // 网络没拿到，用缓存兜底：可能是旧的，但总比一片空白强
             if (cache.exists() && cache.length() > 0) {
                 Bitmap b = BitmapFactory.decodeFile(cache.getAbsolutePath());
                 if (b != null) return circleCrop(b);
             }
-            if (url == null || url.length() == 0) return null;
-            HttpURLConnection cn = (HttpURLConnection) new URL(url).openConnection();
-            cn.setConnectTimeout(10000);
-            cn.setReadTimeout(15000);
+        } catch (Exception ignored) { }
+        return null;
+    }
+
+    /** 取字节，失败不抛：头像只是点缀，一个源不通就换下一个。
+     *  超时单独收紧（头像几 KB，3+5 秒够了），别沿用更新包的 6+9 秒。 */
+    private byte[] httpGetBytesQuiet(String url) {
+        java.net.HttpURLConnection cn = null;
+        try {
+            cn = (java.net.HttpURLConnection) new URL(url).openConnection();
+            cn.setConnectTimeout(3000);
+            cn.setReadTimeout(5000);
             cn.setInstanceFollowRedirects(true);
             cn.setRequestProperty("User-Agent", "HZKnowledge-Android");
-            InputStream is = cn.getInputStream();
-            File tmp = new File(getFilesDir(), "avatar.tmp");
-            FileOutputStream fos = new FileOutputStream(tmp);
-            byte[] buf = new byte[8192];
+            java.io.InputStream is = cn.getInputStream();
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] b = new byte[8192];
             int n;
-            while ((n = is.read(buf)) > 0) fos.write(buf, 0, n);
-            fos.close();
+            while ((n = is.read(b)) > 0) bos.write(b, 0, n);
             is.close();
-            cn.disconnect();
-            Bitmap src = BitmapFactory.decodeFile(tmp.getAbsolutePath());
-            if (src == null) return null;
-            if (cache.exists()) cache.delete();
-            tmp.renameTo(cache);
-            return circleCrop(src);
+            return bos.toByteArray();
         } catch (Exception e) {
             return null;
+        } finally {
+            if (cn != null) cn.disconnect();
         }
     }
 

@@ -3,6 +3,7 @@
 源文件只写内容：分组节点 = name + children，叶子 = name + body；层级可以任意深。
 编号 / 日期 / 星级由本脚本按层级路径自动生成，源文件不写。"""
 import json, os, importlib.util, sys, re, difflib
+from collections import Counter
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
 DATA_VERSION = 16
@@ -166,6 +167,31 @@ def _plain(s):
 
 def _sim(a, b):
     if not a or not b:
+        return 0.0
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+def _sim_cached(a, ca, b, cb):
+    """_sim 的加速版：先用 ratio 的严格上界剪枝，够不着 0.62 就直接返回 0.0。
+
+    difflib 的 ratio = 2M/(len(a)+len(b))，而 M 不超过两串字符多重集的交集大小，
+    所以上界小于 0.62 时真实值必然也小于 0.62；调用方的阈值只有 0.62 / 0.72 / 0.82，
+    判定结果与直接调 _sim 完全一致。全库两两比时能省掉绝大部分 difflib 调用
+    （中文条目正文普遍一两百字，长度和字频的差距足够把九成以上的对子筛掉）。
+    """
+    la, lb = len(a), len(b)
+    t = la + lb
+    if t == 0:
+        return 0.0
+    if 2.0 * min(la, lb) / t < 0.62:
+        return 0.0
+    small, big = (ca, cb) if len(ca) <= len(cb) else (cb, ca)
+    m = 0
+    for ch, v in small.items():
+        w = big.get(ch)
+        if w:
+            m += v if v < w else w
+    if 2.0 * m / t < 0.62:
         return 0.0
     return difflib.SequenceMatcher(None, a, b).ratio()
 
@@ -614,22 +640,25 @@ def dedupe_items(ordered):
     for subj in ordered:
         slots = []
         for node, container, path, _depth in walk_nodes(subj["nodes"]):
-            slots.append([container, path, node, False])
+            body = _plain(node["sec"][0]["body"])
+            # 正文和字频预先算好：两两比对时用它们做相似度上界剪枝，
+            # 每对都重新 _plain + 跑 difflib 会把这步拖到七十多秒
+            slots.append([container, path, node, False, body, Counter(body)])
         for i in range(len(slots)):
-            c1, p1, it1, dead1 = slots[i]
-            if dead1:
+            if slots[i][3]:
                 continue
+            c1, p1, it1 = slots[i][0], slots[i][1], slots[i][2]
             for j in range(i + 1, len(slots)):
-                c2, p2, it2, dead2 = slots[j]
-                if dead2:
+                if slots[j][3]:
                     continue
+                c2, p2, it2 = slots[j][0], slots[j][1], slots[j][2]
                 nt1, nt2 = _norm_title(it1["t"]), _norm_title(it2["t"])
-                body1 = _plain(it1["sec"][0]["body"])
-                body2 = _plain(it2["sec"][0]["body"])
+                body1, cc1 = slots[i][4], slots[i][5]
+                body2, cc2 = slots[j][4], slots[j][5]
                 same_sec = (c1 is c2)
                 title_same = (nt1 == nt2)
                 contain = (nt1 in nt2 or nt2 in nt1) and abs(len(nt1) - len(nt2)) <= 6
-                sim = _sim(body1, body2)
+                sim = _sim_cached(body1, cc1, body2, cc2)
                 if title_same:
                     if not same_sec and sim < 0.72:
                         warns.append((subj["name"], p1[-1] if p1 else "", it1["t"],
@@ -654,9 +683,13 @@ def dedupe_items(ordered):
                 removed += 1
                 reports.append((subj["name"], p1[-1] if p1 else "", it1["t"],
                                 p2[-1] if p2 else "", it2["t"]))
-        for container, _path, it, dead in slots:
-            if dead:
-                container.remove(it)
+                # 合并后正文变了：i 的缓存必须跟着刷新，否则后面几对还在拿旧正文比
+                nb = _plain(it1["sec"][0]["body"])
+                slots[i][4] = nb
+                slots[i][5] = Counter(nb)
+        for slot in slots:
+            if slot[3]:
+                slot[0].remove(slot[2])
     return removed, reports, warns
 
 

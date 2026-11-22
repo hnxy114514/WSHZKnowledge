@@ -348,7 +348,16 @@ python gen_all.py                           # 需要全部重生成时跑这个
 KS_PASS=你的签名密码 ./build.sh
 ```
 
-产物：`汇总知识.apk`。
+产物：`汇总知识.apk`。全程约 20 秒（v3.12.5 之前是 98 秒）。
+
+提速靠两处，改动都在构建链上，别随手删：
+
+- **数据源没变就跳过生成**（`build.sh` 第 1 步）：按「9 个科目文件 + `build_authored.py` + `ids.json`」的
+  内容哈希做指纹（不看 mtime，git 切分支会改 mtime），与上次成功的比对，相同就跳过，
+  省掉固定 75 秒。产物少于 10 个 JSON 时强制重跑。改 Java、改文档时收益最大。
+- **去重剪枝**（`build_authored.py` 的 `_sim_cached`）：原来是全库两两跑 `difflib`（16 万次、73 秒）。
+  先用 ratio 的严格上界（长度上界 + 字符多重集交集上界，阈值 0.62）剪掉不可能命中的对子，
+  判定结果与直接算完全一致（实测 10 个产物文件 md5 逐个相同）。这一步把 75 秒压到 1.5 秒。
 
 ### 一键发布（构建 + Release + 上传 APK）
 
@@ -367,11 +376,13 @@ GITHUB_TOKEN=你的PAT python release.py --promote                              
 **预发布（`--pre`）**：Release 标成 `prerelease=True`，并且**不写** `cloud/version.json`、**不提交推送**。
 App 查的 `/releases/latest` 由 GitHub 服务端排除预发布，所以普通用户永远收不到这一版；
 只有设置里把「接收测试版」打开的机器才会去查 `/releases` 列表、拿到它。
-测完没问题再 `--promote`：只把那条 Release 的 `prerelease` 改成 `False`、写 `version.json`、提交推送，
-**不重新构建也不重新上传**——用户拿到的就是你自测过的那个 APK。
 
-> 版本号要一轮一轮往上加（`compareSemver` 只比三段数字，同号不会提示更新）。
-> 预发布期间源码改动还没提交，`--promote` 时会一起 `git add -A` 提交并在 `main` 上推送。
+版本号由脚本自己推：`3.12.5` → `3.12.5pre1`，再跑一次变成 `3.12.5pre2`（`versionCode` 同样 +1），
+不用手改 manifest。这样每一轮测试包的版本号都比上一轮大，App 才会提示更新。
+
+测完跑 `--promote`：把 `pre` 后缀去掉、**重新构建**并发一个正式版（线上版本号不能带 pre），
+同时把带 pre 的那条 Release 删掉；版本号不带后缀时则只改 `prerelease` 标记、不重打包。
+预发布期间源码改动尚未提交，正式发版时会一起 `git add -A` 提交并在 `main` 上推送。
 
 ---
 
@@ -385,6 +396,13 @@ App 查的 `/releases/latest` 由 GitHub 服务端排除预发布，所以普通
 - **进位清零**：Y 加 1 → Z 清零；X 加 1 → Y、Z 都清零（如 2.1.5 加内容 → 2.2.0）。
 
 改 `AndroidManifest.xml` 的 `versionName`（`versionCode` 同步 +1 即可，仅作整数递增，不参与比较）。App 内更新比较用的是 `versionName` 与 Release 的 tag。
+
+**测试版号**：正式版号后面加 `preN`，一轮一个数字——`3.12.5` → `3.12.5pre1` → `3.12.5pre2`。
+`compareSemver` 先比三段数字，三段相同再比 `pre` 序号：**同号的正式版大于任何 pre**，
+`pre1 < pre2`。不递增这个数字的话，第二轮的包装上去也收不到更新提示（三段数字一样）。
+`release.py --pre` 会自动改 manifest（pre 号 +1、`versionCode` +1），不用手写；
+`--promote` 时会把 `pre` 后缀去掉、重新构建并发正式版（用户看到的版本号不带 pre）。
+`compareSemver` 的这段逻辑别删——它是测试通道能一轮轮收到更新的唯一依据。
 
 ---
 
@@ -400,7 +418,8 @@ App 查的 `/releases/latest` 由 GitHub 服务端排除预发布，所以普通
   一个测试开关不该把更新检查整个搞挂。关着时行为与以前完全一致。
   这是「自己能收到预发布、普通用户收不到」的唯一实现方式——`/releases/latest` 由 GitHub 服务端排除预发布，改不了。
 - API 请求一律带 `?nocache=<当前毫秒>` 穿透镜像缓存；Release 资源名必须与 tag 对得上才采用其下载地址，否则按 tag 拼 URL。
-- 用 `versionName` 与最新 tag 做语义化比较（`compareSemver`，按三段数字比）。
+- 用 `versionName` 与最新 tag 做语义化比较（`compareSemver`：先比三段数字，再比 `preN` 序号——
+  同号的正式版大于任何 pre，`pre1 < pre2`，测试版才能一轮轮收到更新）。
 - 有新版 → 先申请「安装未知应用」权限 → 下载 APK → 触发覆盖安装。
 - 下载源顺序（`MainActivity.MIRRORS`，前缀 + 原地址）：直连 → gh-proxy.com → ghproxy.net → ghfast.top → gh.llkk.cc → github.moeyy.xyz。任一源 15 秒内拿不到 150KB 即判定「太慢」自动切换下一个。
 - 屏幕中央有进度卡片，实时显示百分比、已下载/总大小、当前下载源；卡片不拦截点击，可边下边用；卡片底部有「取消」，点后立即断开当前下载连接并关闭进度卡片，不等读超时。
@@ -611,7 +630,9 @@ enterApp()：buildUi() 建主界面（setContentView 换掉开屏）→ 定首�
 3. **两个** `View[]` 数组末尾都加 `xxxScreen`（`showScreen()` 的右滑分支 `ss` 与正常分支 `screens`，顺序必须和常量值一致）；
 4. `screenView()` / `currentScreenView()` 各加一个 `case S_XXX:`；`svOf()` 只有列表页才需要加；`scrollOf()` 凡是有滚动容器的都要加；
 5. `backTarget()` 里写返回去哪，`showScreen()` 里加 `else if (s == S_XXX) renderXxx();`；
-6. 需要从主页进就在 `buildSubjectScreen()` 加一行入口。
+6. 需要从主页进就在 `buildSubjectScreen()` 加一行入口；
+7. **渲染末尾调 `padInner(xxxInner)`**：圆屏上下各留 25% 屏高（`overDist()`），方屏自动不做事。
+   不调的话首尾内容滑不到屏幕中央、最后一行点不着（S_ORDER 第一版就漏了这条，圆屏底部点不到 ▼）。
 
 ### SvList：唯一的列表实现
 

@@ -25,7 +25,31 @@ OUT="$PROJ/build/汇总知识.apk"
 
 echo "== 1. 生成知识库（subjects → assets/data）=="
 cd "$PROJ/tools"
-python build_authored.py
+# 数据源没变就跳过生成：改 Java / 改文档时没必要把九科重新算一遍（原来固定烧 75 秒，
+# 其中 73 秒是去重时的两两比对）。指纹取「科目源文件 + build_authored.py + ids.json」的内容，
+# 不看 mtime——git 切分支、复制目录都会改 mtime，内容哈希才靠谱。产物不全也强制重跑。
+DATA_STAMP="$BUILD/.data_stamp"
+DATA_SIG=$(python - "$PROJ" <<'PY'
+import hashlib, os, sys
+root = sys.argv[1]
+files = [os.path.join(root, 'tools', 'build_authored.py'),
+         os.path.join(root, 'tools', 'ids.json')]
+sd = os.path.join(root, 'tools', 'subjects')
+files += [os.path.join(sd, f) for f in sorted(os.listdir(sd)) if f.endswith('.py')]
+h = hashlib.md5()
+for f in files:
+    h.update(os.path.basename(f).encode('utf-8'))
+    h.update(open(f, 'rb').read())
+print(h.hexdigest())
+PY
+)
+DATA_COUNT=$(ls "$PROJ"/app/src/main/assets/data/*.json 2>/dev/null | wc -l)
+if [ -f "$DATA_STAMP" ] && [ "$(cat "$DATA_STAMP")" = "$DATA_SIG" ] && [ "$DATA_COUNT" -ge 10 ]; then
+    echo "   数据源没变，跳过生成（约省 75 秒）"
+else
+    python build_authored.py
+    echo -n "$DATA_SIG" > "$DATA_STAMP"
+fi
 
 echo "== 1.5 注释体检（译文块的 ①②③ 编号与落点，有问题直接中断）=="
 python "$PROJ/tools/check_notes.py" || { echo "注释编号有问题，构建中止"; exit 1; }
