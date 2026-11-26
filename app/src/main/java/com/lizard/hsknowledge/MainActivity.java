@@ -1932,6 +1932,31 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** 给有道词典用的请求：Accept 必须是 application/json，别的都返回 500。
+     *  httpGetText 里钉死的是 GitHub 的 Accept（application/vnd.github+json），
+     *  有道 jsonapi 对这个头直接 500，词组/句子查不出来、弹窗打不开——就是这个原因。
+     *  suggest 接口倒是不挑，但两条路统一走这里，省得以后再踩。 */
+    private String httpGetTextDict(String urlStr, int connectMs, int readMs) throws Exception {
+        HttpURLConnection cn = (HttpURLConnection) new URL(urlStr).openConnection();
+        try {
+            cn.setConnectTimeout(connectMs);
+            cn.setReadTimeout(readMs);
+            cn.setInstanceFollowRedirects(true);
+            cn.setRequestProperty("Accept", "application/json");
+            cn.setRequestProperty("User-Agent",
+                    "Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 (KHTML, like Gecko)");
+            InputStream is = cn.getInputStream();
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] b = new byte[8192];
+            int n;
+            while ((n = is.read(b)) > 0) bos.write(b, 0, n);
+            is.close();
+            return new String(bos.toByteArray(), StandardCharsets.UTF_8);
+        } finally {
+            cn.disconnect();
+        }
+    }
+
     // ================= 启动时的通道探测 =================
     /** 探测 api.github.com 用的轻量地址（无需鉴权、体积极小）。 */
     private static final String PROBE_API = "https://api.github.com/zen";
@@ -14620,7 +14645,7 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             public void run() {
                 String body = null;
-                try { body = httpGetText(SEARCH_SUGGEST + urlEnc(key), 4000, 6000); }
+                try { body = httpGetTextDict(SEARCH_SUGGEST + urlEnc(key), 4000, 6000); }
                 catch (Throwable ignored) { body = null; }
                 final String b = body;
                 runOnUiThread(new Runnable() {
@@ -14695,7 +14720,7 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             public void run() {
                 JSONObject o = null;
-                try { o = new JSONObject(httpGetText(SEARCH_DICT + urlEnc(word), 4000, 8000)); }
+                try { o = new JSONObject(httpGetTextDict(SEARCH_DICT + urlEnc(word), 4000, 8000)); }
                 catch (Throwable ignored) { o = null; }
                 final JSONObject r = o;
                 runOnUiThread(new Runnable() {
