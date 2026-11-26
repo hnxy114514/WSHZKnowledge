@@ -9884,7 +9884,8 @@ public class MainActivity extends Activity {
                     searchScreen, feedbackScreen, mineScreen, profileScreen, changelogScreen, aboutScreen,
                     displayScreen, todayScreen, extraScreen, favScreen, histScreen, favSubScreen,
                     dailyScreen, sentScreen, aiWebScreen, aiHubScreen, aiApiScreen, aiWebCfgScreen,
-                    aiChatScreen, orderScreen};
+                    aiChatScreen, orderScreen, wordHomeScreen, wordStudyScreen, wordSearchScreen,
+                    wordSettingsScreen, wordVocabScreen};
             screen = s;
             for (int i = 0; i < ss.length; i++) {
                 if (i == s) continue;
@@ -11954,6 +11955,45 @@ public class MainActivity extends Activity {
         curBook = null;
         for (WordBook b : wordBooks) if (b.id.equals(cur)) curBook = b;
         wordDailyNew = prefs.getInt("word_daily_new", 10);
+        // 正式版：测试期预置的复习词在这里一次性清干净（遍历所有已下载词书，不只当前那本），
+        // 免得用户在测试版里换过词书，正式版只清当前书、别的书还留着假进度。
+        if (appVersion().indexOf("pre") < 0) clearSeededWordsForRelease();
+    }
+
+    /** 正式版清掉测试期预置的复习词：按 seed_<id> 记录把对应 .prog 的进度归零，再删记录。
+     *  直接操作文件，不依赖「当前书已加载」——所以能覆盖用户测试期用过的每一本书。 */
+    private void clearSeededWordsForRelease() {
+        for (WordBook b : wordBooks) {
+            String key = "seed_" + b.id;
+            String raw = prefs.getString(key, "");
+            if (raw.length() == 0) continue;
+            File pf = bookProg(b.id);
+            if (pf.exists() && pf.length() > 0) {
+                try {
+                    byte[] p = new byte[(int) pf.length()];
+                    java.io.DataInputStream in = new java.io.DataInputStream(
+                            new java.io.BufferedInputStream(new java.io.FileInputStream(pf)));
+                    try { in.readFully(p); } finally { try { in.close(); } catch (Exception ignored) { } }
+                    boolean dirty = false;
+                    for (String x : raw.split(",")) {
+                        try {
+                            int i = Integer.parseInt(x.trim());
+                            if (i < 0 || i * 8 + 7 >= p.length) continue;
+                            p[i * 8 + 1] = 0; p[i * 8 + 2] = 0;   // interval
+                            p[i * 8 + 3] = 0; p[i * 8 + 4] = 0;   // due
+                            p[i * 8 + 5] = 0;                      // reps
+                            p[i * 8 + 6] = 0;                      // lapse
+                            dirty = true;
+                        } catch (Exception ignored) { }
+                    }
+                    if (dirty) {
+                        java.io.FileOutputStream fo = new java.io.FileOutputStream(pf);
+                        try { fo.write(p); fo.flush(); } finally { try { fo.close(); } catch (Exception ignored) { } }
+                    }
+                } catch (Exception ignored) { }
+            }
+            prefs.edit().remove(key).apply();
+        }
     }
 
     private boolean bookDownloaded(WordBook b) {
