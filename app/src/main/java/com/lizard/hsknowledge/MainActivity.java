@@ -14109,6 +14109,8 @@ public class MainActivity extends Activity {
     // ================= 单词：搜索 =================
 
     private static final int WORD_SEARCH_LIMIT = 20;
+    private static final int WORD_SEARCH_HIST_MAX = 20;   // 最近搜索最多留 20 条
+    private static final String WORD_SEARCH_HIST_KEY = "word_search_hist";
 
     private void buildWordSearchScreen() {
         wordSearchScroll = new OverScrollScrollView(this);
@@ -14122,7 +14124,9 @@ public class MainActivity extends Activity {
 
     private android.widget.EditText wSearchBox;
     private LinearLayout wSearchResults;
+    private LinearLayout wSearchHistBox;
     private TextView wSearchStatus;
+    private final ArrayList<String> wSearchHist = new ArrayList<String>();
 
     // 搜词的两条路：有网走有道（免 key、免登录），没网在「所有已下载词书」里按前缀搜。
     // 本地索引只存词头 + 行号，正文点开才读；建一次一直留着，书单变了才重建。
@@ -14170,6 +14174,127 @@ public class MainActivity extends Activity {
         Hit(String w, BookIx b, int l) { word = w; bk = b; line = l; }
     }
 
+    // ---- 最近搜索：只记真正点开过的词，不记打字过程中的字母碎片 ----
+
+    private void loadWordSearchHist() {
+        wSearchHist.clear();
+        String raw = prefs.getString(WORD_SEARCH_HIST_KEY, "");
+        if (raw.length() == 0) return;
+        try {
+            org.json.JSONArray a = new org.json.JSONArray(raw);
+            for (int i = 0; i < a.length() && wSearchHist.size() < WORD_SEARCH_HIST_MAX; i++) {
+                String w = a.optString(i, "").trim();
+                if (w.length() == 0 || w.length() > 40 || hasWordSearchHist(w)) continue;
+                wSearchHist.add(w);
+            }
+        } catch (Throwable ignored) { }
+    }
+
+    private boolean hasWordSearchHist(String w) {
+        for (String s : wSearchHist) if (s.equalsIgnoreCase(w)) return true;
+        return false;
+    }
+
+    private void saveWordSearchHist() {
+        org.json.JSONArray a = new org.json.JSONArray();
+        for (String w : wSearchHist) a.put(w);
+        prefs.edit().putString(WORD_SEARCH_HIST_KEY, a.toString()).apply();
+    }
+
+    /** 同一个词先去掉再放最前，超出上限丢最旧的。 */
+    private void pushWordSearchHist(String word) {
+        if (word == null) return;
+        String w = word.trim();
+        if (w.length() == 0 || w.length() > 40) return;
+        for (int i = 0; i < wSearchHist.size(); i++) {
+            if (wSearchHist.get(i).equalsIgnoreCase(w)) { wSearchHist.remove(i); break; }
+        }
+        wSearchHist.add(0, w);
+        while (wSearchHist.size() > WORD_SEARCH_HIST_MAX) wSearchHist.remove(wSearchHist.size() - 1);
+        saveWordSearchHist();
+        if (screen == S_WORD_SEARCH) renderWordSearchHist();
+    }
+
+    private void clearWordSearchHist() {
+        wSearchHist.clear();
+        prefs.edit().remove(WORD_SEARCH_HIST_KEY).apply();
+        renderWordSearchHist();
+        toast("搜索记录已清空");
+    }
+
+    /** 只有输入框是空的时候才显示历史；整个区块随搜词页一起滚，不另做内层滚动。 */
+    private void renderWordSearchHist() {
+        if (wSearchHistBox == null) return;
+        boolean emptyInput = wSearchBox == null || wSearchBox.getText().toString().trim().length() == 0;
+        if (!emptyInput || wSearchHist.isEmpty()) {
+            wSearchHistBox.setVisibility(View.GONE);
+            wSearchHistBox.removeAllViews();
+            return;
+        }
+        wSearchHistBox.setVisibility(View.VISIBLE);
+        wSearchHistBox.removeAllViews();
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView t = new TextView(this);
+        t.setText("最近搜索");
+        t.setTextSize(m.subtitleSize - 2f);
+        t.setTextColor(C_SUB);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        head.addView(t, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView clear = new TextView(this);
+        clear.setText("清空");
+        clear.setTextSize(m.subtitleSize - 2f);
+        clear.setTextColor(C_PRIMARY);
+        clear.setPadding(dp(10), dp(6), dp(4), dp(6));
+        clear.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                confirmAction("清空搜索记录？",
+                        "最近点开过的词会被清掉，词书、背诵记录和其他收藏都不受影响。",
+                        "确认清空", 0xFFFFB74D, new Runnable() {
+                            public void run() { clearWordSearchHist(); }
+                        });
+            }
+        });
+        head.addView(clear, wrap());
+        wSearchHistBox.addView(head, wrap());
+
+        for (int i = 0; i < wSearchHist.size(); i++) {
+            final String w = wSearchHist.get(i);
+            TextView row = new TextView(this);
+            row.setText(w);
+            row.setTextSize(m.backSize - 1f);
+            row.setTextColor(C_PRIMARY);
+            row.setSingleLine(true);
+            row.setEllipsize(TextUtils.TruncateAt.END);
+            row.setPadding(dp(12), dp(8), dp(12), dp(8));
+            applyClickBg(row, C_PILL);
+            row.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    vibrate();
+                    if (wSearchBox == null) return;
+                    wSearchBox.setText(w);
+                    wSearchBox.setSelection(w.length());
+                    if (wSearchDebounce != null) wSearchHandler.removeCallbacks(wSearchDebounce);
+                    fillWordResultsNow(w);
+                }
+            });
+            row.setOnLongClickListener(new View.OnLongClickListener() {
+                public boolean onLongClick(View v) {
+                    vibrate();
+                    wSearchHist.remove(w);
+                    saveWordSearchHist();
+                    renderWordSearchHist();
+                    toast("已删除「" + w + "」");
+                    return true;
+                }
+            });
+            wSearchHistBox.addView(row, wrapGap(3));
+        }
+    }
+
     private void renderWordSearch() {
         loadWordBooks();
         wSearchKey = "";
@@ -14183,6 +14308,7 @@ public class MainActivity extends Activity {
 
         boolean anyBook = !downloadedBooks().isEmpty();
         if (!anyBook && !online()) {
+            wSearchHistBox = null;
             wordSearchInner.addView(grayTip("没有已下载的词书，也没有网络。先去「背单词设置」下载一本，或连上网再搜。"), wrap());
             return;
         }
@@ -14212,6 +14338,10 @@ public class MainActivity extends Activity {
         wSearchStatus.setPadding(dp(4), dp(2), dp(4), dp(2));
         wordSearchInner.addView(wSearchStatus, wrap());
 
+        wSearchHistBox = new LinearLayout(this);
+        wSearchHistBox.setOrientation(LinearLayout.VERTICAL);
+        wordSearchInner.addView(wSearchHistBox, wrapGap(6));
+
         wSearchResults = new LinearLayout(this);
         wSearchResults.setOrientation(LinearLayout.VERTICAL);
         wordSearchInner.addView(wSearchResults, wrapGap(4));
@@ -14219,6 +14349,8 @@ public class MainActivity extends Activity {
         padInner(wordSearchInner);
 
         updateSearchStatus();
+        loadWordSearchHist();
+        renderWordSearchHist();
         ensureSearchIndexAsync();     // 还没输就先在后台把词库整理好，别等第一下按键
     }
 
@@ -14229,9 +14361,11 @@ public class MainActivity extends Activity {
         if (wSearchDebounce != null) wSearchHandler.removeCallbacks(wSearchDebounce);
         if (q.length() == 0) {
             if (wSearchResults != null) wSearchResults.removeAllViews();
+            renderWordSearchHist();
             updateSearchStatus();
             return;
         }
+        if (wSearchHistBox != null) wSearchHistBox.setVisibility(View.GONE);
         final String key = q;
         wSearchDebounce = new Runnable() {
             public void run() {
@@ -14663,7 +14797,7 @@ public class MainActivity extends Activity {
      *  没有再去查有道。搜索本身是联网的，点开走哪条路只看谁的信息更全。 */
     private void openOnlineWord(final String word) {
         Hit local = findLocalExact(word);
-        if (local != null) { showWordDetail(local.bk, local.line); return; }
+        if (local != null) { pushWordSearchHist(word); showWordDetail(local.bk, local.line); return; }
         toast("正在查 " + word + "…");
         new Thread(new Runnable() {
             public void run() {
@@ -14674,7 +14808,9 @@ public class MainActivity extends Activity {
                 runOnUiThread(new Runnable() {
                     public void run() {
                         if (r == null) { toast("查询失败，检查网络"); return; }
-                        if (!showOnlineCard(r, word)) toast("有道也没查到这个词");
+                        // 查到了才记进最近搜索，失败或空结果不留死词
+                        if (showOnlineCard(r, word)) pushWordSearchHist(word);
+                        else toast("有道也没查到这个词");
                     }
                 });
             }
@@ -14846,7 +14982,7 @@ public class MainActivity extends Activity {
         row.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 vibrate();
-                if (bk != null) { showWordDetail(bk, line); return; }
+                if (bk != null) { pushWordSearchHist(word); showWordDetail(bk, line); return; }
                 if (isChinese(word)) {
                     // 中文词条：一个中文往往对应好几个英文，先让用户挑，再查那个词
                     ArrayList<String> cands = parseCandidates(mean, word);
