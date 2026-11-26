@@ -231,11 +231,11 @@ public class MainActivity extends Activity {
     }
     static class Subject { String key, name; List<Node> roots = new ArrayList<Node>(); }
 
-    private final List<Subject> subjects = new ArrayList<Subject>();
-    private final Map<String, Subject> subjectMap = new HashMap<String, Subject>();
-    private final List<Node> allHits = new ArrayList<Node>();
+    private final List<Subject> subjects = new ArrayList<Subject>(16);
+    private final Map<String, Subject> subjectMap = new HashMap<String, Subject>(16);
+    private final List<Node> allHits = new ArrayList<Node>(1800);   // 叶子约 1572，一次分配够，免得反复扩容
     /** 所有分组节点（有下级的），供全局搜索按标题命中；点进去就是那一层的列表。 */
-    private final List<Node> allGroups = new ArrayList<Node>();
+    private final List<Node> allGroups = new ArrayList<Node>(400);  // 分组约 342
     /** 日期 → 当天修改过的叶子，读数据时建一次：「今日新增」直接取，不再每次全表扫。 */
     private final Map<String, List<Node>> nodesByDate = new LinkedHashMap<String, List<Node>>();
     private final List<Node> searchHits = new ArrayList<Node>();
@@ -546,7 +546,7 @@ public class MainActivity extends Activity {
     private final LinkedHashSet<String> favIds = new LinkedHashSet<String>();
     private final List<String> histIds = new ArrayList<String>();
     /** 稳定编号 → 节点（分组与叶子都在内）；收藏页、搜索、历史、今日都查它。 */
-    private final Map<String, Node> nodeById = new HashMap<String, Node>();
+    private final Map<String, Node> nodeById = new HashMap<String, Node>(4096);   // 每个节点存两个键，预留足够容量
     /** 每日一句的收藏 / 浏览记录：点一下复制整句，收藏模式长按取消收藏。 */
     private void renderSent() {
         loadDailyStore();
@@ -937,15 +937,34 @@ public class MainActivity extends Activity {
      *  日期段只在叶子、且位于最前（唯一的 6 位数字段），跳过它即可；
      *  分组编号不含日期、原样返回。兼容旧版本（日期曾在末段/第 2 段）。 */
     private static String stableKey(String id) {
-        if (id == null) return "";
-        String[] p = id.split("-");
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < p.length; i++) {
-            if (p[i].matches("\\d{6}")) continue;   // 跳过 6 位日期段
-            if (sb.length() > 0) sb.append("-");
-            sb.append(p[i]);
+        if (id == null || id.length() == 0) return "";
+        // 手写切分：id.split("-") 会给每个编号造一个数组加一堆子串，启动时 1914 个编号、
+        // 一万三千多个片段，全是要分配的临时对象，直接扫一遍拼出来省得多。
+        int n = id.length();
+        StringBuilder sb = new StringBuilder(n);
+        int i = 0;
+        while (i < n) {
+            int j = id.indexOf('-', i);
+            if (j < 0) j = n;
+            if (!isDate6At(id, i, j)) {
+                if (sb.length() > 0) sb.append('-');
+                sb.append(id, i, j);
+            }
+            i = j + 1;
         }
         return sb.toString();
+    }
+
+    /** 这一段是不是 6 位纯数字的日期段（起止下标，左闭右开）。
+     *  不用 `seg.matches("\\d{6}")`：String.matches 每次都重新编译 Pattern，
+     *  启动时要跑一万三千多次，在手表上就是几百毫秒纯浪费。 */
+    private static boolean isDate6At(String s, int from, int to) {
+        if (to - from != 6) return false;
+        for (int i = from; i < to; i++) {
+            char c = s.charAt(i);
+            if (c < '0' || c > '9') return false;
+        }
+        return true;
     }
 
     /** 读本地的收藏与历史（存的是稳定编号）。 */
