@@ -59,6 +59,12 @@ python "$PROJ/tools/check_notes.py" || { echo "注释编号有问题，构建中
 echo "== 1.6 生成二进制缓存 =="
 python "$PROJ/tools/gen_cache.py"
 
+# 词书清单：dict/books.json 是唯一来源，App 读 assets 里这份（离线也能列出可下载的词书）
+cp "$PROJ/dict/books.json" "$PROJ/app/src/main/assets/dict_books.json"
+
+# 助记图索引：词头 → 图片地址，任何词书命中都能用
+python "$PROJ/tools/gen_pics.py" || { echo "助记图索引生成失败"; exit 1; }
+
 echo "== 2. 清理 =="
 python - "$BUILD" "$OUT" <<'PY'
 import os, shutil, sys, time

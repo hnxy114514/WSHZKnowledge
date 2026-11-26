@@ -248,8 +248,11 @@ public class MainActivity extends Activity {
             S_CHANGELOG = 8, S_ABOUT = 9, S_DISPLAY = 10, S_TODAY = 11,
             S_EXTRA = 12, S_FAV = 13, S_HIST = 14, S_FAV_SUB = 15, S_DAILY = 16, S_SENT = 17,
             S_AI_WEB = 18, S_AI_HUB = 19, S_AI_API_CFG = 20, S_AI_WEB_CFG = 21, S_AI_CHAT = 22,
-            S_ORDER = 23;
-    private static final int SCREEN_COUNT = 24;
+            S_ORDER = 23,
+            // 单词：主页 / 背词 / 搜索 / 设置（都在英语科目里进，或从设置页进）
+            S_WORD_HOME = 24, S_WORD_STUDY = 25, S_WORD_SEARCH = 26, S_WORD_SETTINGS = 27,
+            S_WORD_VOCAB = 28;   // 生词本
+    private static final int SCREEN_COUNT = 29;
     private int screen = S_SUBJECT;
     private Subject curSubject;
     /** 从科目根走到当前所在的分组节点；空 = 正在看某科目的顶层节点。 */
@@ -537,6 +540,13 @@ public class MainActivity extends Activity {
     // 首页科目排序（设置页的子页）
     private LinearLayout orderScreen, orderInner;
     private ScrollView orderScroll;
+
+    // ---- 单词功能（四屏共用一套词书数据）----
+    private LinearLayout wordHomeScreen, wordHomeInner, wordStudyScreen, wordStudyInner,
+            wordSearchScreen, wordSearchInner, wordSettingsScreen, wordSettingInner,
+            wordVocabScreen, wordVocabInner;
+    private ScrollView wordHomeScroll, wordStudyScroll, wordSearchScroll, wordSettingScroll,
+            wordVocabScroll;
 
     // 收藏与历史记录（都按节点稳定编号记在本地）
     private LinearLayout favScreen, histScreen, favSubScreen;
@@ -2783,6 +2793,19 @@ public class MainActivity extends Activity {
         orderScreen = newScreen();
         root.addView(orderScreen, fp());
 
+        // 单词四屏：内容都在首次进入时建（见 ensureScreenBuilt），启动时不碰
+        wordHomeScreen = newScreen();
+        root.addView(wordHomeScreen, fp());
+        wordStudyScreen = newScreen();
+        root.addView(wordStudyScreen, fp());
+        wordSearchScreen = newScreen();
+        root.addView(wordSearchScreen, fp());
+        wordSettingsScreen = newScreen();
+        root.addView(wordSettingsScreen, fp());
+
+        wordVocabScreen = newScreen();
+        root.addView(wordVocabScreen, fp());
+
         todayScreen = newScreen();
         root.addView(todayScreen, fp());
 
@@ -2977,6 +3000,10 @@ public class MainActivity extends Activity {
         }));
         nodeList.addHead(listTitle);
         nodeList.addHead(itemSearchBox);
+        // 英语科目专属：背单词 / 搜单词（其他科目隐藏，见 renderNodes）
+        englishEntryBar = buildEnglishEntryBar();
+        englishEntryBar.setVisibility(View.GONE);
+        nodeList.addHead(englishEntryBar);
         nodeScreen.addView(nodeList.sc, lw());
 
         // 详情页
@@ -3413,7 +3440,7 @@ public class MainActivity extends Activity {
                 if (swipeActive) resetSwipe();
                 // 第一指按下时网页已经收到 ACTION_DOWN，接管后必须补一个 CANCEL，
                 // 否则网页还等着自己的长按计时到点，弹出「复制 / 全选」气泡——双指长按误触就是它。
-                aiWebCancelChildGesture();
+                cancelChildGesture();
                 scheduleAiTwoLong();
                 return true;
             }
@@ -3450,15 +3477,6 @@ public class MainActivity extends Activity {
                 break;
         }
         return true;
-    }
-
-    /** 给网页补一个 ACTION_CANCEL：告诉它「这一串触摸作废了」，撤掉正在走的长按 / 双击识别。 */
-    private void aiWebCancelChildGesture() {
-        long now = SystemClock.uptimeMillis();
-        MotionEvent cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0);
-        try { super.dispatchTouchEvent(cancel); }
-        catch (Throwable ignored) { }
-        cancel.recycle();
     }
 
     private void scheduleAiTwoLong() {
@@ -4438,6 +4456,12 @@ public class MainActivity extends Activity {
     /** digitsOnly=true 时让系统输入法切成数字键盘，并只收数字字符（键盘仍是系统输入法，不是自绘键盘）。 */
     private void apiInputDialog(String title, String hint, String initial, boolean secret,
                                 boolean digitsOnly, final ApiTextSink sink) {
+        apiInputDialog(title, hint, initial, secret, digitsOnly, true, sink);
+    }
+
+    /** showPaste=false 时不给「粘贴」——纯数字项粘进来也没用，多一个按钮反倒碍事。 */
+    private void apiInputDialog(String title, String hint, String initial, boolean secret,
+                                boolean digitsOnly, boolean showPaste, final ApiTextSink sink) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(13), dp(12), dp(13), dp(8));
@@ -4493,15 +4517,18 @@ public class MainActivity extends Activity {
 
         LinearLayout util = new LinearLayout(this);
         util.setOrientation(LinearLayout.HORIZONTAL);
-        TextView paste = new TextView(this);
-        paste.setText("粘贴");
-        paste.setTextSize(m.subtitleSize - 2f);
-        paste.setGravity(Gravity.CENTER);
-        paste.setTextColor(C_SUB);
-        paste.setPadding(dp(6), dp(7), dp(6), dp(7));
-        paste.setBackgroundDrawable(pill(C_PILL));
-        util.addView(paste, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView paste = null;
+        if (showPaste) {
+            paste = new TextView(this);
+            paste.setText("粘贴");
+            paste.setTextSize(m.subtitleSize - 2f);
+            paste.setGravity(Gravity.CENTER);
+            paste.setTextColor(C_SUB);
+            paste.setPadding(dp(6), dp(7), dp(6), dp(7));
+            paste.setBackgroundDrawable(pill(C_PILL));
+            util.addView(paste, new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        }
         if (secret) {
             TextView wipe = new TextView(this);
             wipe.setText("清空");
@@ -4521,9 +4548,11 @@ public class MainActivity extends Activity {
                 }
             });
         }
-        LinearLayout.LayoutParams ulp = wrap();
-        ulp.topMargin = dp(4);
-        box.addView(util, ulp);
+        if (showPaste || secret) {
+            LinearLayout.LayoutParams ulp = wrap();
+            ulp.topMargin = dp(4);
+            box.addView(util, ulp);
+        }
 
         final AlertDialog d = new AlertDialog.Builder(this).setView(box).create();
 
@@ -4555,19 +4584,21 @@ public class MainActivity extends Activity {
         blp.topMargin = dp(6);
         box.addView(bar, blp);
 
-        paste.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                vibrate();
-                String s = clipboardText();
-                if (s.length() == 0) {
-                    toast("剪贴板是空的");
-                    return;
+        if (paste != null) {
+            paste.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    vibrate();
+                    String s = clipboardText();
+                    if (s.length() == 0) {
+                        toast("剪贴板是空的");
+                        return;
+                    }
+                    ed.setText(s);
+                    ed.setSelection(ed.getText().length());
+                    toast("已粘贴");
                 }
-                ed.setText(s);
-                ed.setSelection(ed.getText().length());
-                toast("已粘贴");
-            }
-        });
+            });
+        }
         save.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 vibrate();
@@ -4866,6 +4897,7 @@ public class MainActivity extends Activity {
         // 底部：输入 + 停止（停止只在回复中出现）。它是居中的一条，不会碰到圆弧
         buildChatInputBar();
 
+        loadChatHistory();   // 上次的对话（进程被杀后回来的情况）在这一步恢复
         renderAiChat();
     }
 
@@ -6000,6 +6032,7 @@ public class MainActivity extends Activity {
         chatBusy = false;
         chatStopFlag = false;
         try { computeRelated(msg); } catch (Throwable ignored) { }
+        saveChatHistory();
         runOnUiThread(new Runnable() {
             public void run() {
                 updateChatBar();
@@ -6017,6 +6050,7 @@ public class MainActivity extends Activity {
         msg.streaming = false;
         chatBusy = false;
         chatStopFlag = false;
+        saveChatHistory();
         runOnUiThread(new Runnable() {
             public void run() {
                 updateChatBar();
@@ -6040,6 +6074,65 @@ public class MainActivity extends Activity {
         toast("已停止");
     }
 
+    /** 对话落盘的位置。API 模式的对话原来只在内存，手表进程被回收后重进就全空了。 */
+    private File chatStoreFile() {
+        return new File(getFilesDir(), "chat_api.json");
+    }
+
+    /** 存最近 100 条（半截的流不存）。切后台被系统杀掉后回来还能看到。 */
+    private void saveChatHistory() {
+        final JSONArray arr = new JSONArray();
+        int from = Math.max(0, chatMsgs.size() - 100);
+        for (int i = from; i < chatMsgs.size(); i++) {
+            ChatMsg m = chatMsgs.get(i);
+            if (m.streaming) continue;
+            try {
+                JSONObject o = new JSONObject();
+                o.put("r", m.role);
+                o.put("c", m.content);
+                o.put("t", m.reasoning);
+                o.put("f", m.folded);
+                o.put("x", m.truncated);
+                if (m.err != null) o.put("e", m.err);
+                arr.put(o);
+            } catch (Exception ignored) { }
+        }
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    java.io.FileOutputStream fo = new java.io.FileOutputStream(chatStoreFile());
+                    fo.write(arr.toString().getBytes("UTF-8"));
+                    fo.flush();
+                    fo.close();
+                } catch (Exception ignored) { }
+            }
+        }).start();
+    }
+
+    /** 进对话页时恢复；内存里已有内容就不覆盖。 */
+    private void loadChatHistory() {
+        if (!chatMsgs.isEmpty()) return;
+        File f = chatStoreFile();
+        if (!f.exists() || f.length() < 2) return;
+        try {
+            byte[] b = new byte[(int) f.length()];
+            java.io.FileInputStream fi = new java.io.FileInputStream(f);
+            try { fi.read(b); } finally { fi.close(); }
+            JSONArray arr = new JSONArray(new String(b, "UTF-8"));
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                ChatMsg m = new ChatMsg(o.optString("r", "user"));
+                m.content = o.optString("c", "");
+                m.reasoning = o.optString("t", "");
+                m.folded = o.optBoolean("f", false);
+                m.truncated = o.optBoolean("x", false);
+                if (o.has("e")) m.err = o.optString("e", null);
+                chatMsgs.add(m);
+            }
+        } catch (Exception ignored) { }
+    }
+
     private void chatReset() {
         chatStopFlag = true;
         HttpURLConnection c = chatConn;
@@ -6050,6 +6143,7 @@ public class MainActivity extends Activity {
         chatBusy = false;
         chatStopFlag = false;
         chatDirty = true;
+        saveChatHistory();      // 存一份空的，别让下次进来又冒出旧对话
         renderAiChat();
         toast("已清空");
     }
@@ -6331,6 +6425,11 @@ public class MainActivity extends Activity {
             case S_CHANGELOG: return changelogScroll;
             case S_FEEDBACK: return feedbackScroll;
             case S_PROFILE: return profScroll;
+            case S_WORD_HOME: return wordHomeScroll;
+            case S_WORD_STUDY: return wordStudyScroll;
+            case S_WORD_SEARCH: return wordSearchScroll;
+            case S_WORD_SETTINGS: return wordSettingScroll;
+            case S_WORD_VOCAB: return wordVocabScroll;
             default: return null;
         }
     }
@@ -7601,6 +7700,13 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
     }
 
+    /** 同上，但底部留出间距。新页的按钮之间都靠它撑开——不在调用处一个个手写 margin。 */
+    private LinearLayout.LayoutParams wrapGap(int bottomDp) {
+        LinearLayout.LayoutParams lp = wrap();
+        lp.bottomMargin = dp(bottomDp);
+        return lp;
+    }
+
     private LinearLayout.LayoutParams wrapM() {
         LinearLayout.LayoutParams lp = wrap();
         lp.bottomMargin = dp(6);
@@ -7702,7 +7808,48 @@ public class MainActivity extends Activity {
         itemSearchBox.setText("");
         nodeRefreshLocked = false;
         setPath(listTitle, currentPath());
+        if (englishEntryBar != null) {
+            boolean top = navStack.isEmpty() && curSubject != null && "english".equals(curSubject.key);
+            englishEntryBar.setVisibility(top ? View.VISIBLE : View.GONE);
+        }
         bindNodes();
+    }
+
+    private LinearLayout englishEntryBar;
+
+    /** 英语科目页顶部那两个入口：背单词 / 搜单词。只在这一科的顶层显示。 */
+    private LinearLayout buildEnglishEntryBar() {
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER);
+        bar.setPadding(0, dp(2), 0, dp(5));
+
+        TextView w = wordBtn("背单词", true);
+        w.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                wordHomeBack = S_NODE;      // 从科目页进的，返回就该回科目页
+                showScreen(S_WORD_HOME);
+            }
+        });
+        LinearLayout.LayoutParams lp1 = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        lp1.rightMargin = dp(4);
+        bar.addView(w, lp1);
+
+        TextView s = wordBtn("搜单词", true);
+        s.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                wordSearchBack = S_NODE;    // 同上：别退到背单词页去
+                showScreen(S_WORD_SEARCH);
+            }
+        });
+        LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        lp2.leftMargin = dp(4);
+        bar.addView(s, lp2);
+        return bar;
     }
 
     private void refreshNodes() {
@@ -9225,40 +9372,60 @@ public class MainActivity extends Activity {
     }
 
     // ================= 设置页（分类） =================
+    /** 设置页里的一行入口：圆角底、居中、可带图标。所有入口都走这一个方法，样式不会各写一套。 */
+    private TextView settingsEntry(String text, String icon, int color, boolean bold,
+                                   View.OnClickListener listener) {
+        TextView v = new TextView(this);
+        v.setText(text);
+        v.setTextSize(m.backSize);
+        if (bold) v.setTypeface(Typeface.DEFAULT_BOLD);
+        v.setTextColor(color);
+        v.setGravity(Gravity.CENTER);
+        v.setPadding(dp(10), dp(10), dp(10), dp(10));
+        v.setBackground(clickBg(C_PILL));
+        if (icon != null) applyIcon(v, icon, color, 15);
+        v.setOnClickListener(listener);
+        return v;
+    }
+
+    /** 入口 / 开关下面那行小灰字。afterToggle 时下边多留一点，和下一块分开。 */
+    private TextView settingsHint(String text, boolean afterToggle) {
+        TextView v = new TextView(this);
+        v.setText(text);
+        v.setTextSize(m.subtitleSize - 2f);
+        v.setTextColor(C_SUB);
+        v.setGravity(Gravity.CENTER);
+        v.setPadding(dp(4), dp(afterToggle ? 2 : 3), dp(4), dp(afterToggle ? 4 : 2));
+        return v;
+    }
+
+    /** 只加上边距的布局参数（同组里第二个入口起用）。 */
+    private LinearLayout.LayoutParams topGap(int topDp) {
+        LinearLayout.LayoutParams lp = wrap();
+        lp.topMargin = dp(topDp);
+        return lp;
+    }
+
     private void renderSettings() {
-        // 原地重绘（调科目顺序、切开关）时保住当前滚动位置：以前末尾无条件 scrollToTop，
-        // 点一次 ▲▼ 就被弹回最上面，得重新往下滑到排序那一块才能接着调。
+        // 原地重绘（切开关、清缓存）时保住滚动位置：以前末尾无条件 scrollToTop，
+        // 点一次开关就被弹回最上面，得重新往下滑回原来那块。
         int keepY = (settingsInner.getChildCount() > 0) ? settingsScroll.getScrollY() : -1;
         settingsInner.removeAllViews();
         if (overDist() > 0) settingsInner.addView(makeScrollSpacer());
         settingsInner.addView(settingsBackBtn, wrapM());
+
+        // 分组按「用户在找什么」来分。以前「背单词设置」挂到「问 AI」标题下面、
+        // 「个人主页」和「首页科目排序」混在「其他」里，找东西只能靠记位置。
         settingsInner.addView(sectionHeader("显示"), wrap());
-        TextView displayEntry = new TextView(this);
-        displayEntry.setText("显示调节");
-        displayEntry.setTextSize(m.backSize);
-        displayEntry.setTypeface(Typeface.DEFAULT_BOLD);
-        displayEntry.setTextColor(C_PRIMARY);
-        displayEntry.setGravity(Gravity.CENTER);
-        displayEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
-        displayEntry.setBackground(clickBg(C_PILL));
-        applyIcon(displayEntry, "ic_settings", C_PRIMARY, 15);
-        displayEntry.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                vibrate();
-                tuningFirstRun = false;
-                showScreen(S_DISPLAY);
-            }
-        });
-        settingsInner.addView(displayEntry, wrap());
-
-        TextView displayHint = new TextView(this);
-        displayHint.setText("调整字号和整体缩放。");
-        displayHint.setTextSize(m.subtitleSize - 2f);
-        displayHint.setTextColor(C_SUB);
-        displayHint.setGravity(Gravity.CENTER);
-        displayHint.setPadding(dp(4), dp(3), dp(4), dp(2));
-        settingsInner.addView(displayHint, wrap());
-
+        settingsInner.addView(settingsEntry("显示调节", "ic_settings", C_PRIMARY, true,
+                new View.OnClickListener() {
+                    public void onClick(View v) {
+                        vibrate();
+                        tuningFirstRun = false;
+                        showScreen(S_DISPLAY);
+                    }
+                }), wrap());
+        settingsInner.addView(settingsHint("调整字号和整体缩放。", false), wrap());
         settingsInner.addView(toggleRow("震动反馈", haptic, new View.OnClickListener() {
             public void onClick(View v) {
                 haptic = !haptic;
@@ -9268,14 +9435,7 @@ public class MainActivity extends Activity {
                 renderSettings();
             }
         }, false), wrap());
-        TextView hapticHint = new TextView(this);
-        hapticHint.setText("点击时轻微震动。");
-        hapticHint.setTextSize(m.subtitleSize - 2f);
-        hapticHint.setTextColor(C_SUB);
-        hapticHint.setGravity(Gravity.CENTER);
-        hapticHint.setPadding(dp(4), dp(2), dp(4), dp(4));
-        settingsInner.addView(hapticHint, wrap());
-
+        settingsInner.addView(settingsHint("点击时轻微震动。", true), wrap());
         settingsInner.addView(toggleRow("右滑返回", swipeBack, new View.OnClickListener() {
             public void onClick(View v) {
                 swipeBack = !swipeBack;
@@ -9283,39 +9443,64 @@ public class MainActivity extends Activity {
                 renderSettings();
             }
         }), wrap());
-        TextView swipeHint = new TextView(this);
-        swipeHint.setText("从左边缘向右滑，返回上一页。");
-        swipeHint.setTextSize(m.subtitleSize - 2f);
-        swipeHint.setTextColor(C_SUB);
-        swipeHint.setGravity(Gravity.CENTER);
-        swipeHint.setPadding(dp(4), dp(2), dp(4), dp(4));
-        settingsInner.addView(swipeHint, wrap());
+        settingsInner.addView(settingsHint("从左边缘向右滑，返回上一页。", true), wrap());
 
-        settingsInner.addView(sectionHeader("常用"), wrap());
-        TextView upd = new TextView(this);
-        upd.setText("检查更新");
-        upd.setTextSize(m.backSize);
-        upd.setTextColor(C_PRIMARY);
-        upd.setGravity(Gravity.CENTER);
-        upd.setPadding(dp(10), dp(10), dp(10), dp(10));
-        upd.setBackground(clickBg(C_PILL));
-        applyIcon(upd, "ic_update", C_PRIMARY, 15);
-        upd.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                vibrate();
-                checkUpdate(false);
-            }
-        });
-        settingsInner.addView(upd, wrap());
+        settingsInner.addView(sectionHeader("学习"), wrap());
+        settingsInner.addView(settingsEntry("背单词设置", "ic_assignment", C_PRIMARY, true,
+                new View.OnClickListener() {
+                    public void onClick(View v) {
+                        vibrate();
+                        wordSettingBack = S_SETTINGS;
+                        showScreen(S_WORD_SETTINGS);
+                    }
+                }), wrap());
+        settingsInner.addView(settingsHint("词书、每天新词数、发音与助记图。", false), wrap());
+        settingsInner.addView(settingsEntry("首页科目排序", "ic_sort", C_PRIMARY, false,
+                new View.OnClickListener() {
+                    public void onClick(View v) {
+                        vibrate();
+                        showScreen(S_ORDER);
+                    }
+                }), topGap(6));
+        settingsInner.addView(settingsHint("调整主页科目的先后顺序。", false), wrap());
 
-        TextView updHint = new TextView(this);
-        updHint.setText("下载并安装新版本。");
-        updHint.setTextSize(m.subtitleSize - 2f);
-        updHint.setTextColor(C_SUB);
-        updHint.setGravity(Gravity.CENTER);
-        updHint.setPadding(dp(4), dp(3), dp(4), dp(2));
-        settingsInner.addView(updHint, wrap());
+        settingsInner.addView(sectionHeader("问 AI"), wrap());
+        settingsInner.addView(settingsEntry("问 AI", "ic_ai", C_PRIMARY, true,
+                new View.OnClickListener() {
+                    public void onClick(View v) {
+                        vibrate();
+                        showScreen(S_AI_HUB);
+                    }
+                }), wrap());
+        settingsInner.addView(settingsHint("模型、接口与网页版入口。", false), wrap());
 
+        settingsInner.addView(sectionHeader("账号与反馈"), wrap());
+        settingsInner.addView(settingsEntry("个人主页", "ic_person", C_PRIMARY, true,
+                new View.OnClickListener() {
+                    public void onClick(View v) {
+                        vibrate();
+                        showScreen(S_PROFILE);
+                    }
+                }), wrap());
+        settingsInner.addView(settingsHint("昵称、头像与我的反馈。", false), wrap());
+        settingsInner.addView(settingsEntry("反馈与建议", "ic_feedback", C_PRIMARY, false,
+                new View.OnClickListener() {
+                    public void onClick(View v) {
+                        vibrate();
+                        goBack(S_FEEDBACK);
+                    }
+                }), topGap(6));
+        settingsInner.addView(settingsHint("提交问题或建议，需要 GitHub 账号。", false), wrap());
+
+        settingsInner.addView(sectionHeader("更新与维护"), wrap());
+        settingsInner.addView(settingsEntry("检查更新", "ic_update", C_PRIMARY, false,
+                new View.OnClickListener() {
+                    public void onClick(View v) {
+                        vibrate();
+                        checkUpdate(false);
+                    }
+                }), wrap());
+        settingsInner.addView(settingsHint("下载并安装新版本。", false), wrap());
         // 测试通道：默认关。关着时查 /releases/latest，服务端就不返回预发布，
         // 普通用户永远看不到测试包；只有自己开这一项，才把列表里的预发布也算进更新。
         settingsInner.addView(toggleRow("接收测试版", betaChannel, new View.OnClickListener() {
@@ -9325,107 +9510,16 @@ public class MainActivity extends Activity {
                 renderSettings();
             }
         }), wrap());
-        TextView betaHint = new TextView(this);
-        betaHint.setText("收到预发布版本，自测用。");
-        betaHint.setTextSize(m.subtitleSize - 2f);
-        betaHint.setTextColor(C_SUB);
-        betaHint.setGravity(Gravity.CENTER);
-        betaHint.setPadding(dp(4), dp(2), dp(4), dp(4));
-        settingsInner.addView(betaHint, wrap());
-
-        TextView fbEntry = new TextView(this);
-        fbEntry.setText("反馈与建议");
-        fbEntry.setTextSize(m.backSize);
-        fbEntry.setTextColor(C_PRIMARY);
-        fbEntry.setGravity(Gravity.CENTER);
-        fbEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
-        fbEntry.setBackground(clickBg(C_PILL));
-        applyIcon(fbEntry, "ic_feedback", C_PRIMARY, 15);
-        fbEntry.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                vibrate();
-                goBack(S_FEEDBACK);
-            }
-        });
-        LinearLayout.LayoutParams fbLp = wrap();
-        fbLp.topMargin = dp(6);
-        settingsInner.addView(fbEntry, fbLp);
-        TextView fbHint = new TextView(this);
-        fbHint.setText("提交问题或建议，需要 GitHub 账号。");
-        fbHint.setTextSize(m.subtitleSize - 2f);
-        fbHint.setTextColor(C_SUB);
-        fbHint.setGravity(Gravity.CENTER);
-        fbHint.setPadding(dp(4), dp(3), dp(4), dp(2));
-        settingsInner.addView(fbHint, wrap());
-
-        // 设置主页里「问 AI」只留一个入口，模式切换、两种设置和重新登录都收进子页
-        settingsInner.addView(sectionHeader("问 AI"), wrap());
-        TextView aiEntry = new TextView(this);
-        aiEntry.setText("问 AI");
-        aiEntry.setTextSize(m.backSize);
-        aiEntry.setTypeface(Typeface.DEFAULT_BOLD);
-        aiEntry.setTextColor(C_PRIMARY);
-        aiEntry.setGravity(Gravity.CENTER);
-        aiEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
-        aiEntry.setBackground(clickBg(C_PILL));
-        applyIcon(aiEntry, "ic_ai", C_PRIMARY, 15);
-        aiEntry.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                vibrate();
-                showScreen(S_AI_HUB);
-            }
-        });
-        settingsInner.addView(aiEntry, wrap());
-
-        settingsInner.addView(sectionHeader("其他"), wrap());
-        TextView profEntry = new TextView(this);
-        profEntry.setText("个人主页");
-        profEntry.setTextSize(m.backSize);
-        profEntry.setTypeface(Typeface.DEFAULT_BOLD);
-        profEntry.setTextColor(C_PRIMARY);
-        profEntry.setGravity(Gravity.CENTER);
-        profEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
-        profEntry.setBackground(clickBg(C_PILL));
-        applyIcon(profEntry, "ic_person", C_PRIMARY, 15);
-        profEntry.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                vibrate();
-                showScreen(S_PROFILE);
-            }
-        });
-        settingsInner.addView(profEntry, wrap());
-
-        // 排序单独一页：设置页只留一个入口，不再把 9 行排序堆在这里
-        TextView orderEntry = new TextView(this);
-        orderEntry.setText("首页科目排序");
-        orderEntry.setTextSize(m.backSize);
-        orderEntry.setTextColor(C_PRIMARY);
-        orderEntry.setGravity(Gravity.CENTER);
-        orderEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
-        orderEntry.setBackground(clickBg(C_PILL));
-        applyIcon(orderEntry, "ic_sort", C_PRIMARY, 15);
-        orderEntry.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                vibrate();
-                showScreen(S_ORDER);
-            }
-        });
-        LinearLayout.LayoutParams orderLp = wrap();
-        orderLp.topMargin = dp(6);
-        settingsInner.addView(orderEntry, orderLp);
-
-        TextView orderHint = new TextView(this);
-        orderHint.setText("调整主页科目的先后顺序。");
-        orderHint.setTextSize(m.subtitleSize - 2f);
-        orderHint.setTextColor(C_SUB);
-        orderHint.setGravity(Gravity.CENTER);
-        orderHint.setPadding(dp(4), dp(2), dp(4), dp(4));
-        settingsInner.addView(orderHint, wrap());
-
+        settingsInner.addView(settingsHint("收到预发布版本，自测用。", true), wrap());
+        settingsInner.addView(settingsEntry("清理缓存", "ic_clean", C_PRIMARY, false,
+                new View.OnClickListener() {
+                    public void onClick(View v) {
+                        vibrate();
+                        confirmClearCache();
+                    }
+                }), topGap(8));
+        settingsInner.addView(settingsHint(cacheSizeHint(), false), wrap());
         // 记录日志开关：点击后由 toggleRow 自己震动，这里只处理状态切换。
-        // 上面是排序行（一行挨一行没有外边距），这里要自己留出间隔，否则两块会贴在一起
-        LinearLayout.LayoutParams logLp = wrap();
-        logLp.topMargin = dp(8);
         settingsInner.addView(toggleRow("记录日志", logEnabled, new View.OnClickListener() {
             public void onClick(View v) {
                 if (logEnabled) {
@@ -9436,95 +9530,112 @@ public class MainActivity extends Activity {
                     showLogEnableDialog();
                 }
             }
-        }), logLp);
-        TextView logHint = new TextView(this);
-        logHint.setText("开启后在本机记录运行日志，方便排查问题。");
-        logHint.setTextSize(m.subtitleSize - 2f);
-        logHint.setTextColor(C_SUB);
-        logHint.setGravity(Gravity.CENTER);
-        logHint.setPadding(dp(4), dp(3), dp(4), dp(2));
-        settingsInner.addView(logHint, wrap());
-
-        TextView routeEntry = new TextView(this);
-        routeEntry.setText("重新连接服务器");
-        routeEntry.setTextSize(m.backSize);
-        routeEntry.setTextColor(C_PRIMARY);
-        routeEntry.setGravity(Gravity.CENTER);
-        routeEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
-        routeEntry.setBackground(clickBg(C_PILL));
-        applyIcon(routeEntry, "ic_route", C_PRIMARY, 15);
-        routeEntry.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                vibrate();
-                if (routeHint != null) {
-                    routeHint.setTextColor(C_SUB);
-                    routeHint.setText("正在检测各条线路…");
-                }
-                startRouteProbe(true);
-            }
-        });
-        LinearLayout.LayoutParams rtLp = wrap();
-        rtLp.topMargin = dp(6);
-        settingsInner.addView(routeEntry, rtLp);
-
-        routeHint = new TextView(this);
-        routeHint.setGravity(Gravity.CENTER);
-        routeHint.setTextSize(m.subtitleSize - 2f);
-        routeHint.setTextColor(C_SUB);
-        routeHint.setPadding(dp(4), dp(3), dp(4), dp(2));
+        }), topGap(8));
+        settingsInner.addView(settingsHint("开启后在本机记录运行日志，方便排查问题。", true), wrap());
+        settingsInner.addView(settingsEntry("重新连接服务器", "ic_route", C_PRIMARY, false,
+                new View.OnClickListener() {
+                    public void onClick(View v) {
+                        vibrate();
+                        if (routeHint != null) {
+                            routeHint.setTextColor(C_SUB);
+                            routeHint.setText("正在检测各条线路…");
+                        }
+                        startRouteProbe(true);
+                    }
+                }), topGap(8));
+        routeHint = settingsHint("", false);
         settingsInner.addView(routeHint, wrap());
         refreshRouteHint();
 
         settingsInner.addView(sectionHeader("关于"), wrap());
-        TextView aboutEntry = new TextView(this);
-        aboutEntry.setText("关于本应用");
-        aboutEntry.setTextSize(m.backSize);
-        aboutEntry.setTypeface(Typeface.DEFAULT_BOLD);
-        aboutEntry.setTextColor(C_PRIMARY);
-        aboutEntry.setGravity(Gravity.CENTER);
-        aboutEntry.setPadding(dp(10), dp(10), dp(10), dp(10));
-        aboutEntry.setBackground(clickBg(C_PILL));
-        applyIcon(aboutEntry, "ic_info", C_PRIMARY, 15);
-        aboutEntry.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                vibrate();
-                showScreen(S_ABOUT);
-            }
-        });
-        settingsInner.addView(aboutEntry, wrap());
-        TextView aboutHint = new TextView(this);
-        aboutHint.setText("版本、更新日志与感谢名单。");
-        aboutHint.setTextSize(m.subtitleSize - 2f);
-        aboutHint.setTextColor(C_SUB);
-        aboutHint.setGravity(Gravity.CENTER);
-        aboutHint.setPadding(dp(4), dp(3), dp(4), dp(2));
-        settingsInner.addView(aboutHint, wrap());
+        settingsInner.addView(settingsEntry("关于本应用", "ic_info", C_PRIMARY, true,
+                new View.OnClickListener() {
+                    public void onClick(View v) {
+                        vibrate();
+                        showScreen(S_ABOUT);
+                    }
+                }), wrap());
+        settingsInner.addView(settingsHint("版本、更新日志与感谢名单。", false), wrap());
+        // 会清东西的操作单独放最后，不和「关于」挤在一起
+        settingsInner.addView(settingsEntry("恢复默认设置", null, 0xFFFFB74D, false,
+                new View.OnClickListener() {
+                    public void onClick(View v) {
+                        vibrate();
+                        // 误触代价太大（以前一点就直接执行，还连收藏一起清掉），先确认
+                        confirmAction("恢复默认设置？",
+                                "字号、缩放、震动、右滑返回和科目顺序回到默认。收藏、浏览记录、每日一句和登录都保留。",
+                                "确认恢复", 0xFFE57373, new Runnable() {
+                                    public void run() { resetSettingsToDefault(); }
+                                });
+                    }
+                }), topGap(12));
 
-        TextView reset = new TextView(this);
-        reset.setText("恢复默认设置");
-        reset.setTextSize(m.backSize);
-        reset.setTextColor(0xFFFFB74D);
-        reset.setGravity(Gravity.CENTER);
-        reset.setPadding(dp(10), dp(10), dp(10), dp(10));
-        reset.setBackground(clickBg(C_PILL));
-        reset.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                vibrate();
-                // 误触代价太大（以前一点就直接执行，还连收藏一起清掉），先确认
-                confirmAction("恢复默认设置？",
-                        "字号、缩放、震动、右滑返回和科目顺序回到默认。收藏、浏览记录、每日一句和登录都保留。",
-                        "确认恢复", 0xFFE57373, new Runnable() {
-                            public void run() { resetSettingsToDefault(); }
-                        });
-            }
-        });
-        LinearLayout.LayoutParams rlp = wrap();
-        rlp.topMargin = dp(12);
-        settingsInner.addView(reset, rlp);
         if (overDist() > 0) settingsInner.addView(makeScrollSpacer());
         if (keepY >= 0) scrollToY(settingsScroll, keepY);   // 重绘：回到原来的位置
         else scrollToTop(settingsScroll);                   // 首次进入：贴顶
     }
+
+    // ---- 清理缓存 ----
+    // 只清发音和助记图（这两样都能重新下），词书正文、.idx、.prog 和收藏一律不碰。
+
+    private long wordCacheSize() {
+        return dirSize(voiceDir()) + dirSize(picDir());
+    }
+
+    private long dirSize(File d) {
+        if (d == null || !d.isDirectory()) return 0L;
+        File[] fs = d.listFiles();
+        if (fs == null) return 0L;
+        long n = 0L;
+        for (File f : fs) n += f.isDirectory() ? dirSize(f) : f.length();
+        return n;
+    }
+
+    private static String sizeText(long b) {
+        if (b >= 1024L * 1024L) return String.format(java.util.Locale.US, "%.1f MB", b / 1048576f);
+        if (b >= 1024L) return (b / 1024L) + " KB";
+        return b + " B";
+    }
+
+    /** 设置页那行小字：现在占多少。 */
+    private String cacheSizeHint() {
+        long n = wordCacheSize();
+        return n > 0 ? "发音和助记图缓存，共 " + sizeText(n) + "。"
+                : "发音和助记图缓存，暂时是空的。";
+    }
+
+    private void confirmClearCache() {
+        final long n = wordCacheSize();
+        if (n <= 0) { toast("没有可清理的缓存"); return; }
+        confirmAction("清理缓存？",
+                "发音和助记图缓存共 " + sizeText(n) + "，清掉之后再用到会重新下载。词书和背诵记录不受影响。",
+                "确认清理", 0xFFFFB74D, new Runnable() {
+                    public void run() { clearWordCaches(); }
+                });
+    }
+
+    private void clearWordCaches() {
+        long before = wordCacheSize();
+        stopVoice();                 // 正在播的先停，否则文件可能被占用
+        clearDir(voiceDir());
+        clearDir(picDir());
+        wPicBm = null;               // 当前词的助记图也在内存里，一起放掉
+        wPicUrl = null;
+        toast(before > 0 ? "已清理 " + sizeText(before) : "没有可清理的缓存");
+        renderSettings();
+    }
+
+    /** 删目录里的文件，目录本身留着（下次写入不用重建）。 */
+    private void clearDir(File d) {
+        if (d == null || !d.isDirectory()) return;
+        File[] fs = d.listFiles();
+        if (fs == null) return;
+        for (File f : fs) {
+            if (f.isDirectory()) clearDir(f);
+            else deleteQuietly(f);
+        }
+    }
+
 
     /** 「恢复默认设置」：只重置设置类键值，收藏/历史/每日一句/登录这些用户数据一律不动。
      *  以前是 prefs.edit().clear()，一点就把收藏和登录一起清了（用户反馈「全部东西都没了」）。 */
@@ -9751,6 +9862,11 @@ public class MainActivity extends Activity {
             case S_AI_API_CFG: buildAiApiScreen(); break;
             case S_AI_WEB_CFG: buildAiWebCfgScreen(); break;
             case S_AI_CHAT: buildAiChatScreen(); break;
+            case S_WORD_HOME: buildWordHomeScreen(); break;
+            case S_WORD_STUDY: buildWordStudyScreen(); break;
+            case S_WORD_SEARCH: buildWordSearchScreen(); break;
+            case S_WORD_SETTINGS: buildWordSettingsScreen(); break;
+            case S_WORD_VOCAB: buildWordVocabScreen(); break;
             default: break;
         }
     }
@@ -9758,6 +9874,7 @@ public class MainActivity extends Activity {
     // ================= 页面切换（带动画） =================
     private void showScreen(int s) {
         final int old = screen;
+        if (old == S_WORD_STUDY && s != S_WORD_STUDY) stopVoice();   // 离开学习页就闭嘴
         ensureScreenBuilt(s);     // 懒建的页在这里补上内容，后面的渲染分支才不会拿到空容器
         // 右滑返回：preparePrev 已经把「要退回的那一页」渲染好、摆在离开时的滚动位置并露出来了。
         // 这条路径只做可见性确认，绝不重新 bind / 重新定位，否则列表会被清空重载（闪一下）或弹回顶端。
@@ -9808,7 +9925,8 @@ public class MainActivity extends Activity {
                 searchScreen, feedbackScreen, mineScreen, profileScreen, changelogScreen, aboutScreen,
                 displayScreen, todayScreen, extraScreen, favScreen, histScreen, favSubScreen,
                 dailyScreen, sentScreen, aiWebScreen, aiHubScreen, aiApiScreen, aiWebCfgScreen,
-                aiChatScreen, orderScreen};
+                aiChatScreen, orderScreen, wordHomeScreen, wordStudyScreen, wordSearchScreen,
+                wordSettingsScreen, wordVocabScreen};
         View target = screens[s];
         boolean shown = target.getVisibility() == View.VISIBLE && target.getAlpha() > 0.95f
                 && Math.abs(target.getTranslationX()) < dp(4);
@@ -9890,6 +10008,19 @@ public class MainActivity extends Activity {
         } else if (s == S_ORDER) {
             renderOrder();
             scrollToTop(orderScroll);
+        } else if (s == S_WORD_HOME) {
+            renderWordHome();
+            scrollToTop(wordHomeScroll);
+        } else if (s == S_WORD_STUDY) {
+            // 卡片由 openWordStudy() 里的 nextCard() 负责铺，这里不重画（避免翻面状态被冲掉）
+        } else if (s == S_WORD_SEARCH) {
+            renderWordSearch();
+        } else if (s == S_WORD_VOCAB) {
+            renderWordVocab();
+            scrollToTop(wordVocabScroll);
+        } else if (s == S_WORD_SETTINGS) {
+            renderWordSettings();
+            scrollToTop(wordSettingScroll);
         } else if (s == S_SEARCH) {
             // 关键词没变就不重设数据，返回时列表位置不会跳回顶部
             String q = gSearchBox.getText().toString().trim();
@@ -10122,6 +10253,12 @@ public class MainActivity extends Activity {
         if (screen == S_SENT) return "hist".equals(sentMode) ? S_HIST : S_FAV;
         if (screen == S_AI_WEB) return aiWebBack;
         if (screen == S_AI_CHAT) return aiChatBack;
+        // 单词四屏：主页回它的来处（英语科目或主页），子页回主页
+        if (screen == S_WORD_HOME) return wordHomeBack;
+        if (screen == S_WORD_STUDY) return S_WORD_HOME;
+        if (screen == S_WORD_SEARCH) return wordSearchBack;
+        if (screen == S_WORD_SETTINGS) return wordSettingBack;
+        if (screen == S_WORD_VOCAB) return S_WORD_HOME;
         if (screen == S_AI_HUB) return S_SETTINGS;
         if (screen == S_AI_API_CFG || screen == S_AI_WEB_CFG) return aiCfgBack;
         return -1;
@@ -10153,6 +10290,11 @@ public class MainActivity extends Activity {
             case S_AI_WEB_CFG: return aiWebCfgScreen;
             case S_AI_CHAT: return aiChatScreen;
             case S_ORDER: return orderScreen;
+            case S_WORD_HOME: return wordHomeScreen;
+            case S_WORD_STUDY: return wordStudyScreen;
+            case S_WORD_SEARCH: return wordSearchScreen;
+            case S_WORD_SETTINGS: return wordSettingsScreen;
+            case S_WORD_VOCAB: return wordVocabScreen;
             default: return null;
         }
     }
@@ -10160,6 +10302,18 @@ public class MainActivity extends Activity {
     /** 拖动预览时把下载进度卡重新提到最上层。 */
     private void ensureOverlaysOnTop() {
         if (progBox != null && progBox.getVisibility() == View.VISIBLE) progBox.bringToFront();
+    }
+
+    /** 手势被上层接管时（双指接管、右滑返回），给下面已经收下 ACTION_DOWN 的控件补一个 CANCEL：
+     *  告诉它「这一串触摸作废了」，撤掉还在走的长按 / 双击识别。
+     *  只拦 MOVE 不补 CANCEL 是不够的——控件收不到后续事件，它的长按计时照走，
+     *  滑到一半突然弹出「取消收藏」确认框、按钮长按生效，都是这么来的。 */
+    private void cancelChildGesture() {
+        long now = SystemClock.uptimeMillis();
+        MotionEvent cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0);
+        try { super.dispatchTouchEvent(cancel); }
+        catch (Throwable ignored) { }
+        cancel.recycle();
     }
 
     @Override
@@ -10189,6 +10343,9 @@ public class MainActivity extends Activity {
                     if (screen != S_SUBJECT && swipeX <= zone && dx > dp(16) && dx > dy * 1.5f) {
                         View cur = currentScreenView();
                         if (cur != null) {
+                            // 手势从现在起归返回用：先给起手处那个控件（列表行、按钮）补 CANCEL，
+                            // 撤掉它排着的长按。快照要在 CANCEL 之后拍，免得把按下态画进去。
+                            cancelChildGesture();
                             cur.animate().cancel();
                             boolean ok = preparePrev(cur);
                             swipeActive = true;
@@ -10281,6 +10438,11 @@ public class MainActivity extends Activity {
             case S_AI_WEB_CFG: return aiWebCfgScreen;
             case S_AI_CHAT: return aiChatScreen;
             case S_ORDER: return orderScreen;
+            case S_WORD_HOME: return wordHomeScreen;
+            case S_WORD_STUDY: return wordStudyScreen;
+            case S_WORD_SEARCH: return wordSearchScreen;
+            case S_WORD_SETTINGS: return wordSettingsScreen;
+            case S_WORD_VOCAB: return wordVocabScreen;
             default: return subjectScreen;
         }
     }
@@ -10611,6 +10773,15 @@ public class MainActivity extends Activity {
         aboutInner.addView(logEntry, llp);
 
         aboutInner.addView(sectionHeader("感谢名单"), wrap());
+        // 词库来源与版权说明（用户要求：写在感谢名单里，侵权可联系）
+        TextView dictNote = new TextView(this);
+        dictNote.setText("单词词库来自公开英语词表项目（有道背单词整理版），仅供个人学习使用。"
+                + "若相关词条侵犯了您的权益，请联系 3444140854@qq.com，核实后会立即移除。");
+        dictNote.setTextSize(m.subtitleSize - 3f);
+        dictNote.setTextColor(0xFF6A6A6A);
+        dictNote.setPadding(dp(6), 0, dp(6), dp(6));
+        dictNote.setLineSpacing(dp(1), 1.15f);
+        aboutInner.addView(dictNote, wrap());
         TextView tip = new TextView(this);
         tip.setText("以下朋友提交的反馈被采纳，特此致谢（按采纳数量排序）");
         tip.setGravity(Gravity.CENTER);
@@ -11416,7 +11587,3497 @@ public class MainActivity extends Activity {
         orderScreen.addView(orderScroll, lw());
     }
 
-    /** 画排序页。改顺序只重画这一页，主页靠 markSubjectsDirty 标记，回去时再重建。 */
+    // ================= 单词：词书 / 索引 / 进度 =================
+    // 词书按需下载（原始 zip 存在仓库 dict/ 目录），下载后解压成 JSON Lines，
+    // 另建一份「行偏移索引」。查词时按偏移读那一行，不整本解析——词库再大也不拖慢启动。
+
+    /** 一本词书。words/size 来自内置清单 dict_books.json。 */
+    private static class WordBook {
+        String id, name, file;
+        int words;
+        long size;
+        WordBook(String id, String name, String file, int words, long size) {
+            this.id = id;
+            this.name = name;
+            this.file = file;
+            this.words = words;
+            this.size = size;
+        }
+    }
+
+    private final List<WordBook> wordBooks = new ArrayList<WordBook>();
+    private WordBook curBook;                       // 当前要背的词书
+    private final ArrayList<String> wWords = new ArrayList<String>();   // 词头（按文件行序 = 学习顺序）
+    private final ArrayList<Integer> wOff = new ArrayList<Integer>();   // 每行在 JSON 里的字节偏移
+    private final ArrayList<Integer> wLen = new ArrayList<Integer>();   // 每行字节长度
+    private int[] wSorted;                          // 按词头字母排序后的下标，搜索用
+    private byte[] wProg;                           // 进度：每词 8 字节
+    private boolean wordIdxReady = false;
+    private int wordDailyNew = 10;                  // 每日新词数
+    private static final java.util.regex.Pattern W_HEAD =
+            java.util.regex.Pattern.compile("\"wordHead\"\\s*:\\s*\"([^\"]+)\"");
+    /** buildWordIndex 里按字节找词头用，比正则快得多（不需要整行解码）。 */
+    private static final byte[] HEAD_KEY = ("\"wordHead\"").getBytes();
+
+    private File dictDir() {
+        File d = new File(getFilesDir(), "dict");
+        if (!d.exists()) d.mkdirs();
+        return d;
+    }
+    private File bookJson(String id) { return new File(dictDir(), id + ".json"); }
+    private File bookIdx(String id) { return new File(dictDir(), id + ".idx"); }
+    private File bookProg(String id) { return new File(dictDir(), id + ".prog"); }
+
+    // ================= 单词：发音与助记图 =================
+
+    private android.media.MediaPlayer wPlayer;
+    private int wAutoSpoken = -1;      // 已经自动发音过的词下标，翻面时不再响一次
+    private String wCurHead = "";      // 当前词（展开时再读一遍用）
+
+    // ---- 一期：当天重来池 + 复习统计 ----
+    private int[] wRetry;              // 本轮评过「不认识」的词
+    private int wRetryN;
+    private int wRound = 1;            // 第几轮，最多 3
+    private int wStatDue, wStatFresh;  // 本次开始时的到期数 / 新词数
+    private int wStatNewDone, wStatReviewDone, wStatHard;   // 本次新学 / 复习 / 没记住
+    private int wMode;                                      // 0 混合 / 1 只复习 / 2 生词本
+    private final java.util.HashSet<Integer> wCounted = new java.util.HashSet<Integer>();
+    private Bitmap wPicBm;             // 当前词的助记图（翻面复用，避免每次重解码）
+    private String wPicUrl;
+
+    private File voiceDir() {
+        File d = new File(dictDir(), "voice");
+        if (!d.exists()) d.mkdirs();
+        return d;
+    }
+
+    private File picDir() {
+        File d = new File(dictDir(), "pic");
+        if (!d.exists()) d.mkdirs();
+        return d;
+    }
+
+    /** 有没有网。只用来决定「能不能发音 / 看图」，背单词本身不受影响。 */
+    private boolean online() {
+        try {
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager)
+                    getSystemService(CONNECTIVITY_SERVICE);
+            if (cm == null) return false;
+            android.net.NetworkInfo ni = cm.getActiveNetworkInfo();
+            return ni != null && ni.isConnected();
+        } catch (Throwable e) {
+            return true;      // 状态拿不到就别拦着，让它去试
+        }
+    }
+
+    /** 静音模式：不出喇叭、不自动读。和「自动发音」互斥（打开一个会关掉另一个）。 */
+    private boolean muteOn() { return prefs.getBoolean("word_mute", false); }
+
+    private boolean autoSpeakOn() {
+        return prefs.getBoolean("word_auto_speak", false) && !muteOn();
+    }
+    private boolean showPicOn() { return prefs.getBoolean("word_show_pic", true); }
+    private String accent() { return prefs.getString("word_accent", "us"); }
+
+    /** 缓存文件名：词 + 口音。词里可能有空格、撇号，用 hashCode 避开非法字符。 */
+    private static String voiceKey(String word, int type) {
+        return Integer.toHexString((word.toLowerCase() + "#" + type).hashCode());
+    }
+
+    /** 播一个词的发音：有缓存直接播，没有就下 10 KB 再播。下载在子线程，播放回主线程。 */
+    private void speakWord(final String word) {
+        if (word == null || word.trim().length() == 0) return;
+        if (muteOn()) return;      // 静音模式下任何入口都不出声
+        final int type = "uk".equals(accent()) ? 1 : 2;
+        final File f = new File(voiceDir(), voiceKey(word, type) + ".mp3");
+        if (!online()) {
+            toast("离线模式，发音需要联网");
+            return;
+        }
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    if (!f.exists() || f.length() < 600) {
+                        String q;
+                        try { q = java.net.URLEncoder.encode(word.trim(), "UTF-8"); }
+                        catch (Exception e) { q = word.trim(); }
+                        downToFile("https://dict.youdao.com/dictvoice?audio=" + q
+                                + "&type=" + type, f);
+                        trimCache(voiceDir(), 5 * 1024 * 1024);
+                    }
+                    final File target = f;
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            target.setLastModified(System.currentTimeMillis());   // 当最近使用时间
+                            playVoice(target);
+                        }
+                    });
+                } catch (Throwable e) {
+                    runOnUiThread(new Runnable() {
+                        public void run() { toast("发音加载失败，检查网络"); }
+                    });
+                }
+            }
+        }).start();
+    }
+
+    /** 小文件下载（发音 10 KB、助记图 45 KB），不参与词书下载进度。 */
+    private void downToFile(String url, File out) throws Exception {
+        java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        try {
+            c.setConnectTimeout(8000);
+            c.setReadTimeout(15000);
+            c.setInstanceFollowRedirects(true);
+            c.setRequestProperty("User-Agent", "HZKnowledge-Android");
+            int code = c.getResponseCode();
+            if (code >= 400) throw new Exception("HTTP " + code);
+            InputStream in = c.getInputStream();
+            File tmp = new File(out.getAbsolutePath() + ".part");
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(tmp);
+            byte[] buf = new byte[16 * 1024];
+            int n;
+            while ((n = in.read(buf)) > 0) fos.write(buf, 0, n);
+            fos.flush();
+            fos.close();
+            in.close();
+            if (tmp.length() < 300) { tmp.delete(); throw new Exception("文件不完整"); }
+            if (out.exists()) out.delete();
+            if (!tmp.renameTo(out)) throw new Exception("写入失败");
+        } finally {
+            try { c.disconnect(); } catch (Exception ignored) { }
+        }
+    }
+
+    private void playVoice(File f) {
+        try {
+            stopVoice();
+            wPlayer = new android.media.MediaPlayer();
+            wPlayer.setDataSource(f.getAbsolutePath());
+            wPlayer.setOnCompletionListener(new android.media.MediaPlayer.OnCompletionListener() {
+                public void onCompletion(android.media.MediaPlayer mp) { stopVoice(); }
+            });
+            wPlayer.prepare();
+            wPlayer.start();
+        } catch (Throwable e) {
+            toast("发音播放失败");
+            stopVoice();
+        }
+    }
+
+    /** 停掉并释放播放器。播下一个词前必须调，否则两句会叠在一起。 */
+    private void stopVoice() {
+        if (wPlayer == null) return;
+        try { wPlayer.stop(); } catch (Throwable ignored) { }
+        try { wPlayer.release(); } catch (Throwable ignored) { }
+        wPlayer = null;
+    }
+
+    /** 目录超限就按「最久没用」删到限内。 */
+    private void trimCache(File dir, long limit) {
+        try {
+            File[] fs = dir.listFiles();
+            if (fs == null || fs.length == 0) return;
+            long total = 0;
+            for (File f : fs) total += f.length();
+            if (total <= limit) return;
+            java.util.Arrays.sort(fs, new java.util.Comparator<File>() {
+                public int compare(File a, File b) {
+                    return Long.valueOf(a.lastModified()).compareTo(b.lastModified());
+                }
+            });
+            for (File f : fs) {
+                if (total <= limit) break;
+                long len = f.length();
+                if (f.delete()) total -= len;
+            }
+        } catch (Throwable ignored) { }
+    }
+
+    /** 纯图标按钮用：不补右侧透明占位，图标才会居中（applyIcon 是给「图标+文字」用的）。 */
+    private void applyIconOnly(TextView tv, String name, int color, int sizeDp) {
+        try {
+            int id = getResources().getIdentifier(name, "drawable", getPackageName());
+            if (id == 0) return;
+            Drawable d = getResources().getDrawable(id).mutate();
+            d.setTint(color);
+            int sz = dp(sizeDp);
+            d.setBounds(0, 0, sz, sz);
+            tv.setCompoundDrawables(d, null, null, null);
+        } catch (Throwable ignored) { }
+    }
+
+    /** 按屏幕宽度降采样解码，别把 1000×1000 的图整张塞进内存（手表扛不住）。 */
+    private Bitmap decodeScaled(File f, int maxW) {
+        try {
+            BitmapFactory.Options probe = new BitmapFactory.Options();
+            probe.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(f.getAbsolutePath(), probe);
+            int sample = 1;
+            while (probe.outWidth / (sample * 2) >= maxW) sample *= 2;
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inSampleSize = sample;
+            o.inPreferredConfig = Bitmap.Config.RGB_565;   // 插画用 565 够了，内存省一半
+            return BitmapFactory.decodeFile(f.getAbsolutePath(), o);
+        } catch (Throwable e) {
+            return null;
+        }
+    }
+
+    // ---------- 助记图索引：任何词书都能用 ----------
+
+    private static final String PIC_BASE = "http://ydschool-online.nos.netease.com/";
+    private java.util.HashMap<String, String> picMap;
+
+    /** 词 → 图片地址。第一次用到才读那张表（1162 条 / 78 KB），不影响启动。 */
+    private String picUrlFor(String word) {
+        if (word == null) return "";
+        String k = word.trim().toLowerCase();
+        if (k.length() == 0) return "";
+        if (picMap == null) loadPicMap();
+        if (picMap == null) return "";
+        String rel = picMap.get(k);
+        return (rel == null) ? "" : PIC_BASE + rel;
+    }
+
+    private void loadPicMap() {
+        java.util.HashMap<String, String> m = new java.util.HashMap<String, String>(2048);
+        InputStream in = null;
+        try {
+            in = getAssets().open("word_pics.txt");
+            BufferedReader r = new BufferedReader(new InputStreamReader(in, "UTF-8"));
+            String line;
+            while ((line = r.readLine()) != null) {
+                int t = line.indexOf('\t');
+                if (t <= 0 || t >= line.length() - 1) continue;
+                m.put(line.substring(0, t), line.substring(t + 1));
+            }
+            r.close();
+        } catch (Throwable ignored) {
+            // 表读不到就当没有图，不影响其它功能
+        } finally {
+            try { if (in != null) in.close(); } catch (Exception ignored) { }
+        }
+        picMap = m;
+    }
+
+    /** 卡片里的助记图：先占位，下好了换成真图；点击全屏（复用详情页那套缩放）。 */
+    private void addWordPicture(final String url) {
+        if (url == null || url.length() == 0 || !showPicOn()) return;
+        final File cache = new File(picDir(), Integer.toHexString(url.hashCode()) + ".png");
+
+        final ImageView iv = new ImageView(this);
+        iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        iv.setAdjustViewBounds(true);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0x11FFFFFF);
+        bg.setCornerRadius(dp(10));
+        iv.setBackgroundDrawable(bg);
+        iv.setMinimumHeight(dp(60));
+        iv.setContentDescription("助记图");
+        wCardBox.addView(iv, wrapGap(8));
+
+        final int maxW = Math.max(dp(160),
+                getResources().getDisplayMetrics().widthPixels - dp(60));   // 卡片与页面内边距
+        iv.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                Bitmap bm = decodeScaled(cache, maxW * 2);   // 放大时用两倍宽，清楚些
+                if (bm == null) bm = (Bitmap) iv.getTag();
+                if (bm != null) showFullscreen(bm);
+            }
+        });
+
+        // 翻面会重建整块卡片：同一个词同一张图直接复用上次解好的位图，别重解码一遍
+        if (wPicBm != null && url.equals(wPicUrl)) {
+            iv.setImageBitmap(wPicBm);
+            iv.setTag(wPicBm);
+            return;
+        }
+        // 先看缓存文件：有就直接显示，不联网
+        if (cache.exists()) {
+            Bitmap bm = decodeScaled(cache, maxW);
+            if (bm != null) {
+                wPicBm = bm;
+                wPicUrl = url;
+                iv.setImageBitmap(bm);
+                iv.setTag(bm);
+                return;
+            }
+        }
+        if (!online()) return;      // 离线就不占位了，留个空框更难看
+
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    if (!cache.exists()) {
+                        downToFile(url, cache);
+                        trimCache(picDir(), 20 * 1024 * 1024);
+                    }
+                    final Bitmap bm = decodeScaled(cache, maxW);
+                    if (bm == null) throw new Exception("解码失败");
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            cache.setLastModified(System.currentTimeMillis());
+                            wPicBm = bm;
+                            wPicUrl = url;
+                            iv.setImageBitmap(bm);
+                            iv.setTag(bm);
+                        }
+                    });
+                } catch (Throwable e) {
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            // 失败了就连占位块一起撤掉，别留一个灰框
+                            try { wCardBox.removeView(iv); } catch (Throwable ignored) { }
+                        }
+                    });
+                }
+            }
+        }).start();
+    }
+
+
+    /** 读内置词书清单；再恢复上次选的词书。 */
+    private void loadWordBooks() {
+        if (!wordBooks.isEmpty()) return;
+        try {
+            JSONObject o = readJsonAsset("dict_books.json");
+            JSONArray arr = o.optJSONArray("books");
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject b = arr.optJSONObject(i);
+                if (b == null) continue;
+                wordBooks.add(new WordBook(b.optString("id", ""), b.optString("name", ""),
+                        b.optString("file", ""), b.optInt("words", 0), b.optLong("size", 0)));
+            }
+        } catch (Exception ignored) { }
+        String cur = prefs.getString("word_book", "");
+        curBook = null;
+        for (WordBook b : wordBooks) if (b.id.equals(cur)) curBook = b;
+        wordDailyNew = prefs.getInt("word_daily_new", 10);
+    }
+
+    private boolean bookDownloaded(WordBook b) {
+        return b != null && bookJson(b.id).exists();
+    }
+
+    /** 下载词书：zip 落到临时文件 → 解压 → 建索引 → 删 zip。全程子线程，进度回调刷新设置页。 */
+    private void downloadWordBook(final WordBook b) {
+        if (downloadingBook != null) { toast("正在下载「" + downloadingBook.name + "」，等它完成"); return; }
+        downloadingBook = b;
+        dlActView = null;
+        dlStage = "下载中";
+        downloadPct = 0;
+        renderWordSettings();
+        new Thread(new Runnable() {
+            public void run() {
+                File zip = new File(dictDir(), b.id + ".zip.part");
+                Exception err = null;
+                try {
+                    // 直连 + 镜像逐个试：与更新检查共用同一套镜像表
+                    List<String> urls = new ArrayList<String>();
+                    String path = "https://raw.githubusercontent.com/" + REPO + "/main/dict/" + b.id + ".zip";
+                    urls.add(path);
+                    for (int i = 0; i < MIRRORS.length && i < 3; i++) urls.add(MIRRORS[i] + path);
+                    Exception last = null;
+                    for (String u : urls) {
+                        try {
+                            fetchToFile(u, zip, b.size);
+                            err = null;
+                            break;
+                        } catch (Exception e) {
+                            err = e;
+                            last = e;
+                        }
+                    }
+                    if (err != null) throw (last == null ? err : last);
+                    // 下载 100% 只是把 zip 拉完了，后面解压 + 建索引还有两步，
+                    // 手表上二十来兆的词书要好几秒。不切阶段的话界面一直停在 100%，像卡死。
+                    showDlProgress("解压中", 0);
+                    extractAndIndex(b, zip);
+                    zip.delete();
+                } catch (Exception e) {
+                    err = e;
+                    zip.delete();
+                }
+                final Exception fe = err;
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        downloadingBook = null;
+                        if (fe != null) {
+                            toast("下载失败：" + fe.getMessage());
+                        } else {
+                            toast("「" + b.name + "」已下载");
+                            if (curBook == null) {
+                                curBook = b;
+                                prefs.edit().putString("word_book", b.id).apply();
+                            }
+                            wordIdxReady = false;
+                        }
+                        renderWordSettings();
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private WordBook downloadingBook;
+    /** 下载/解压/整理 三个阶段共用一个百分比，跨线程读，必须 volatile。 */
+    private volatile int downloadPct;
+    /** 当前阶段：「下载中」「解压中」「整理中」——100% 之后还有两步，不标出来就像卡死。 */
+    private volatile String dlStage = "下载中";
+    /** 正在下载那行的进度按钮；有它就只改这几个字，不重画整页（80 行重建很贵）。 */
+    private TextView dlActView;
+
+    /** 带进度的下载。大小已知时按已读数算百分比。 */
+    private void fetchToFile(String url, File out, long expectSize) throws Exception {
+        java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        try {
+            c.setConnectTimeout(15000);
+            c.setReadTimeout(30000);
+            c.setInstanceFollowRedirects(true);
+            c.setRequestProperty("User-Agent", "HZKnowledge-Android");
+            InputStream in = c.getInputStream();
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(out);
+            long total = c.getContentLength() > 0 ? c.getContentLength() : expectSize;
+            long got = 0;
+            byte[] buf = new byte[16 * 1024];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                fos.write(buf, 0, n);
+                got += n;
+                if (total > 0) {
+                    int pct = (int) (got * 100 / total);
+                    if (pct / 5 != downloadPct / 5) showDlProgress("下载中", pct);
+                }
+            }
+            fos.flush();
+            fos.close();
+            in.close();
+        } finally {
+            try { c.disconnect(); } catch (Exception ignored) { }
+        }
+        if (out.length() < 1000) throw new Exception("文件不完整");
+    }
+
+    /** 推进下载进度。只改那一行按钮上的字——renderWordSettings 会重建 80 行，每 5% 重来一次太亏。 */
+    private void showDlProgress(final String stage, final int pct) {
+        dlStage = stage;
+        downloadPct = pct;
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (dlActView != null) dlActView.setText(dlLabel());
+                else renderWordSettings();
+            }
+        });
+    }
+
+    /** 「下载中 45%」「解压中…」「整理中 60%」 */
+    private String dlLabel() {
+        if (downloadPct <= 0) return dlStage + "…";
+        return dlStage + " " + downloadPct + "%";
+    }
+
+    /** 解压 zip 里的 JSON，并建行偏移索引。 */
+    private void extractAndIndex(WordBook b, File zip) throws Exception {
+        File json = bookJson(b.id);
+        java.util.zip.ZipInputStream zin = new java.util.zip.ZipInputStream(
+                new BufferedInputStream(new java.io.FileInputStream(zip)));
+        try {
+            java.util.zip.ZipEntry e = zin.getNextEntry();
+            if (e == null) throw new Exception("压缩包是空的");
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(json);
+            byte[] buf = new byte[32 * 1024];
+            int n;
+            while ((n = zin.read(buf)) > 0) fos.write(buf, 0, n);
+            fos.flush();
+            fos.close();
+        } finally {
+            try { zin.close(); } catch (Exception ignored) { }
+        }
+        buildWordIndex(b, json);
+    }
+
+    /** 扫一遍 JSON 记录每行的字节偏移与词头，写成 <id>.idx。只做一次，之后读索引。
+     *
+     *  这里必须顺序流式扫，不能用 RandomAccessFile.readLine()：
+     *  那个方法是「每次 read() 一个字节」，19 MB 的词书要发近两千万次 native 调用，
+     *  手表上几十秒起步——用户看到的「下载到 100% 又卡很久」主要就是这一步（另一步是解压）。
+     *  改成 64 KB 缓冲顺序读，并且只在字节里找 "wordHead" 那一小段，
+     *  整行的中文释义一个字都不解码（原来每行都要 new 一个 1.5 KB 的 String）。 */
+    private void buildWordIndex(WordBook b, File json) throws Exception {
+        // 用局部集合，不碰成员数组：这个方法跑在下载线程里，而主线程可能正在搜索页读它们。
+        // 下载完成后会把 wordIdxReady 置 false，下次进页面由 ensureWordIndex() 重新读索引。
+        ArrayList<String> words = new ArrayList<String>();
+        ArrayList<Integer> offs = new ArrayList<Integer>();
+        ArrayList<Integer> lens = new ArrayList<Integer>();
+
+        final long total = json.length();
+        final byte[] buf = new byte[64 * 1024];
+        final byte[] line = new byte[64 * 1024];      // 单行上限；超长行只用于取词头，多余的截掉
+        int lineLen = 0;
+        long lineStart = 0;                          // 当前行在文件里的起始字节位置
+        long pos = 0;                                // 已读总字节
+        int last5 = -1;
+
+        InputStream raw = new BufferedInputStream(new java.io.FileInputStream(json), 64 * 1024);
+        try {
+            int n;
+            while ((n = raw.read(buf)) > 0) {
+                for (int i = 0; i < n; i++) {
+                    byte c = buf[i];
+                    if (c == '\n') {
+                        String w = headOf(line, lineLen);
+                        if (w != null) {
+                            words.add(w);
+                            offs.add((int) lineStart);
+                            lens.add((int) (pos + i - lineStart + 1));   // 含换行符，与 readLine 的取值一致
+                        }
+                        lineStart = pos + i + 1;
+                        lineLen = 0;
+                    } else if (lineLen < line.length) {
+                        line[lineLen++] = c;
+                    }
+                }
+                pos += n;
+                // 「整理中」按已读字节报百分比：这一步是 100% 之后最长的，必须有反馈
+                if (total > 0) {
+                    int pct = (int) (pos * 100 / total);
+                    if (pct / 5 != last5) {
+                        last5 = pct / 5;
+                        showDlProgress("整理中", pct);
+                    }
+                }
+            }
+            // 最后一行可能没有换行符
+            if (lineLen > 0) {
+                String w = headOf(line, lineLen);
+                if (w != null) {
+                    words.add(w);
+                    offs.add((int) lineStart);
+                    lens.add((int) (pos - lineStart));
+                }
+            }
+        } finally {
+            try { raw.close(); } catch (Exception ignored) { }
+        }
+
+        // 写索引：magic + 条数 + 每条（词、偏移、长度）
+        DataOutputStream out = new DataOutputStream(new BufferedOutputStream(
+                new java.io.FileOutputStream(bookIdx(b.id))));
+        try {
+            out.writeInt(0x48575A31);   // "HWZ1"
+            out.writeInt(words.size());
+            for (int i = 0; i < words.size(); i++) {
+                wStr(out, words.get(i));
+                out.writeInt(offs.get(i));
+                out.writeInt(lens.get(i));
+            }
+            out.flush();
+        } finally {
+            out.close();
+        }
+    }
+
+    /** 一行 JSON 的字节里取 "wordHead" 的值；没有就返回 null。
+     *  词头是纯英文（可能带空格、连字符、撇号），按 ASCII 直接切出来，
+     *  不像原来那样把整行（含中文释义、例句）都解码成 String。 */
+    private static String headOf(byte[] line, int len) {
+        for (int i = 0; i + HEAD_KEY.length <= len; i++) {
+            int k = 0;
+            while (k < HEAD_KEY.length && line[i + k] == HEAD_KEY[k]) k++;
+            if (k != HEAD_KEY.length) continue;
+            int j = i + HEAD_KEY.length;
+            while (j < len && (line[j] == ' ' || line[j] == '\t')) j++;
+            if (j >= len || line[j] != ':') continue;
+            j++;
+            while (j < len && (line[j] == ' ' || line[j] == '\t')) j++;
+            if (j >= len || line[j] != '"') continue;
+            j++;
+            int s = j;
+            while (j < len && line[j] != '"') j++;
+            if (j > s) return new String(line, s, j - s);   // 词头是 ASCII，默认字符集即可
+        }
+        return null;
+    }
+
+    /** 载入当前词书的索引和进度（进背单词页/搜索页时调，一次约 50ms）。 */
+    private boolean ensureWordIndex() {
+        if (wordIdxReady) return true;
+        loadWordBooks();
+        if (curBook == null || !bookDownloaded(curBook)) return false;
+        wWords.clear();
+        wOff.clear();
+        wLen.clear();
+        try {
+            DataInputStream in = new DataInputStream(new BufferedInputStream(
+                    new java.io.FileInputStream(bookIdx(curBook.id))));
+            try {
+                if (in.readInt() != 0x48575A31) throw new Exception("索引格式不对");
+                int n = in.readInt();
+                for (int i = 0; i < n; i++) {
+                    wWords.add(rStr(in));
+                    wOff.add(in.readInt());
+                    wLen.add(in.readInt());
+                }
+            } finally {
+                in.close();
+            }
+        } catch (Exception e) {
+            toast("索引读取失败，请重新下载这本词书");
+            return false;
+        }
+        // 排序下标：搜索时按字母序二分
+        int n = wWords.size();
+        Integer[] idx = new Integer[n];
+        for (int i = 0; i < n; i++) idx[i] = i;
+        java.util.Arrays.sort(idx, new java.util.Comparator<Integer>() {
+            public int compare(Integer a, Integer b) {
+                return wWords.get(a).compareToIgnoreCase(wWords.get(b));
+            }
+        });
+        wSorted = new int[n];
+        for (int i = 0; i < n; i++) wSorted[i] = idx[i];
+        // 进度：每词 8 字节，首次全 0
+        byte[] p = new byte[n * 8];
+        File pf = bookProg(curBook.id);
+        if (pf.exists() && pf.length() == p.length) {
+            try {
+                java.io.DataInputStream pi = new java.io.DataInputStream(
+                        new java.io.BufferedInputStream(new java.io.FileInputStream(pf)));
+                try { pi.readFully(p); } catch (Exception ignored) { }
+                try { pi.close(); } catch (Exception ignored) { }
+            } catch (Exception ignored) { }
+        }
+        wProg = p;
+        wordIdxReady = true;
+        seedTestReviewWords();
+        return true;
+    }
+
+    /** 测试期预置几个复习词，方便试四选一和复习入口。
+     *  只在 versionName 带 pre 的包里执行；正式版反而会把当初种下的进度清零。 */
+    private void seedTestReviewWords() {
+        if (curBook == null || wProg == null) return;
+        String key = "seed_" + curBook.id;
+        String raw = prefs.getString(key, "");
+        boolean pre = appVersion().indexOf("pre") >= 0;
+
+        if (!pre) {
+            // 正式版：清掉测试期种下的假进度，别让用户看到凭空的复习词
+            if (raw.length() > 0) {
+                for (String x : raw.split(",")) {
+                    try {
+                        int i = Integer.parseInt(x.trim());
+                        if (i < 0 || i * 8 + 7 >= wProg.length) continue;
+                        setProgShort(i, 1, 0);
+                        setProgShort(i, 3, 0);
+                        setProgByte(i, 5, 0);
+                        setProgByte(i, 6, 0);
+                    } catch (Exception ignored) { }
+                }
+                saveWordProgress();
+                prefs.edit().remove(key).apply();
+                log("WORD", "正式版：已清掉测试期预置的复习词");
+            }
+            return;
+        }
+
+        if (raw.length() > 0) return;          // 这本已经种过，别每次进页面都重来
+        int n = wWords.size();
+        if (n < 40) return;
+
+        int today = todayDay();
+        StringBuilder ids = new StringBuilder();
+        int count = 0;
+        for (int i = 20; i < n && count < 6; i++) {
+            if (progShort(i, 1) != 0 || progByte(i, 5) != 0) continue;   // 不覆盖真实进度
+            setProgShort(i, 1, 2 + count);        // 间隔 2~7 天
+            setProgShort(i, 3, today);            // 今天到期
+            setProgByte(i, 5, 2);                 // 当成背过两次
+            setProgByte(i, 6, count >= 4 ? 2 : 0);// 后两个记成「忘过两次」，顺便能测生词本
+            ids.append(i).append(',');
+            count++;
+        }
+        if (count > 0) {
+            saveWordProgress();
+            prefs.edit().putString(key, ids.toString()).apply();
+            log("WORD", "测试包：预置 " + count + " 个复习词（正式版会自动清掉）");
+        } else {
+            prefs.edit().putString(key, "").apply();
+        }
+    }
+
+    private void saveWordProgress() {
+        if (wProg == null || curBook == null) return;
+        try {
+            java.io.FileOutputStream fo = new java.io.FileOutputStream(bookProg(curBook.id));
+            fo.write(wProg);
+            fo.flush();
+            fo.close();
+        } catch (Exception ignored) { }
+    }
+
+    /** 读第 i 个词的完整 JSON（按偏移 seek 一行）。 */
+    private JSONObject readWordLine(int i) {
+        try {
+            RandomAccessFile rf = new RandomAccessFile(bookJson(curBook.id), "r");
+            try {
+                byte[] b = new byte[wLen.get(i)];
+                rf.seek(wOff.get(i));
+                rf.readFully(b);
+                String s = new String(b, "UTF-8").trim();
+                return new JSONObject(s);
+            } finally {
+                rf.close();
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // ---- SM-2 ----
+    private int progByte(int i, int k) { return wProg[i * 8 + k] & 0xFF; }
+    private void setProgByte(int i, int k, int v) { wProg[i * 8 + k] = (byte) v; }
+    private int progShort(int i, int k) {
+        return ((wProg[i * 8 + k] & 0xFF) << 8) | (wProg[i * 8 + k + 1] & 0xFF);
+    }
+    private void setProgShort(int i, int k, int v) {
+        wProg[i * 8 + k] = (byte) ((v >> 8) & 0xFF);
+        wProg[i * 8 + k + 1] = (byte) (v & 0xFF);
+    }
+    private int todayDay() {
+        return (int) (System.currentTimeMillis() / 86400000L);
+    }
+
+
+    // ================= 单词：设置页（词书管理） =================
+
+    // ================= 单词：生词本 =================
+
+    private void buildWordVocabScreen() {
+        wordVocabScroll = new OverScrollScrollView(this);
+        wordVocabScroll.setVerticalScrollBarEnabled(false);
+        roundPadScroll(wordVocabScroll);
+        wordVocabInner = new LinearLayout(this);
+        wordVocabInner.setOrientation(LinearLayout.VERTICAL);
+        wordVocabScroll.addView(wordVocabInner);
+        wordVocabScreen.addView(wordVocabScroll, lw());
+    }
+
+    /** 忘过 2 次以上的词。清一色从进度第 6 字节读，不另存列表。 */
+    private ArrayList<Integer> vocabIndexes() {
+        ArrayList<Integer> list = new ArrayList<Integer>();
+        if (wWords == null) return list;
+        for (int i = 0; i < wWords.size(); i++) if (progByte(i, 6) >= 2) list.add(i);
+        return list;
+    }
+
+    private void renderWordVocab() {
+        wordVocabInner.removeAllViews();
+        wordVocabInner.addView(makeBack("‹ 返回", new View.OnClickListener() {
+            public void onClick(View v) { goBack(backTarget()); }
+        }), wrapM());
+        wordVocabInner.addView(pageTitle("生词本"), wrap());
+
+        if (!ensureWordIndex()) {
+            wordVocabInner.addView(grayTip("词书还没准备好，先去设置里下载一本。"), wrap());
+            return;
+        }
+        final ArrayList<Integer> list = vocabIndexes();
+        if (list.isEmpty()) {
+            wordVocabInner.addView(grayTip("还没有生词。背词时连着两次点「不认识」，那个词就会收到这里。"), wrap());
+            padInner(wordVocabInner);
+            return;
+        }
+
+        wordVocabInner.addView(grayTip("忘过两次以上的词会收到这里，刷会了自动移出。共 "
+                + list.size() + " 个。"), wrap());
+
+        TextView brush = wordBtn("刷这些词（" + list.size() + " 个）", true);
+        brush.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                openWordStudy(2);
+            }
+        });
+        wordVocabInner.addView(brush, wrapGap(8));
+
+        for (int i = 0; i < list.size(); i++) {
+            wordVocabInner.addView(vocabRow(list.get(i)), wrapGap(4));
+        }
+        padInner(wordVocabInner);
+    }
+
+    /** 生词一行：左边词 + 第一条释义，右边忘了几次。点开看完整词条。 */
+    private View vocabRow(final int idx) {
+        JSONObject o = readWordLine(idx);
+        JSONObject w = (o == null) ? null : o.optJSONObject("content");
+        if (w != null) w = w.optJSONObject("word");
+        JSONObject cc = (w == null) ? null : w.optJSONObject("content");
+        String head = (w == null) ? ("#" + idx) : w.optString("wordHead", "#" + idx);
+
+        String mean = "";
+        JSONArray tr = (cc == null) ? null : cc.optJSONArray("trans");
+        if (tr != null && tr.length() > 0) {
+            JSONObject t = tr.optJSONObject(0);
+            if (t != null) mean = (t.optString("pos", "") + " " + t.optString("tranCn", "")).trim();
+        }
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), dp(9), dp(12), dp(9));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(C_PILL);
+        bg.setCornerRadius(dp(12));
+        row.setBackgroundDrawable(bg);
+
+        LinearLayout left = new LinearLayout(this);
+        left.setOrientation(LinearLayout.VERTICAL);
+
+        TextView t1 = new TextView(this);
+        t1.setText(head);
+        t1.setTextSize(m.backSize - 1f);
+        t1.setTypeface(Typeface.DEFAULT_BOLD);
+        t1.setTextColor(C_TEXT);
+        left.addView(t1);
+
+        if (mean.length() > 0) {
+            TextView t2 = new TextView(this);
+            t2.setText(mean);
+            t2.setTextSize(m.subtitleSize - 2f);
+            t2.setTextColor(C_SUB);
+            t2.setSingleLine(true);
+            t2.setEllipsize(TextUtils.TruncateAt.END);
+            left.addView(t2);
+        }
+        row.addView(left, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView cnt = new TextView(this);
+        cnt.setText("忘 " + progByte(idx, 6) + " 次");
+        cnt.setTextSize(m.subtitleSize - 2.5f);
+        cnt.setTextColor(0xFFFF8A80);
+        row.addView(cnt);
+
+        row.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                showWordDetail(idx);
+            }
+        });
+        return row;
+    }
+
+    private void buildWordSettingsScreen() {
+        wordSettingScroll = new OverScrollScrollView(this);
+        wordSettingScroll.setVerticalScrollBarEnabled(false);
+        roundPadScroll(wordSettingScroll);
+        wordSettingInner = new LinearLayout(this);
+        wordSettingInner.setOrientation(LinearLayout.VERTICAL);
+        wordSettingScroll.addView(wordSettingInner);
+        wordSettingsScreen.addView(wordSettingScroll, lw());
+    }
+
+    /** 词书列表 + 每日新词设置。下载进度回调也会调它重画。 */
+    /** 组内分隔线：1px，左右留出圆角的内边距。 */
+    private View rowDivider() {
+        View v = new View(this);
+        v.setBackgroundColor(0x1FFFFFFF);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, Math.max(1, dp(0.5f)));
+        lp.leftMargin = dp(12);
+        lp.rightMargin = dp(12);
+        v.setLayoutParams(lp);
+        return v;
+    }
+
+    /** 组内开关行：外层已经有圆角底了，这里不画行背景，其余与主设置页一致。 */
+    private View toggleRowFlat(String label, final String key, final boolean def, final Runnable after) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(10), dp(8), dp(10), dp(8));
+
+        TextView left = new TextView(this);
+        left.setText(label);
+        left.setTextSize(m.backSize);
+        left.setTextColor(C_TEXT);
+        row.addView(left, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        final TextView right = new TextView(this);
+        final boolean on = prefs.getBoolean(key, def);
+        right.setText(on ? "开" : "关");
+        right.setTextSize(m.backSize);
+        right.setTypeface(Typeface.DEFAULT_BOLD);
+        right.setTextColor(on ? C_PRIMARY : C_SUB);
+        right.setGravity(Gravity.CENTER);
+        right.setPadding(dp(14), dp(3), dp(14), dp(3));
+        right.setBackgroundDrawable(pill(on ? 0xFF14384A : C_PILL));
+        row.addView(right);
+
+        row.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                boolean now = !prefs.getBoolean(key, def);
+                prefs.edit().putBoolean(key, now).apply();
+                right.setText(now ? "开" : "关");
+                right.setTextColor(now ? C_PRIMARY : C_SUB);
+                right.setBackgroundDrawable(pill(now ? 0xFF14384A : C_PILL));
+                if (after != null) after.run();
+            }
+        });
+        return row;
+    }
+
+    /** 发音口音：右侧两个胶囊「美音 / 英音」，选中的高亮，直接点选，不用轮着切换。 */
+    private View accentRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(10), dp(8), dp(10), dp(8));
+
+        TextView left = new TextView(this);
+        left.setText("发音口音");
+        left.setTextSize(m.backSize);
+        left.setTextColor(C_TEXT);
+        row.addView(left, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        LinearLayout seg = new LinearLayout(this);
+        seg.setOrientation(LinearLayout.HORIZONTAL);
+        final String[] codes = {"us", "uk"};
+        final String[] labels = {"美音", "英音"};
+        for (int i = 0; i < codes.length; i++) {
+            final String code = codes[i];
+            boolean on = code.equals(accent());
+            TextView c = new TextView(this);
+            c.setText(labels[i]);
+            c.setTextSize(m.backSize);
+            c.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            c.setTextColor(on ? C_PRIMARY : C_SUB);
+            c.setGravity(Gravity.CENTER);
+            c.setPadding(dp(10), dp(3), dp(10), dp(3));
+            c.setBackgroundDrawable(pill(on ? 0xFF14384A : C_PILL));
+            c.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    vibrate();
+                    if (code.equals(accent())) return;      // 点的就是当前这项
+                    prefs.edit().putString("word_accent", code).apply();
+                    renderWordSettings();
+                }
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            if (i > 0) lp.leftMargin = dp(4);
+            seg.addView(c, lp);
+        }
+        row.addView(seg);
+        return row;
+    }
+
+    /** 组内的左标签 + 右值行（右值也是胶囊，和开关的「开/关」对齐）。 */
+    private View valueRowFlat(String label, String value, View.OnClickListener click) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(10), dp(8), dp(10), dp(8));
+
+        TextView left = new TextView(this);
+        left.setText(label);
+        left.setTextSize(m.backSize);
+        left.setTextColor(C_TEXT);
+        row.addView(left, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView right = new TextView(this);
+        right.setText(value);
+        right.setTextSize(m.backSize);
+        right.setTypeface(Typeface.DEFAULT_BOLD);
+        right.setTextColor(C_PRIMARY);
+        right.setGravity(Gravity.CENTER);
+        right.setPadding(dp(14), dp(3), dp(14), dp(3));
+        right.setBackgroundDrawable(pill(C_PILL));
+        row.addView(right);
+
+        if (click != null) row.setOnClickListener(click);
+        return row;
+    }
+
+    /** 左标签 + 右值（点一下切换）。和开关行同一套排版。 */
+    private View valueRow(String label, String value, View.OnClickListener click) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(10), dp(8), dp(10), dp(8));
+        row.setBackgroundDrawable(pill(C_CARD));
+
+        TextView left = new TextView(this);
+        left.setText(label);
+        left.setTextSize(m.backSize);
+        left.setTextColor(C_TEXT);
+        row.addView(left, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView right = new TextView(this);
+        right.setText(value);
+        right.setTextSize(m.backSize);
+        right.setTypeface(Typeface.DEFAULT_BOLD);
+        right.setTextColor(C_PRIMARY);
+        right.setGravity(Gravity.CENTER);
+        right.setPadding(dp(14), dp(3), dp(14), dp(3));
+        right.setBackgroundDrawable(pill(C_PILL));
+        row.addView(right);
+
+        if (click != null) row.setOnClickListener(click);
+        return row;
+    }
+
+    /** 设置页开关行：左标签右「开/关」，点了就地切，不重画整页。 */
+    private View toggleRow(String label, final String key, final boolean def) {
+        return toggleRow(label, key, def, null);
+    }
+
+    /** after 在切换完成后执行（用于互斥联动、重画等）。
+     *  样式与主设置页的开关完全一致：卡片底 + 右侧胶囊标签 + backSize 字号。 */
+    private View toggleRow(String label, final String key, final boolean def, final Runnable after) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(10), dp(8), dp(10), dp(8));
+        row.setBackgroundDrawable(pill(C_CARD));
+
+        TextView left = new TextView(this);
+        left.setText(label);
+        left.setTextSize(m.backSize);
+        left.setTextColor(C_TEXT);
+        row.addView(left, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        final TextView right = new TextView(this);
+        final boolean on = prefs.getBoolean(key, def);
+        right.setText(on ? "开" : "关");
+        right.setTextSize(m.backSize);
+        right.setTypeface(Typeface.DEFAULT_BOLD);
+        right.setTextColor(on ? C_PRIMARY : C_SUB);
+        right.setGravity(Gravity.CENTER);
+        right.setPadding(dp(14), dp(3), dp(14), dp(3));
+        right.setBackgroundDrawable(pill(on ? 0xFF14384A : C_PILL));
+        row.addView(right);
+
+        row.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                boolean now = !prefs.getBoolean(key, def);
+                prefs.edit().putBoolean(key, now).apply();
+                right.setText(now ? "开" : "关");
+                right.setTextColor(now ? C_PRIMARY : C_SUB);
+                right.setBackgroundDrawable(pill(now ? 0xFF14384A : C_PILL));
+                if (after != null) after.run();
+            }
+        });
+        return row;
+    }
+
+    private void renderWordSettings() {
+        dlActView = null;         // 整页重画了，旧引用作废；wordBookRow 里会重新挂上
+        loadWordBooks();
+        wordSettingInner.removeAllViews();
+        wordSettingInner.addView(makeBack("‹ 返回", new View.OnClickListener() {
+            public void onClick(View v) { goBack(wordSettingBack); }
+        }), wrapM());
+        wordSettingInner.addView(pageTitle("背单词设置"), wrap());
+
+        // 我的词书：已下载的都在这里，包括正在用的那本（也能删）
+        wordSettingInner.addView(sectionHeader("我的词书"), wrap());
+        int readyN = 0;
+        for (WordBook b : wordBooks) {
+            if (!bookDownloaded(b)) continue;
+            wordSettingInner.addView(wordBookRow(b), wrapGap(4));
+            readyN++;
+        }
+        if (readyN == 0) {
+            wordSettingInner.addView(grayTip("还没有下载词书。点下面的「下载词书」挑一本开始。"), wrap());
+        }
+
+        // 下载词书：单独一个按钮，点开才列可下载的，不占版面
+        TextView dlBtn = wordBtn(wordShowDownload ? "收起可下载词书" : "下载词书", true);
+        dlBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                wordShowDownload = !wordShowDownload;
+                renderWordSettings();
+            }
+        });
+        wordSettingInner.addView(dlBtn, wrapGap(4));
+
+        if (wordShowDownload) {
+            int free = 0;
+            for (WordBook b : wordBooks) {
+                if (bookDownloaded(b)) continue;
+                wordSettingInner.addView(wordBookRow(b), wrapGap(4));
+                free++;
+            }
+            if (free == 0) {
+                wordSettingInner.addView(grayTip("全部词书都已经下载了。"), wrap());
+            }
+        }
+        wordSettingInner.addView(grayTip("词库来自公开词表，仅供个人学习使用。"), wrap());
+
+        // 学习辅助：发音与助记图
+        wordSettingInner.addView(sectionHeader("学习辅助"), wrap());
+
+        // 自动发音 / 静音模式 / 发音口音 是一组：共用一个圆角底、中间插分隔线，
+        // 而不是三张各自独立的胶囊（那样看着像三件不相干的事）。
+        LinearLayout voiceGroup = new LinearLayout(this);
+        voiceGroup.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable vbg = new GradientDrawable();
+        vbg.setColor(C_CARD);
+        vbg.setCornerRadius(dp(12));
+        voiceGroup.setBackgroundDrawable(vbg);
+
+        voiceGroup.addView(toggleRowFlat("自动发音", "word_auto_speak", false, new Runnable() {
+            public void run() {
+                // 和静音互斥：开了自动发音就把静音关掉
+                if (prefs.getBoolean("word_auto_speak", false)) {
+                    prefs.edit().putBoolean("word_mute", false).apply();
+                }
+                renderWordSettings();
+            }
+        }));
+        voiceGroup.addView(rowDivider());
+        voiceGroup.addView(toggleRowFlat("静音模式", "word_mute", false, new Runnable() {
+            public void run() {
+                if (prefs.getBoolean("word_mute", false)) {
+                    prefs.edit().putBoolean("word_auto_speak", false).apply();
+                    stopVoice();          // 正在念的立刻停
+                }
+                renderWordSettings();
+            }
+        }));
+        voiceGroup.addView(rowDivider());
+        voiceGroup.addView(accentRow());
+        wordSettingInner.addView(voiceGroup, wrapGap(5));
+        wordSettingInner.addView(toggleRow("显示助记图", "word_show_pic", true), wrapGap(5));
+        wordSettingInner.addView(toggleRow("复习出选择题", "word_quiz", true), wrapGap(5));
+        wordSettingInner.addView(grayTip("助记图来自词库自带的图片索引，约 1160 个常用词有；"
+                + "换哪本词书都能用，命中就显示。"), wrap());
+
+        wordSettingInner.addView(sectionHeader("学习节奏"), wrap());
+        wordSettingInner.addView(valueRow("每天新词", wordDailyNew + " 个",
+                new View.OnClickListener() {
+                    public void onClick(View v) {
+                        vibrate();
+                        askDailyNew();
+                    }
+                }), wrapGap(5));
+
+        wordSettingInner.addView(grayTip("点上面那一行改数量（1～200）。到期复习优先，新词按这个数量追加；"
+                + "一天没背不会惩罚，到期词顺延。"), wrap());
+        padInner(wordSettingInner);
+    }
+
+    private int wordSettingBack = S_WORD_HOME;
+    private int wordHomeBack = S_SUBJECT;      // 单词主页的上一级（英语科目页或主页）
+    private int wordSearchBack = S_WORD_HOME;  // 搜单词的上一级
+
+    /** 改每天新词数。复用 apiInputDialog：它已经处理了残影（窗口透明 + 滚动重绘）和数字键盘。 */
+    private void askDailyNew() {
+        apiInputDialog("每天背多少新词", "1～200", String.valueOf(wordDailyNew), false, true, false,
+                new ApiTextSink() {
+                    public void onText(String v) {
+                        String t = (v == null ? "" : v.trim());
+                        int n;
+                        try {
+                            n = Integer.parseInt(t);
+                        } catch (Exception e) {
+                            toast("请填数字");
+                            return;
+                        }
+                        if (n < 1 || n > 200) { toast("请填 1～200 之间"); return; }
+                        wordDailyNew = n;
+                        prefs.edit().putInt("word_daily_new", n).apply();
+                        renderWordSettings();
+                    }
+                });
+    }
+
+    /** 单词页的主按钮：字号、内边距、圆角统一，只靠底色和加粗区分主次。 */
+    private TextView wordBtn(String text, boolean primary) {
+        TextView b = new TextView(this);
+        b.setText(text);
+        b.setTextSize(m.subtitleSize);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(10), dp(11), dp(10), dp(11));
+        b.setTextColor(primary ? C_PRIMARY : 0xFFE8E8E8);   // 次要按钮也用白字，灰字在手表上太虚
+        b.setTypeface(primary ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+        b.setBackground(primary ? pill(0xFF14384A) : clickBg(C_PILL));
+        return b;
+    }
+
+    /** 列表右侧的小按钮：字号、内边距统一，只有主/次两种配色（之前大小不一就是这里各写各的）。 */
+    private TextView wordSmallBtn(String text, boolean primary) {
+        TextView t = new TextView(this);
+        t.setText(text);
+        t.setTextSize(m.subtitleSize - 1f);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(dp(10), dp(7), dp(10), dp(7));
+        t.setTextColor(primary ? C_PRIMARY : 0xFFE8E8E8);
+        t.setBackground(primary ? pill(0xFF14384A) : clickBg(C_PILL));
+        return t;
+    }
+
+    /** 一本词书一行：左边名称与规模，右边动作（下载 / 使用中 / 选用 / 删）。
+     *  已下载的都能删，包括正在用的那本——删掉后当前词书清空，主页会提示重新选。 */
+    private View wordBookRow(final WordBook b) {
+        boolean has = bookDownloaded(b);
+        final boolean isCur = (curBook != null && curBook.id.equals(b.id));
+        final boolean dl = (downloadingBook != null && downloadingBook.id.equals(b.id));
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), dp(9), dp(8), dp(9));
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(isCur ? 0xFF12222A : C_PILL);
+        bg.setCornerRadius(dp(12));
+        row.setBackgroundDrawable(bg);
+
+        LinearLayout left = new LinearLayout(this);
+        left.setOrientation(LinearLayout.VERTICAL);
+
+        TextView t1 = new TextView(this);
+        t1.setText(b.name);
+        t1.setTextSize(m.backSize - 1f);
+        t1.setTextColor(isCur ? C_PRIMARY : C_TEXT);
+        t1.setTypeface(isCur ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+        left.addView(t1);
+
+        TextView t2 = new TextView(this);
+        String state;
+        if (dl) state = dlLabel();
+        else if (isCur) state = "使用中 · " + b.words + " 词";
+        else if (has) state = "已下载 · " + b.words + " 词";
+        else state = b.words + " 词 · " + String.format("%.1f", b.size / 1048576.0) + " MB";
+        t2.setText(state);
+        t2.setTextSize(m.subtitleSize - 2f);
+        t2.setTextColor(dl ? C_PRIMARY : C_SUB);
+        left.addView(t2);
+
+        row.addView(left, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        final TextView act = wordSmallBtn(dl ? dlLabel() : (isCur ? "使用中" : (has ? "选用" : "下载")),
+                !dl && (isCur || !has));
+        if (dl) {
+            act.setTextColor(C_SUB);
+            dlActView = act;      // 进度刷新只改这一个按钮，见 showDlProgress
+        }
+        row.addView(act);
+
+        if (has && !dl) {
+            // 圆的三点按钮：删除、清空记录、换用都收进一个弹窗，行上只留一个入口
+            TextView more = new TextView(this);
+            more.setPadding(dp(9), dp(9), dp(9), dp(9));
+            GradientDrawable circle = new GradientDrawable();
+            circle.setShape(GradientDrawable.OVAL);
+            circle.setColor(0xFF2E2E2E);
+            more.setBackgroundDrawable(circle);
+            applyIconOnly(more, "ic_more", 0xFFCFCFCF, 16);
+            more.setContentDescription("更多操作");
+            LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            mlp.leftMargin = dp(6);
+            row.addView(more, mlp);
+            more.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    vibrate();
+                    showBookActions(b);
+                }
+            });
+        }
+
+        View.OnClickListener pick = new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                if (dl) return;
+                if (!bookDownloaded(b)) {
+                    downloadWordBook(b);
+                } else if (!isCur) {
+                    curBook = b;
+                    prefs.edit().putString("word_book", b.id).apply();
+                    wordIdxReady = false;
+                    toast("已切换到「" + b.name + "」");
+                    renderWordSettings();
+                }
+            }
+        };
+        row.setOnClickListener(pick);
+        act.setOnClickListener(pick);
+        return row;
+    }
+
+    /** 词书的更多操作：选它 / 清空背诵记录 / 删除。样式与「选单词书」完全一套。 */
+    private void showBookActions(final WordBook b) {
+        final boolean isCur = (curBook != null && curBook.id.equals(b.id));
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(12), dp(10), dp(12), dp(8));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xFF151515);
+        bg.setCornerRadius(dp(16));
+        box.setBackgroundDrawable(bg);
+
+        final AlertDialog d = new AlertDialog.Builder(this).setView(box).create();
+
+        TextView t = new TextView(this);
+        t.setText(b.name);
+        t.setTextSize(m.subtitleSize);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setTextColor(Color.WHITE);
+        t.setGravity(Gravity.CENTER);
+        t.setSingleLine(true);
+        t.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        box.addView(t, wrap());
+
+        TextView st = new TextView(this);
+        st.setText(isCur ? ("使用中 · " + b.words + " 词") : ("已下载 · " + b.words + " 词"));
+        st.setTextSize(m.subtitleSize - 2.5f);
+        st.setTextColor(C_SUB);
+        st.setGravity(Gravity.CENTER);
+        st.setPadding(0, 0, 0, dp(6));
+        box.addView(st, wrap());
+
+        if (!isCur) {
+            box.addView(sheetRow("选择这本", 0xFFE8E8E8, new Runnable() {
+                public void run() {
+                    curBook = b;
+                    prefs.edit().putString("word_book", b.id).apply();
+                    wordIdxReady = false;
+                    toast("已切换到「" + b.name + "」");
+                    renderWordSettings();
+                }
+            }, d), wrapGap(4));
+        }
+
+        box.addView(sheetRow("清空背诵记录", 0xFFE8E8E8, new Runnable() {
+            public void run() {
+                confirmAction("清空「" + b.name + "」的背诵记录？",
+                        "这本词书的进度会全部归零，词书文件保留，可以重新开始背。",
+                        "清空", 0xFFFFB74D, new Runnable() {
+                            public void run() {
+                                clearBookProgress(b);
+                            }
+                        });
+            }
+        }, d), wrapGap(4));
+
+        box.addView(sheetRow("删除单词书", 0xFFFF8A80, new Runnable() {
+            public void run() {
+                confirmAction("删除「" + b.name + "」？",
+                        "只删本机文件，重新下载即可恢复，这本的背诵记录也会一起清掉。",
+                        "删除", 0xFFFF8A80, new Runnable() {
+                            public void run() {
+                                bookJson(b.id).delete();
+                                bookIdx(b.id).delete();
+                                bookProg(b.id).delete();
+                                if (curBook != null && curBook.id.equals(b.id)) {
+                                    curBook = null;
+                                    prefs.edit().remove("word_book").apply();
+                                    wProg = null;
+                                    wordIdxReady = false;
+                                }
+                                if (screen == S_WORD_STUDY || screen == S_WORD_VOCAB) {
+                                    goBack(S_WORD_HOME);
+                                }
+                                toast("已删除「" + b.name + "」");
+                                renderWordSettings();
+                            }
+                        });
+            }
+        }, d), wrapGap(4));
+
+        TextView no = new TextView(this);
+        no.setText("取消");
+        no.setTextSize(m.subtitleSize - 1f);
+        no.setGravity(Gravity.CENTER);
+        no.setTextColor(C_SUB);
+        no.setPadding(dp(8), dp(9), dp(8), dp(4));
+        no.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                try { d.dismiss(); } catch (Throwable ignored) { }
+            }
+        });
+        box.addView(no, wrap());
+
+        tuneDialogWindow(d);   // 必须 show() 之前：否则窗口按不透明格式建，滚动会留残影
+        d.show();
+        sizeDialog(d, 0.9f);
+    }
+
+    /** 清空一本词书的进度：删文件 + 内存里立刻按空进度重建，避免还停在学习页时空指针。 */
+    private void clearBookProgress(WordBook b) {
+        bookProg(b.id).delete();
+        if (curBook != null && curBook.id.equals(b.id)) {
+            wProg = null;
+            wordIdxReady = false;
+            // 今日新词额度也一起归零，否则清空后今天一个都背不了
+            prefs.edit().remove("word_new_day").remove("word_new_cnt").apply();
+            if (screen == S_WORD_STUDY) goBack(S_WORD_HOME);
+            ensureWordIndex();       // 重新读索引 + 建全 0 的进度
+        }
+        toast("已清空「" + b.name + "」的背诵记录");
+        renderWordSettings();
+    }
+
+    /** 弹窗里的一行动作：点了先关弹窗，再执行。 */
+    private View sheetRow(String text, int color, final Runnable act, final AlertDialog dlg) {
+        TextView row = new TextView(this);
+        row.setText(text);
+        row.setTextSize(m.subtitleSize);
+        row.setTextColor(color);
+        row.setGravity(Gravity.CENTER);
+        row.setPadding(dp(8), dp(10), dp(8), dp(10));
+        row.setBackgroundDrawable(clickBg(C_PILL));
+        row.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                try { dlg.dismiss(); } catch (Throwable ignored) { }
+                if (act != null) act.run();
+            }
+        });
+        return row;
+    }
+
+    private void buildWordHomeScreen() {
+        wordHomeScroll = new OverScrollScrollView(this);
+        wordHomeScroll.setVerticalScrollBarEnabled(false);
+        roundPadScroll(wordHomeScroll);
+        wordHomeInner = new LinearLayout(this);
+        wordHomeInner.setOrientation(LinearLayout.VERTICAL);
+        wordHomeScroll.addView(wordHomeInner);
+        wordHomeScreen.addView(wordHomeScroll, lw());
+    }
+
+    private void renderWordHome() {
+        loadWordBooks();
+        wordHomeInner.removeAllViews();
+        wordHomeInner.addView(makeBack("‹ 返回", new View.OnClickListener() {
+            public void onClick(View v) { wordGoBack(); }
+        }), wrapM());
+        wordHomeInner.addView(pageTitle("背单词"), wrap());
+
+        boolean hasBook = (curBook != null && bookDownloaded(curBook));
+        // 首页那几个数字都要读索引和进度，没加载就全是 0
+        boolean ready = hasBook && ensureWordIndex();
+        // 进度卡
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(14), dp(12), dp(14), dp(12));
+        GradientDrawable cbg = new GradientDrawable();
+        cbg.setColor(C_PILL);
+        cbg.setCornerRadius(dp(14));
+        card.setBackgroundDrawable(cbg);
+        TextView big = new TextView(this);
+        big.setText(hasBook ? curBook.name : "还没选单词书");
+        big.setTextSize(m.backSize);
+        big.setTypeface(Typeface.DEFAULT_BOLD);
+        big.setTextColor(hasBook ? C_PRIMARY : C_SUB);
+        card.addView(big);
+        final int[] st = ready ? wordStats() : new int[]{0, 0, 0};
+        TextView sub = new TextView(this);
+        if (ready) {
+            sub.setText("已掌握 " + st[0] + " · 学习中 " + st[1] + " · 未学 " + st[2]);
+        } else {
+            sub.setText("先从下面选一本，再开始背");
+        }
+        sub.setTextSize(m.subtitleSize - 2f);
+        sub.setTextColor(C_SUB);
+        sub.setPadding(0, dp(4), 0, 0);
+        card.addView(sub);
+
+        if (ready) {
+            // 今日任务：把「还要背多少」摆在最显眼的位置，别让人点进去才知道
+            int dueNow = countDue();
+            int doneToday = wordNewToday();
+            int quotaLeft = Math.max(0, wordDailyNew - doneToday);
+            int freshToday = Math.min(quotaLeft, countFresh());
+            TextView tl = new TextView(this);
+            tl.setText("今日　新词 " + doneToday + "/" + wordDailyNew
+                    + (freshToday > 0 ? "（还剩 " + freshToday + "）" : "（今日已背完）")
+                    + " · 复习 " + dueNow + " 个");
+            tl.setTextSize(m.subtitleSize - 1f);
+            tl.setTextColor(dueNow > 0 ? C_PRIMARY : C_TEXT);
+            tl.setPadding(0, dp(6), 0, 0);
+            card.addView(tl);
+
+            // 已学进度条：不写百分比文字，条本身就能看出大概
+            int learned = wWords.size() - st[2];
+            float frac = wWords.size() > 0 ? (float) learned / wWords.size() : 0f;
+            if (frac < 0.002f) frac = 0.002f;
+            if (frac > 0.998f) frac = 0.998f;
+            LinearLayout bar = new LinearLayout(this);
+            bar.setOrientation(LinearLayout.HORIZONTAL);
+            GradientDrawable bgbg = new GradientDrawable();
+            bgbg.setColor(0xFF262626);
+            bgbg.setCornerRadius(dp(3));
+            bar.setBackgroundDrawable(bgbg);
+            View fill = new View(this);
+            GradientDrawable fg = new GradientDrawable();
+            fg.setColor(C_PRIMARY);
+            fg.setCornerRadius(dp(3));
+            fill.setBackgroundDrawable(fg);
+            bar.addView(fill, new LinearLayout.LayoutParams(0, dp(6), frac));
+            bar.addView(new View(this), new LinearLayout.LayoutParams(0, dp(6), 1f - frac));
+            LinearLayout.LayoutParams blp = wrap();
+            blp.topMargin = dp(8);
+            card.addView(bar, blp);
+
+            if (st[0] == 0 && st[1] > 0) {
+                // 刚背的词间隔只有 1 天，全算「学习中」，这里说清口径，免得以为坏了
+                TextView note = new TextView(this);
+                note.setText("连着记住 4 次才算「已掌握」，刚背的都记在学习中");
+                note.setTextSize(m.subtitleSize - 2.5f);
+                note.setTextColor(0xFF6A6A6A);
+                note.setPadding(0, dp(6), 0, 0);
+                card.addView(note);
+            }
+        }
+        wordHomeInner.addView(card, wrapGap(8));
+
+        // 打卡：连续天数 + 最近 30 天的格子（一行 10 个，三行）
+        LinearLayout ciCard = new LinearLayout(this);
+        ciCard.setOrientation(LinearLayout.VERTICAL);
+        ciCard.setPadding(dp(14), dp(10), dp(14), dp(10));
+        GradientDrawable cibg = new GradientDrawable();
+        cibg.setColor(C_PILL);
+        cibg.setCornerRadius(dp(14));
+        ciCard.setBackgroundDrawable(cibg);
+
+        final int streak = checkinStreak();
+        TextView ciTitle = new TextView(this);
+        ciTitle.setText(streak > 0 ? ("连续打卡 " + streak + " 天") : "还没打卡 · 背完一次记一天");
+        ciTitle.setTextSize(m.subtitleSize);
+        ciTitle.setTextColor(streak > 0 ? C_PRIMARY : C_SUB);
+        ciTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        ciCard.addView(ciTitle);
+
+        // 格子只表示「打过多少天」：每打一天多亮一格，从左上角往右、再往下排
+        int lit = Math.min(30, checkinHistory().size());
+        for (int row = 0; row < 3; row++) {
+            LinearLayout line = new LinearLayout(this);
+            line.setOrientation(LinearLayout.HORIZONTAL);
+            line.setGravity(Gravity.CENTER);
+            for (int col = 0; col < 10; col++) {
+                int n = row * 10 + col;
+                View cell = new View(this);
+                GradientDrawable cd = new GradientDrawable();
+                cd.setCornerRadius(dp(2));
+                cd.setColor(n < lit ? C_PRIMARY : 0xFF2A2A2A);
+                cell.setBackgroundDrawable(cd);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(10), dp(10));
+                lp.setMargins(dp(2), dp(2), dp(2), dp(2));
+                line.addView(cell, lp);
+            }
+            ciCard.addView(line);
+        }
+        wordHomeInner.addView(ciCard, wrapGap(8));
+
+        // 开始背单词（没选词书时禁用态）
+        // 今日新词配额用完、又没有到期复习 → 按钮转灰，想继续得长按
+        final boolean allDone = ready && wordNewToday() >= wordDailyNew && countDue() == 0;
+        TextView start = wordBtn("开始背单词", true);
+        if (!ready || allDone) {
+            start.setTextColor(0xFF4A4A4A);
+            start.setTypeface(Typeface.DEFAULT);
+            start.setBackground(pill(0xFF141414));
+        }
+        start.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                if (curBook == null || !bookDownloaded(curBook)) {
+                    toast("先选一本单词书");
+                    return;
+                }
+                if (wordNewToday() >= wordDailyNew && countDue() == 0) {
+                    toast("如果想要继续背单词，请长按该按钮。");
+                    return;
+                }
+                openWordStudy();
+            }
+        });
+        start.setOnLongClickListener(new View.OnLongClickListener() {
+            public boolean onLongClick(View v) {
+                if (curBook == null || !bookDownloaded(curBook)) return false;
+                vibrate();
+                toast("继续背 " + wordDailyNew + " 个新词");
+                openWordStudy(3);       // 放开今日配额
+                return true;
+            }
+        });
+        wordHomeInner.addView(start, wrapGap(6));
+
+        // 只复习：独立入口，只做到期的词，不掺新词
+        final int dueNow = ready ? countDue() : 0;
+        TextView review = wordBtn(dueNow > 0 ? "只复习 " + dueNow + " 个" : "今天没有要复习的", false);
+        if (dueNow == 0) {
+            review.setTextColor(0xFF4A4A4A);
+            review.setBackground(pill(0xFF141414));
+        }
+        review.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                if (curBook == null || !bookDownloaded(curBook)) { toast("先选一本单词书"); return; }
+                if (countDue() == 0) { toast("今天没有到期的词"); return; }
+                openWordStudy(1);
+            }
+        });
+        wordHomeInner.addView(review, wrapGap(6));
+
+        // 生词本：忘过两次以上的词
+        final int vocabN = ready ? vocabIndexes().size() : 0;
+        TextView vocab = wordBtn(vocabN > 0 ? "生词本 " + vocabN + " 个" : "生词本（空）", false);
+        if (vocabN == 0) {
+            vocab.setTextColor(0xFF4A4A4A);
+            vocab.setBackground(pill(0xFF141414));
+        }
+        vocab.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                if (curBook == null || !bookDownloaded(curBook)) { toast("先选一本单词书"); return; }
+                showScreen(S_WORD_VOCAB);
+            }
+        });
+        wordHomeInner.addView(vocab, wrapGap(6));
+
+        // 选择 / 更换单词书
+        TextView pick = wordBtn(ready ? "更换单词书" : "选择单词书", false);
+        pick.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                showBookPicker();
+            }
+        });
+        wordHomeInner.addView(pick, wrapGap(6));
+
+        // 设置（与设置页里那个入口同一个界面）
+        TextView cfg = wordBtn("背单词设置", false);
+        cfg.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                wordSettingBack = S_WORD_HOME;
+                showScreen(S_WORD_SETTINGS);
+            }
+        });
+        wordHomeInner.addView(cfg, wrapGap(6));
+
+        // 搜索单词
+        TextView find = wordBtn("搜索单词", false);
+        find.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                showScreen(S_WORD_SEARCH);
+            }
+        });
+        wordHomeInner.addView(find, wrapGap(6));
+        if (!online()) {
+            wordHomeInner.addView(grayTip("离线模式：无法查看助记图片和收听单词发音"), wrap());
+        }
+        padInner(wordHomeInner);
+    }
+
+    /** 主页返回：从英语科目点进来的回节点页，否则回主页。 */
+    private void wordGoBack() {
+        String key = curSubject == null ? "" : curSubject.key;
+        if ("english".equals(key)) goBack(S_NODE);
+        else goBack(S_SUBJECT);
+    }
+
+    private boolean wordShowDownload = false;   // 设置页是否展开「可下载」
+
+    /** 选单词书：只列已经下载的，样式与「选模型」完全一致。
+     *  一本都没下载就直接跳到背单词设置的下载区，免得弹一个空列表。 */
+    private void showBookPicker() {
+        loadWordBooks();
+        final List<WordBook> ready = new ArrayList<WordBook>();
+        for (WordBook b : wordBooks) if (bookDownloaded(b)) ready.add(b);
+        if (ready.isEmpty()) {
+            toast("还没有下载词书，先下载一本");
+            wordSettingBack = S_WORD_HOME;
+            wordShowDownload = true;
+            showScreen(S_WORD_SETTINGS);
+            return;
+        }
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(12), dp(10), dp(12), dp(8));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xFF151515);
+        bg.setCornerRadius(dp(16));
+        box.setBackgroundDrawable(bg);
+
+        final AlertDialog d = new AlertDialog.Builder(this).setView(box).create();
+
+        TextView t = new TextView(this);
+        t.setText("选单词书（" + ready.size() + " 本）");
+        t.setTextSize(m.subtitleSize);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setTextColor(Color.WHITE);
+        t.setGravity(Gravity.CENTER);
+        box.addView(t, wrap());
+
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        for (int i = 0; i < ready.size(); i++) {
+            final WordBook b = ready.get(i);
+            boolean on = (curBook != null && curBook.id.equals(b.id));
+            TextView row = new TextView(this);
+            row.setText(b.name + "　" + b.words + " 词");
+            row.setTextSize(m.subtitleSize - 1f);
+            row.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            row.setTextColor(on ? C_PRIMARY : C_TEXT);
+            row.setGravity(Gravity.CENTER);
+            row.setSingleLine(true);
+            row.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+            row.setPadding(dp(8), dp(9), dp(8), dp(9));
+            row.setBackgroundDrawable(pill(C_PILL));
+            row.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    vibrate();
+                    try { d.dismiss(); } catch (Throwable ignored) { }
+                    curBook = b;
+                    prefs.edit().putString("word_book", b.id).apply();
+                    wordIdxReady = false;
+                    renderWordHome();
+                }
+            });
+            LinearLayout.LayoutParams lp = wrap();
+            lp.bottomMargin = dp(4);
+            list.addView(row, lp);
+        }
+
+        ScrollView sv = new OverScrollScrollView(this);
+        sv.setVerticalScrollBarEnabled(false);
+        sv.addView(list, wrap());
+        tuneDialogScroll(sv, list);
+        final int pickMaxH = m.round ? dp(150) : dp(240);
+        final LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, pickMaxH);
+        slp.topMargin = dp(4);
+        box.addView(sv, slp);
+        // 词书少的时候按内容收高（与选模型弹窗同一套处理，别留一大片空白）
+        d.setOnShowListener(new DialogInterface.OnShowListener() {
+            public void onShow(DialogInterface dlg) {
+                list.post(new Runnable() {
+                    public void run() {
+                        int h = list.getHeight();
+                        if (h > 0 && h < pickMaxH) {
+                            slp.height = h + dp(2);
+                            sv.setLayoutParams(slp);
+                        }
+                    }
+                });
+            }
+        });
+
+        TextView no = new TextView(this);
+        no.setText("取消");
+        no.setTextSize(m.subtitleSize - 1f);
+        no.setGravity(Gravity.CENTER);
+        no.setTextColor(C_SUB);
+        no.setPadding(dp(8), dp(9), dp(8), dp(4));
+        no.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                try { d.dismiss(); } catch (Throwable ignored) { }
+            }
+        });
+        box.addView(no, wrap());
+
+        tuneDialogWindow(d);   // 必须 show() 之前：否则窗口按不透明格式建，滚动会留残影
+        d.show();
+        sizeDialog(d, 0.9f);
+    }
+
+    /** 已学词数（reps>0 或 interval>0 都算学过）。 */
+    private int learnedCount() {
+        if (!ensureWordIndex() || wProg == null) return 0;
+        int n = wProg.length / 8, c = 0;
+        for (int i = 0; i < n; i++) if (progByte(i, 5) > 0 || progShort(i, 1) > 0) c++;
+        return c;
+    }
+
+    // ================= 单词：背词卡片 =================
+
+    private int[] wQueue;          // 今日队列（词下标）
+    private int wQueuePos;         // 当前做到第几个
+    private int wCurIdx = -1;      // 当前词下标
+    private boolean wFlipped;      // 是否已翻到释义面
+    private LinearLayout wCardBox; // 卡片区（翻面只重画这块）
+
+    private void buildWordStudyScreen() {
+        wordStudyScroll = new OverScrollScrollView(this);
+        wordStudyScroll.setVerticalScrollBarEnabled(false);
+        roundPadScroll(wordStudyScroll);
+        wordStudyInner = new LinearLayout(this);
+        wordStudyInner.setOrientation(LinearLayout.VERTICAL);
+        wordStudyScroll.addView(wordStudyInner);
+        wordStudyScreen.addView(wordStudyScroll, lw());
+    }
+
+    private void openWordStudy() { openWordStudy(0); }
+
+    /** mode：0 复习+新词 / 1 只复习 / 2 生词本。 */
+    private void openWordStudy(int mode) {
+        wMode = mode;
+        startWordSession(mode);
+    }
+
+    private void startWordSession(int mode) {
+        if (!ensureWordIndex()) { toast("词书还没准备好"); return; }
+        buildWordQueue(mode);
+        wQueuePos = 0;
+        wCurIdx = -1;
+        wFlipped = false;
+        showScreen(S_WORD_STUDY);
+        nextCard();
+    }
+
+    /** 组今日队列：到期复习在前，再补每日新词。 */
+    private void buildWordQueue(int mode) {
+        int n = wWords.size(), today = todayDay();
+        ArrayList<Integer> due = new ArrayList<Integer>();
+        ArrayList<Integer> fresh = new ArrayList<Integer>();
+
+        if (mode == 2) {
+            // 生词本：只取「忘过 2 次以上」的，不掺新词、不看到期日
+            for (int i = 0; i < n; i++) if (progByte(i, 6) >= 2) due.add(i);
+        } else {
+            for (int i = 0; i < n; i++) {
+                int interval = progShort(i, 1);
+                int reps = progByte(i, 5);
+                if (interval == 0 && reps == 0) fresh.add(i);
+                else if (progShort(i, 3) <= today) due.add(i);
+            }
+        }
+        // 每天的新词配额要扣掉今天已经学过的，否则一天能无限往下背；
+        // mode 3 是「长按继续」，用户自己要求超额，就不再扣
+        int quotaLeft = (mode == 3) ? wordDailyNew
+                : Math.max(0, wordDailyNew - wordNewToday());
+        int take = (mode == 0 || mode == 3) ? Math.min(quotaLeft, fresh.size()) : 0;
+        wQueue = new int[due.size() + take];
+        int k = 0;
+        for (int i = 0; i < due.size(); i++) wQueue[k++] = due.get(i);
+        for (int i = 0; i < take; i++) wQueue[k++] = fresh.get(i);
+
+        // 重来池：上限就是队列长度（每个词最多进一次）
+        wRetry = new int[Math.max(8, wQueue.length + 8)];
+        wRetryN = 0;
+        wRound = 1;
+        wStatDue = due.size();
+        wStatFresh = take;
+        wStatNewDone = 0;
+        wStatReviewDone = 0;
+        wStatHard = 0;
+        wCounted.clear();
+        wMissed.clear();
+    }
+
+    /** 到期要复习的词数（首页用）。 */
+    private int countDue() { return countDueAt(todayDay()); }
+
+    /** 到指定那天为止要复习多少（完成页预告「明天」用它）。 */
+    private int countDueAt(int day) {
+        int n = wWords.size(), c = 0;
+        for (int i = 0; i < n; i++) {
+            if (progShort(i, 1) == 0 && progByte(i, 5) == 0) continue;   // 没学过
+            if (progShort(i, 3) <= day) c++;
+        }
+        return c;
+    }
+
+    /** 还没学过的新词数。 */
+    private int countFresh() {
+        int n = wWords.size(), c = 0;
+        for (int i = 0; i < n; i++) {
+            if (progShort(i, 1) == 0 && progByte(i, 5) == 0) c++;
+        }
+        return c;
+    }
+
+    /** {已掌握, 学习中, 未学}。掌握 = 间隔满 7 天（1→2→4→7，也就是连着记住 4 次）。 */
+    private int[] wordStats() {
+        int n = wWords.size(), learned = 0, mastered = 0;
+        for (int i = 0; i < n; i++) {
+            int interval = progShort(i, 1);
+            int reps = progByte(i, 5);
+            if (interval == 0 && reps == 0) continue;
+            learned++;
+            if (interval >= 7) mastered++;      // 连续记住 4 次（1→2→4→7）算掌握
+        }
+        return new int[]{mastered, learned - mastered, n - learned};
+    }
+
+    // ================= 打卡 =================
+
+    /** 完成一次完整会话就记一天；昨天打过卡就续，断了从 1 重新算。 */
+    private void doCheckin() {
+        int today = todayDay();
+        int last = prefs.getInt("word_ci_last", 0);
+        if (last == today) return;
+        int streak = (last == today - 1) ? prefs.getInt("word_ci_streak", 0) + 1 : 1;
+        ArrayList<String> days = checkinHistory();
+        if (!days.contains(String.valueOf(today))) days.add(String.valueOf(today));
+        while (days.size() > 30) days.remove(0);
+        prefs.edit().putInt("word_ci_last", today)
+                .putInt("word_ci_streak", streak)
+                .putString("word_ci_hist", TextUtils.join(",", days))
+                .apply();
+    }
+
+    private ArrayList<String> checkinHistory() {
+        ArrayList<String> out = new ArrayList<String>();
+        String raw = prefs.getString("word_ci_hist", "");
+        if (raw.length() == 0) return out;
+        for (String x : raw.split(",")) if (x.length() > 0) out.add(x);
+        return out;
+    }
+
+    /** 当前连续天数：昨天或今天打过才算，断了显示 0。 */
+    private int checkinStreak() {
+        int last = prefs.getInt("word_ci_last", 0);
+        int today = todayDay();
+        if (last == today || last == today - 1) return prefs.getInt("word_ci_streak", 0);
+        return 0;
+    }
+
+    /** 今天已经学了多少个新词。跨天自动归零。 */
+    private int wordNewToday() {
+        int day = prefs.getInt("word_new_day", 0);
+        if (day != todayDay()) return 0;
+        return prefs.getInt("word_new_cnt", 0);
+    }
+
+    private void bumpNewToday() {
+        int day = todayDay();
+        int n = (prefs.getInt("word_new_day", 0) == day) ? prefs.getInt("word_new_cnt", 0) : 0;
+        prefs.edit().putInt("word_new_day", day).putInt("word_new_cnt", n + 1).apply();
+    }
+
+    private void addRetry(int idx) {
+        if (wRetryN >= wRetry.length) {
+            int[] t = new int[wRetry.length * 2];
+            System.arraycopy(wRetry, 0, t, 0, wRetry.length);
+            wRetry = t;
+        }
+        wRetry[wRetryN++] = idx;
+    }
+
+    /** 下一张卡。一轮走完还有「不认识」的，就再走一轮（最多 3 轮）。 */
+    private void nextCard() {
+        if (wQueue == null) {
+            renderWordStudy(true);
+            return;
+        }
+        if (wQueuePos >= wQueue.length) {
+            if (wRetryN > 0 && wRound < 3) {
+                wRound++;
+                wQueue = java.util.Arrays.copyOf(wRetry, wRetryN);
+                wRetryN = 0;
+                wQueuePos = 0;
+                toast("第 " + wRound + " 轮 · " + wQueue.length + " 个还不熟的");
+            } else {
+                renderWordStudy(true);
+                return;
+            }
+        }
+        wCurIdx = wQueue[wQueuePos];
+        wFlipped = false;
+        if (wQuizNext != null) {
+            wQuizHandler.removeCallbacks(wQuizNext);
+            wQuizNext = null;
+        }
+        wAutoSpoken = -1;          // 每个词重新出现都该读一次
+        wPicBm = null;
+        wPicUrl = null;
+        stopVoice();
+        renderWordStudy(false);
+    }
+
+    private void renderWordStudy(boolean finished) {
+        wordStudyInner.removeAllViews();
+        wordStudyInner.addView(makeBack("‹ 返回", new View.OnClickListener() {
+            public void onClick(View v) { goBack(backTarget()); }
+        }), wrapM());
+
+        int total = (wQueue == null) ? 0 : wQueue.length;
+        if (finished || total == 0) {
+            if (total > 0) doCheckin();     // 走到「背完了」这一页才算今天打过卡
+            TextView done = new TextView(this);
+            done.setText(total == 0 ? "今天没有要背的词" : "今天的都背完了");
+            done.setTextSize(m.backSize);
+            done.setTextColor(C_PRIMARY);
+            done.setGravity(Gravity.CENTER);
+            done.setPadding(0, dp(24), 0, dp(10));
+            wordStudyInner.addView(done, wrap());
+            TextView tip = new TextView(this);
+            if (total == 0) {
+                tip.setText("去设置里换一本词书，或者明天再来。");
+            } else {
+                StringBuilder sb = new StringBuilder();
+                if (wStatReviewDone > 0) sb.append("复习 ").append(wStatReviewDone).append(" 个");
+                if (wStatNewDone > 0) {
+                    if (sb.length() > 0) sb.append(" · ");
+                    sb.append("新学 ").append(wStatNewDone).append(" 个");
+                }
+                if (wStatHard > 0) sb.append(" · ").append(wStatHard).append(" 次没记住");
+                sb.append("\n明天要复习 ").append(countDueAt(todayDay() + 1)).append(" 个");
+                tip.setText(sb.toString());
+                tip.setLineSpacing(dp(2), 1.2f);
+            }
+            tip.setTextSize(m.subtitleSize - 1f);
+            tip.setTextColor(C_SUB);
+            tip.setGravity(Gravity.CENTER);
+            tip.setPadding(dp(12), 0, dp(12), dp(16));
+            wordStudyInner.addView(tip, wrap());
+            TextView back = new TextView(this);
+            back.setText("回到背单词");
+            back.setTextSize(m.subtitleSize);
+            back.setGravity(Gravity.CENTER);
+            back.setPadding(dp(10), dp(10), dp(10), dp(10));
+            back.setTextColor(C_PRIMARY);
+            back.setBackground(clickBg(C_PILL));
+            back.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) { goBack(S_WORD_HOME); }
+            });
+            wordStudyInner.addView(back, wrap());
+            padInner(wordStudyInner);
+            return;
+        }
+
+        // 顶部进度
+        TextView prog = new TextView(this);
+        prog.setText(wRound > 1
+                ? ("第 " + wRound + " 轮 · " + (wQueuePos + 1) + " / " + total)
+                : ((wQueuePos + 1) + " / " + total));
+        prog.setTextSize(m.subtitleSize - 1f);
+        prog.setTextColor(C_SUB);
+        prog.setGravity(Gravity.CENTER);
+        wordStudyInner.addView(prog, wrapGap(4));
+
+        if (shouldQuiz(wCurIdx)) {
+            renderWordQuiz();
+        } else {
+            renderSelfRateCard();
+        }
+
+        if (!online()) {
+            wordStudyInner.addView(grayTip("离线模式：无法查看助记图片和收听单词发音"), wrapGap(6));
+        }
+        padInner(wordStudyInner);
+    }
+
+    // ================= 单词：四选一测试（三期） =================
+
+    private boolean wQuizAnswered = false;
+    private int wQuizAnswer = 0;                 // 正确答案在选项里的位置
+    private final android.os.Handler wQuizHandler =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+    private Runnable wQuizNext;
+    /** 本轮答错过的词：下次出现先走自评卡片，看懂了再考。 */
+    private final java.util.HashSet<Integer> wMissed = new java.util.HashSet<Integer>();
+
+    /** 背过至少一次的词才出选择题；新词第一次见还是看卡片自评。 */
+    private boolean shouldQuiz(int idx) {
+        if (idx < 0) return false;
+        if (!prefs.getBoolean("word_quiz", true)) return false;
+        if (wMissed.contains(idx)) return false;   // 这轮答错过的，下次先给卡片看释义
+        return progByte(idx, 5) > 0 || progShort(idx, 1) > 0;
+    }
+
+    /** 取第一条中文释义，形如「n. 通道；进入」。 */
+    private String firstMeaning(JSONObject cc) {
+        if (cc == null) return "";
+        JSONArray tr = cc.optJSONArray("trans");
+        if (tr == null) return "";
+        for (int i = 0; i < tr.length(); i++) {
+            JSONObject t = tr.optJSONObject(i);
+            if (t == null) continue;
+            String cn = t.optString("tranCn", "").trim();
+            if (cn.length() == 0) continue;
+            String pos = t.optString("pos", "").trim();
+            return (pos.length() > 0 ? pos + " " : "") + cn;
+        }
+        return "";
+    }
+
+    /** 第 i 个词的第一条释义。 */
+    private String meaningAt(int i) {
+        JSONObject o = readWordLine(i);
+        JSONObject w = (o == null) ? null : o.optJSONObject("content");
+        if (w != null) w = w.optJSONObject("word");
+        return firstMeaning(w == null ? null : w.optJSONObject("content"));
+    }
+
+    /** 随机找几个别的词的释义当干扰项（去重）。挑不满就返回已有的，按实际数量出题。 */
+    private ArrayList<String> randomMeanings(int exclude, String avoid, int count) {
+        ArrayList<String> out = new ArrayList<String>();
+        int n = wWords.size();
+        if (n < 16) return out;
+        int tries = 0;
+        while (out.size() < count && tries < 40) {
+            tries++;
+            int i = (int) (Math.random() * n);
+            if (i == exclude) continue;
+            String m = meaningAt(i);
+            if (m.length() == 0 || m.equals(avoid) || out.contains(m)) continue;
+            out.add(m);
+        }
+        return out;
+    }
+
+    /** 复习词的四选一：给英文，选正确的中文释义。点对算「认识」，点错算「不认识」。 */
+    private void renderWordQuiz() {
+        wQuizAnswered = false;
+        wCardBox = null;              // 选择题不用那张可翻面的卡
+        wFlipped = true;
+
+        JSONObject o = readWordLine(wCurIdx);
+        JSONObject word = (o == null) ? null : o.optJSONObject("content");
+        JSONObject w = (word == null) ? null : word.optJSONObject("word");
+        JSONObject cc = (w == null) ? null : w.optJSONObject("content");
+        String head = (w == null) ? "" : w.optString("wordHead", "");
+        wCurHead = head;
+
+        final String right = firstMeaning(cc);
+        ArrayList<String> wrongs = (right.length() == 0)
+                ? new ArrayList<String>() : randomMeanings(wCurIdx, right, 3);
+        if (right.length() == 0 || wrongs.isEmpty()) {
+            renderSelfRateCard();     // 没释义或凑不出干扰项，退回自评
+            return;
+        }
+
+        if (autoSpeakOn()) speakWord(head);
+
+        // 题干：词 + 音标（静音时不出喇叭）
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(14), dp(12), dp(14), dp(12));
+        GradientDrawable cbg = new GradientDrawable();
+        cbg.setColor(C_PILL);
+        cbg.setCornerRadius(dp(16));
+        card.setBackgroundDrawable(cbg);
+
+        TextView tv = new TextView(this);
+        tv.setText(head);
+        tv.setTextSize(m.titleSize - 1f);
+        tv.setTypeface(Typeface.DEFAULT_BOLD);
+        tv.setTextColor(Color.WHITE);
+        tv.setGravity(Gravity.CENTER);
+        card.addView(tv);
+
+        String phone = (cc == null) ? "" : cc.optString("usphone", "");
+        if (phone.length() == 0 && cc != null) phone = cc.optString("ukphone", "");
+        LinearLayout phRow = new LinearLayout(this);
+        phRow.setOrientation(LinearLayout.HORIZONTAL);
+        phRow.setGravity(Gravity.CENTER);
+        if (phone.length() > 0) {
+            TextView ph = new TextView(this);
+            ph.setText("/" + phone + "/");
+            ph.setTextSize(m.subtitleSize);
+            ph.setTextColor(C_SUB);
+            if (!muteOn()) ph.setPadding(0, 0, dp(8), 0);
+            phRow.addView(ph);
+        }
+        if (!muteOn()) {
+            TextView spk = new TextView(this);
+            spk.setPadding(dp(9), dp(7), dp(9), dp(7));
+            spk.setBackground(clickBg(0xFF14384A));
+            applyIconOnly(spk, "ic_volume", C_PRIMARY, 15);
+            spk.setContentDescription("播放发音");
+            spk.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    vibrate();
+                    speakWord(wCurHead);
+                }
+            });
+            phRow.addView(spk);
+        }
+        if (phRow.getChildCount() > 0) {
+            LinearLayout.LayoutParams plp = wrap();
+            plp.topMargin = dp(4);
+            card.addView(phRow, plp);
+        }
+        wordStudyInner.addView(card, wrapGap(8));
+
+        // 选项竖着排：圆屏横着放不下四个，竖着每个都是整行，点起来也准
+        final int total = wrongs.size() + 1;
+        final String[] opts = new String[total];
+        wQuizAnswer = (int) (Math.random() * total);
+        opts[wQuizAnswer] = right;
+        int k = 0;
+        for (int i = 0; i < total; i++) {
+            if (i == wQuizAnswer) continue;
+            opts[i] = wrongs.get(k++);
+        }
+
+        final TextView[] btns = new TextView[total];
+        for (int i = 0; i < total; i++) {
+            final int idx = i;
+            TextView b = new TextView(this);
+            b.setText((char) ('A' + i) + ". " + opts[i]);
+            b.setTextSize(m.subtitleSize - 0.5f);
+            b.setTextColor(C_TEXT);
+            b.setGravity(Gravity.CENTER);
+            b.setPadding(dp(10), dp(11), dp(10), dp(11));
+            b.setBackground(pill(C_PILL));
+            b.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    if (wQuizAnswered) return;
+                    wQuizAnswered = true;
+                    vibrate();
+                    boolean ok = (idx == wQuizAnswer);
+                    for (int j = 0; j < btns.length; j++) {
+                        if (btns[j] != null) btns[j].setClickable(false);
+                    }
+                    btns[idx].setTextColor(ok ? C_PRIMARY : 0xFFFF8A80);
+                    btns[idx].setBackground(pill(ok ? 0xFF14384A : 0xFF3A1A1A));
+                    if (!ok) {
+                        btns[wQuizAnswer].setTextColor(C_PRIMARY);
+                        btns[wQuizAnswer].setBackground(pill(0xFF14384A));
+                    }
+                    final boolean good = ok;
+                    wQuizNext = new Runnable() {
+                        public void run() {
+                            if (screen != S_WORD_STUDY) return;
+                            rateWord(good ? 5 : 1);
+                        }
+                    };
+                    wQuizHandler.postDelayed(wQuizNext, ok ? 650 : 1700);
+                }
+            });
+            btns[i] = b;
+            wordStudyInner.addView(b, wrapGap(5));
+        }
+    }
+
+    /** 自评卡片：新词第一次见、或者这个课程关了选择题时走这里。 */
+    private void renderSelfRateCard() {
+        // 卡片区
+        wCardBox = new LinearLayout(this);
+        wCardBox.setOrientation(LinearLayout.VERTICAL);
+        wCardBox.setPadding(dp(14), dp(16), dp(14), dp(16));
+        GradientDrawable cbg = new GradientDrawable();
+        cbg.setColor(C_PILL);
+        cbg.setCornerRadius(dp(16));
+        wCardBox.setBackgroundDrawable(cbg);
+        wCardBox.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                // 只能展开，不能收回：收回去只会让人以为「还得再看一遍」
+                if (wFlipped) return;
+                wFlipped = true;
+                renderWordCard();
+                // 展开时再读一遍（自动发音开着才做）
+                if (autoSpeakOn()) speakWord(wCurHead);
+            }
+        });
+        wordStudyInner.addView(wCardBox, wrapGap(10));
+        renderWordCard();
+
+        // 三档评分：翻面前只给「看释义」，避免瞎点
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER);
+        final String[] labels = {"不认识", "模糊", "认识"};
+        final int[] qs = {1, 3, 5};
+        final int[] colors = {0xFFFF8A80, 0xFFFFB74D, C_PRIMARY};
+        for (int i = 0; i < labels.length; i++) {
+            final int q = qs[i];
+            TextView b = new TextView(this);
+            b.setText(labels[i]);
+            b.setTextSize(m.subtitleSize - 1f);
+            b.setGravity(Gravity.CENTER);
+            b.setPadding(dp(6), dp(9), dp(6), dp(9));
+            b.setTextColor(colors[i]);
+            b.setBackground(pill(q == 5 ? 0xFF14384A : C_PILL));
+            b.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    vibrate();
+                    if (!wFlipped) { wFlipped = true; renderWordCard(); return; }
+                    rateWord(q);
+                }
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            lp.leftMargin = dp(3);
+            lp.rightMargin = dp(3);
+            bar.addView(b, lp);
+        }
+        wordStudyInner.addView(bar, wrapGap(6));
+    }
+
+    /** 只重画卡片内容（翻面/切词都不重建整页，避免滚动位置跳动）。 */
+    private void renderWordCard() {
+        if (wCardBox == null) return;
+        wCardBox.removeAllViews();
+        JSONObject o = readWordLine(wCurIdx);
+        JSONObject word = (o == null) ? null : o.optJSONObject("content");
+        JSONObject w = (word == null) ? null : word.optJSONObject("word");
+        JSONObject cc = (w == null) ? null : w.optJSONObject("content");
+
+        TextView head = new TextView(this);
+        head.setText(w == null ? "（读取失败）" : w.optString("wordHead", ""));
+        head.setTextSize(m.titleSize);
+        head.setTypeface(Typeface.DEFAULT_BOLD);
+        head.setTextColor(Color.WHITE);
+        head.setGravity(Gravity.CENTER);
+        wCardBox.addView(head, wrap());
+
+        final String headWord = (w == null) ? "" : w.optString("wordHead", "");
+        wCurHead = headWord;
+
+        // 音标 + 发音按钮同一行：只给音标不会读，按钮必须挨着它
+        if (cc != null) {
+            String phone = cc.optString("usphone", "");
+            if (phone.length() == 0) phone = cc.optString("ukphone", "");
+            LinearLayout phRow = new LinearLayout(this);
+            phRow.setOrientation(LinearLayout.HORIZONTAL);
+            phRow.setGravity(Gravity.CENTER);
+
+            if (phone.length() > 0) {
+                TextView ph = new TextView(this);
+                ph.setText("/" + phone + "/");
+                ph.setTextSize(m.subtitleSize);
+                ph.setTextColor(C_SUB);
+                ph.setPadding(0, 0, dp(8), 0);
+                phRow.addView(ph);
+            }
+
+            if (!muteOn()) {
+                TextView spk = new TextView(this);
+                spk.setPadding(dp(9), dp(7), dp(9), dp(7));
+                spk.setBackground(clickBg(0xFF14384A));
+                applyIconOnly(spk, "ic_volume", C_PRIMARY, 15);
+                spk.setContentDescription("播放发音");
+                spk.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) {
+                        vibrate();
+                        speakWord(headWord);
+                    }
+                });
+                phRow.addView(spk);
+            }
+
+            LinearLayout.LayoutParams plp = wrap();
+            plp.topMargin = dp(4);
+            wCardBox.addView(phRow, plp);
+        }
+
+        // 自动发音：卡片一出现就读一遍。翻面会再调一次 renderWordCard，靠 wAutoSpoken 挡住不重复响
+        if (autoSpeakOn() && wCurIdx >= 0 && wAutoSpoken != wCurIdx) {
+            wAutoSpoken = wCurIdx;
+            speakWord(headWord);
+        }
+
+        if (!wFlipped) {
+            TextView hint = new TextView(this);
+            hint.setText("轻点卡片看释义");
+            hint.setTextSize(m.subtitleSize - 2f);
+            hint.setTextColor(0xFF666666);
+            hint.setGravity(Gravity.CENTER);
+            hint.setPadding(0, dp(12), 0, dp(2));
+            wCardBox.addView(hint, wrap());
+            return;
+        }
+
+        JSONArray trans = (cc == null) ? null : cc.optJSONArray("trans");
+        if (trans != null) {
+            for (int i = 0; i < trans.length(); i++) {
+                JSONObject t = trans.optJSONObject(i);
+                if (t == null) continue;
+                String pos = t.optString("pos", "");
+                String cn = t.optString("tranCn", "");
+                if (cn.length() == 0) continue;
+                TextView tv = new TextView(this);
+                tv.setText((pos.length() > 0 ? pos + "  " : "") + cn);
+                tv.setTextSize(m.backSize - 1f);
+                tv.setTextColor(C_TEXT);
+                tv.setPadding(0, dp(6), 0, 0);
+                wCardBox.addView(tv, wrap());
+            }
+        }
+
+        // 助记图：词条自带就用自己的；没有就查全局索引，任何词书的同一个词都能配上图
+        String picUrl = (cc == null) ? "" : cc.optString("picture", "");
+        if (picUrl.length() == 0) picUrl = picUrlFor(headWord);
+        if (picUrl.length() > 0) addWordPicture(picUrl);
+
+        JSONObject sen = (cc == null) ? null : cc.optJSONObject("sentence");
+        JSONArray ss = (sen == null) ? null : sen.optJSONArray("sentences");
+        if (ss != null && ss.length() > 0) {
+            JSONObject s0 = ss.optJSONObject(0);
+            if (s0 != null) {
+                String en = s0.optString("sContent", "");
+                String cn = s0.optString("sCn", "");
+                if (en.length() > 0) {
+                    TextView e1 = new TextView(this);
+                    e1.setText(en);
+                    e1.setTextSize(m.subtitleSize - 1f);
+                    e1.setTextColor(0xFFB0BEC5);
+                    e1.setPadding(0, dp(10), 0, 0);
+                    wCardBox.addView(e1, wrap());
+                }
+                if (cn.length() > 0) {
+                    TextView e2 = new TextView(this);
+                    e2.setText(cn);
+                    e2.setTextSize(m.subtitleSize - 2f);
+                    e2.setTextColor(C_SUB);
+                    wCardBox.addView(e2, wrap());
+                }
+            }
+        }
+    }
+
+    /** 记忆曲线 1 → 2 → 4 → 7 → 15 → 30 → 60 天。q=5 认识 / 3 模糊 / 1 不认识。
+     *  「不认识」不往后推，而是明天再见 + 本轮进重来池，当天就要再碰一次。 */
+    private void rateWord(int q) {
+        int i = wCurIdx;
+        int interval = progShort(i, 1);
+        int reps = progByte(i, 5);
+        int today = todayDay();
+        boolean wasNew = (interval == 0 && reps == 0);
+
+        if (q >= 3) {
+            int next;
+            if (interval <= 0) next = 1;
+            else if (interval < 2) next = 2;
+            else if (interval < 4) next = 4;
+            else if (interval < 7) next = 7;
+            else if (interval < 15) next = 15;
+            else if (interval < 30) next = 30;
+            else next = Math.min(60, interval * 2);
+            // 模糊：不往后推，也不允许比原来更短（4→7/2=3 那种倒退没道理）
+            if (q == 3 && interval > 0) next = Math.max(interval, Math.max(1, next / 2));
+            interval = next;
+            reps = Math.min(255, reps + 1);
+            wMissed.remove(i);      // 看过卡片答对了，下次回到选择题
+            // 生词本里点「认识」就是刷会了，直接移出生词本
+            if (wMode == 2 && q == 5) setProgByte(i, 6, 0);
+        } else {
+            // 记一次忘记（第 6 字节），明天再见，本轮还会在重来池里再出现
+            setProgByte(i, 6, Math.min(255, progByte(i, 6) + 1));
+            reps = 0;
+            interval = 1;
+            addRetry(i);
+            wMissed.add(i);         // 下一轮先给卡片看释义，不连着考
+            wStatHard++;
+        }
+
+        setProgShort(i, 1, interval);
+        setProgShort(i, 3, Math.min(65535, today + interval));
+        setProgByte(i, 5, reps);
+        saveWordProgress();
+
+        // 同一个词在重来轮里会再评一次，只按「第一次见到」记一笔
+        if (wCounted.add(i)) {
+            if (wasNew) { wStatNewDone++; bumpNewToday(); } else wStatReviewDone++;
+        }
+        wQueuePos++;
+        nextCard();
+    }
+
+    // ================= 单词：搜索 =================
+
+    private static final int WORD_SEARCH_LIMIT = 20;
+
+    private void buildWordSearchScreen() {
+        wordSearchScroll = new OverScrollScrollView(this);
+        wordSearchScroll.setVerticalScrollBarEnabled(false);
+        roundPadScroll(wordSearchScroll);
+        wordSearchInner = new LinearLayout(this);
+        wordSearchInner.setOrientation(LinearLayout.VERTICAL);
+        wordSearchScroll.addView(wordSearchInner);
+        wordSearchScreen.addView(wordSearchScroll, lw());
+    }
+
+    private android.widget.EditText wSearchBox;
+    private LinearLayout wSearchResults;
+    private TextView wSearchStatus;
+
+    // 搜词的两条路：有网走有道（免 key、免登录），没网在「所有已下载词书」里按前缀搜。
+    // 本地索引只存词头 + 行号，正文点开才读；建一次一直留着，书单变了才重建。
+    private static final String SEARCH_SUGGEST = "https://dict.youdao.com/suggest?doctype=json&num=8&q=";
+    private static final String SEARCH_DICT = "https://dict.youdao.com/jsonapi?q=";
+    private static final int SEARCH_PER_BOOK = 40;      // 每本书最多取这么多前缀命中，再一起排序取前 20
+
+    private String wSearchKey = "";                     // 当前关键词：网络结果回来时比对，别让旧结果盖新结果
+    private volatile int wSearchSeq = 0;                // 后台扫描线程也要读它，改了词就停下
+    private Runnable wSearchDebounce;
+    private final Handler wSearchHandler = new Handler();
+    private long wNetSearchDead = 0L;                   // 网络查词失败后，这段时间内直接走本地，别每次都等超时
+    private final ArrayList<BookIx> searchIx = new ArrayList<BookIx>();
+    private String searchIxSig = "";                    // 书单指纹（id + 两个文件长度）
+    private boolean searchIxBuilding = false;
+    private int searchIxWords = 0;
+    private final java.util.HashMap<String, ArrayList<String[]>> suggestCache =
+            new java.util.HashMap<String, ArrayList<String[]>>();
+
+    /** 多书索引：一本书的词头 + 排序下标 + 每行偏移。10 万词也就几 MB，比每次重扫文件划算。 */
+    private static class BookIx {
+        String id, name;
+        final ArrayList<String> words = new ArrayList<String>();
+        int[] off, len, sorted;
+
+        void sortWords() {
+            int n = words.size();
+            Integer[] idx = new Integer[n];
+            for (int i = 0; i < n; i++) idx[i] = i;
+            java.util.Arrays.sort(idx, new java.util.Comparator<Integer>() {
+                public int compare(Integer a, Integer b) {
+                    return words.get(a).compareToIgnoreCase(words.get(b));
+                }
+            });
+            sorted = new int[n];
+            for (int i = 0; i < n; i++) sorted[i] = idx[i];
+        }
+    }
+
+    /** 一条搜索结果：词、来自哪本书、书里的第几行。 */
+    private static class Hit {
+        String word;
+        BookIx bk;
+        int line;
+        Hit(String w, BookIx b, int l) { word = w; bk = b; line = l; }
+    }
+
+    private void renderWordSearch() {
+        loadWordBooks();
+        wSearchKey = "";
+        wSearchSeq++;
+        wordSearchInner.removeAllViews();
+        wordSearchInner.addView(makeBack("‹ 返回", new View.OnClickListener() {
+            // 跟着入口走：从英语科目进来就回科目页，从背单词主页进来才主页
+            public void onClick(View v) { goBack(backTarget()); }
+        }), wrapM());
+        wordSearchInner.addView(pageTitle("搜索单词"), wrap());
+
+        boolean anyBook = !downloadedBooks().isEmpty();
+        if (!anyBook && !online()) {
+            wordSearchInner.addView(grayTip("没有已下载的词书，也没有网络。先去「背单词设置」下载一本，或连上网再搜。"), wrap());
+            return;
+        }
+
+        wSearchBox = new android.widget.EditText(this);
+        wSearchBox.setHint("输入英文或中文");
+        wSearchBox.setSingleLine(true);
+        wSearchBox.setTextSize(m.subtitleSize);
+        wSearchBox.setTextColor(C_TEXT);
+        wSearchBox.setHintTextColor(0xFF666666);
+        wSearchBox.setBackground(pill(C_PILL));
+        wSearchBox.setPadding(dp(12), dp(8), dp(12), dp(8));
+        wSearchBox.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+        wSearchBox.addTextChangedListener(new android.text.TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+            public void onTextChanged(CharSequence s, int a, int b, int c) { }
+            public void afterTextChanged(android.text.Editable e) {
+                onSearchInput(e.toString().trim());
+            }
+        });
+        wordSearchInner.addView(wSearchBox, wrapGap(6));   // 搜索框和第一条结果不能贴在一起
+
+        wSearchStatus = new TextView(this);
+        wSearchStatus.setTextSize(m.subtitleSize - 2f);
+        wSearchStatus.setTextColor(C_SUB);
+        wSearchStatus.setGravity(Gravity.CENTER);
+        wSearchStatus.setPadding(dp(4), dp(2), dp(4), dp(2));
+        wordSearchInner.addView(wSearchStatus, wrap());
+
+        wSearchResults = new LinearLayout(this);
+        wSearchResults.setOrientation(LinearLayout.VERTICAL);
+        wordSearchInner.addView(wSearchResults, wrapGap(4));
+        wordSearchInner.addView(grayTip("英文按开头几个字母匹配，中文按释义找；点结果看完整释义。"), wrap());
+        padInner(wordSearchInner);
+
+        updateSearchStatus();
+        ensureSearchIndexAsync();     // 还没输就先在后台把词库整理好，别等第一下按键
+    }
+
+    /** 输入变化：350ms 防抖，打字过程中不每敲一个字母就发一次请求。 */
+    private void onSearchInput(String q) {
+        wSearchKey = q;
+        wSearchSeq++;
+        if (wSearchDebounce != null) wSearchHandler.removeCallbacks(wSearchDebounce);
+        if (q.length() == 0) {
+            if (wSearchResults != null) wSearchResults.removeAllViews();
+            updateSearchStatus();
+            return;
+        }
+        final String key = q;
+        wSearchDebounce = new Runnable() {
+            public void run() {
+                if (!key.equals(wSearchKey)) return;
+                fillWordResultsNow(key);
+            }
+        };
+        wSearchHandler.postDelayed(wSearchDebounce, 350);
+    }
+
+    private void fillWordResultsNow(String key) {
+        if (wSearchResults == null || screen != S_WORD_SEARCH) return;
+        wSearchResults.removeAllViews();
+        if (netSearchUsable()) searchOnline(key);
+        else searchLocal(key);
+    }
+
+    /** 有网 → 有道；请求失败过一次就静默 60 秒，期间直接搜本地。 */
+    private boolean netSearchUsable() {
+        if (!online()) return false;
+        return System.currentTimeMillis() >= wNetSearchDead;
+    }
+
+    // ---- 本地：所有已下载词书一起搜 ----
+
+    /** 书单指纹：书 id + 词书大小 + 索引大小。下载/删除一本书，指纹就变了。 */
+    private String searchIxSignature() {
+        StringBuilder sb = new StringBuilder();
+        for (WordBook b : wordBooks) {
+            if (!bookDownloaded(b)) continue;
+            sb.append(b.id).append(':')
+                    .append(bookJson(b.id).length()).append('/')
+                    .append(bookIdx(b.id).length()).append(';');
+        }
+        return sb.toString();
+    }
+
+    private ArrayList<WordBook> downloadedBooks() {
+        ArrayList<WordBook> out = new ArrayList<WordBook>();
+        for (WordBook b : wordBooks) if (bookDownloaded(b) && bookIdx(b.id).exists()) out.add(b);
+        return out;
+    }
+
+    /** 后台整理多书索引；已经是最新就直接返回。 */
+    private void ensureSearchIndexAsync() {
+        if (searchIxBuilding) return;
+        final String sig = searchIxSignature();
+        if (sig.equals(searchIxSig) && (!searchIx.isEmpty() || sig.length() == 0)) return;
+        if (sig.length() == 0) {
+            searchIx.clear();
+            searchIxSig = "";
+            searchIxWords = 0;
+            updateSearchStatus();
+            return;
+        }
+        searchIxBuilding = true;
+        updateSearchStatus();
+        new Thread(new Runnable() {
+            public void run() {
+                final ArrayList<BookIx> built = buildSearchIndex();
+                int total = 0;
+                if (built != null) for (BookIx b : built) total += b.words.size();
+                final int tot = total;
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        searchIxBuilding = false;
+                        if (built != null) {
+                            searchIx.clear();
+                            searchIx.addAll(built);
+                            searchIxSig = sig;
+                            searchIxWords = tot;
+                        }
+                        updateSearchStatus();
+                        if (screen == S_WORD_SEARCH && wSearchKey.length() > 0) fillWordResultsNow(wSearchKey);
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private ArrayList<BookIx> buildSearchIndex() {
+        ArrayList<BookIx> out = new ArrayList<BookIx>();
+        for (WordBook b : downloadedBooks()) {
+            try {
+                BookIx ix = new BookIx();
+                ix.id = b.id;
+                ix.name = b.name;
+                java.io.DataInputStream in = new java.io.DataInputStream(
+                        new java.io.BufferedInputStream(new java.io.FileInputStream(bookIdx(b.id))));
+                try {
+                    if (in.readInt() != 0x48575A31) continue;
+                    int n = in.readInt();
+                    ix.words.ensureCapacity(n);
+                    ix.off = new int[n];
+                    ix.len = new int[n];
+                    for (int i = 0; i < n; i++) {
+                        ix.words.add(rStr(in));
+                        ix.off[i] = in.readInt();
+                        ix.len[i] = in.readInt();
+                    }
+                } finally {
+                    try { in.close(); } catch (Exception ignored) { }
+                }
+                ix.sortWords();
+                if (!ix.words.isEmpty()) out.add(ix);
+            } catch (Throwable ignored) {
+                // 单本坏了就跳过，别让整个搜索页打不开
+            }
+        }
+        return out;
+    }
+
+    private void searchLocal(String key) {
+        if (isChinese(key)) { searchLocalChinese(key); return; }   // 中文按释义反查
+        if (searchIxBuilding) { showSearchNote("正在整理词库…"); return; }
+        if (!searchIxSig.equals(searchIxSignature())) {
+            ensureSearchIndexAsync();
+            showSearchNote("正在整理词库…");
+            return;
+        }
+        if (searchIx.isEmpty()) { showSearchNote("还没有已下载的词书"); return; }
+
+        final String low = key.toLowerCase();
+        ArrayList<Hit> hits = new ArrayList<Hit>();
+        for (int bi = 0; bi < searchIx.size(); bi++) {
+            BookIx bk = searchIx.get(bi);
+            int[] srt = bk.sorted;
+            if (srt == null) continue;
+            int lo = 0, hi = srt.length;
+            while (lo < hi) {
+                int mid = (lo + hi) >>> 1;
+                if (bk.words.get(srt[mid]).compareToIgnoreCase(low) < 0) lo = mid + 1;
+                else hi = mid;
+            }
+            int take = 0;
+            for (int i = lo; i < srt.length && take < SEARCH_PER_BOOK; i++) {
+                String w = bk.words.get(srt[i]);
+                if (!startsWithIgnoreCase(w, low)) break;
+                hits.add(new Hit(w, bk, srt[i]));
+                take++;
+            }
+        }
+        if (hits.isEmpty()) { showSearchNote("没找到以「" + key + "」开头的词"); return; }
+
+        java.util.Collections.sort(hits, new java.util.Comparator<Hit>() {
+            public int compare(Hit a, Hit b) { return a.word.compareToIgnoreCase(b.word); }
+        });
+        ArrayList<Hit> top = new ArrayList<Hit>();
+        java.util.HashSet<String> seen = new java.util.HashSet<String>();
+        for (int i = 0; i < hits.size() && top.size() < WORD_SEARCH_LIMIT; i++) {
+            Hit h = hits.get(i);
+            if (seen.add(h.word.toLowerCase())) top.add(h);      // 同一词在多本书里只留一条
+        }
+        renderLocalHits(top);
+    }
+
+    /** 输入里只要有一个非 ASCII 字符就当中文：英文前缀搜不到中文，得按释义反查。 */
+    private static boolean isChinese(String s) {
+        if (s == null) return false;
+        for (int i = 0; i < s.length(); i++) if (s.charAt(i) > 0x7F) return true;
+        return false;
+    }
+
+    /** 离线中文搜索：把已下载的词书逐本扫一遍，找释义里含这个中文的词。
+     *  不建额外索引（建索引要读全部正文，一样慢），扫的时候字节级预筛，
+     *  只有「这一行含关键词」才解析 JSON 确认，命中的行直接用 .idx 的词头。 */
+    private void searchLocalChinese(final String key) {
+        if (searchIxBuilding || !searchIxSig.equals(searchIxSignature())) {
+            ensureSearchIndexAsync();
+            showSearchNote("正在整理词库…");
+            return;
+        }
+        if (searchIx.isEmpty()) { showSearchNote("还没有已下载的词书"); return; }
+
+        final ArrayList<BookIx> books = new ArrayList<BookIx>(searchIx);
+        if (curBook != null) {          // 正在背的那本排最前，通常就是用户想找的
+            for (int i = 0; i < books.size(); i++) {
+                if (books.get(i).id.equals(curBook.id)) {
+                    books.add(0, books.remove(i));
+                    break;
+                }
+            }
+        }
+        final int seq = wSearchSeq;
+        showSearchNote("正在词书里找「" + key + "」…");
+        new Thread(new Runnable() {
+            public void run() {
+                final byte[] kb = key.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                final ArrayList<Hit> hits = new ArrayList<Hit>();
+                final ArrayList<String> means = new ArrayList<String>();
+                long deadline = System.currentTimeMillis() + 8000L;    // 书多的时候别无限扫
+                for (int i = 0; i < books.size(); i++) {
+                    scanBookChinese(books.get(i), kb, key, seq, hits, means, WORD_SEARCH_LIMIT, deadline);
+                    if (seq != wSearchSeq) return;
+                    if (hits.size() >= WORD_SEARCH_LIMIT) break;
+                    if (System.currentTimeMillis() > deadline) break;
+                }
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (seq != wSearchSeq || screen != S_WORD_SEARCH || wSearchResults == null) return;
+                        renderChineseHits(key, hits, means);
+                    }
+                });
+            }
+        }).start();
+    }
+
+    /** 扫一本书的正文；行号只在「有词头的行」上递增，必须和 .idx 的计数规则一致。 */
+    private void scanBookChinese(BookIx bk, byte[] kb, String key, int seq,
+                                 ArrayList<Hit> hits, ArrayList<String> means,
+                                 int max, long deadline) {
+        java.io.BufferedInputStream in = null;
+        try {
+            in = new java.io.BufferedInputStream(new java.io.FileInputStream(bookJson(bk.id)), 64 * 1024);
+            byte[] buf = new byte[64 * 1024];
+            byte[] line = new byte[96 * 1024];
+            int lineLen = 0, lineNo = 0, n;
+            while ((n = in.read(buf)) > 0) {
+                for (int i = 0; i < n; i++) {
+                    byte c = buf[i];
+                    if (c == '\n') {
+                        if (lineLen > 0) {
+                            String head = headOf(line, lineLen);
+                            if (head != null) {
+                                if (containsBytes(line, lineLen, kb)) {
+                                    String mean = meaningOfLine(line, lineLen);
+                                    if (mean != null && mean.indexOf(key) >= 0) {
+                                        hits.add(new Hit(head, bk, lineNo));
+                                        means.add(mean);
+                                        if (hits.size() >= max) return;
+                                    }
+                                }
+                                lineNo++;
+                            }
+                        }
+                        lineLen = 0;
+                    } else if (lineLen < line.length) {
+                        line[lineLen++] = c;
+                    }
+                }
+                if (seq != wSearchSeq || System.currentTimeMillis() > deadline) return;
+            }
+            if (lineLen > 0) {
+                String head = headOf(line, lineLen);
+                if (head != null && containsBytes(line, lineLen, kb)) {
+                    String mean = meaningOfLine(line, lineLen);
+                    if (mean != null && mean.indexOf(key) >= 0) {
+                        hits.add(new Hit(head, bk, lineNo));
+                        means.add(mean);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        } finally {
+            try { if (in != null) in.close(); } catch (Exception ignored) { }
+        }
+    }
+
+    /** 字节里找一段字节（中文按 UTF-8 直接比，不用先解码整行）。 */
+    private static boolean containsBytes(byte[] hay, int len, byte[] key) {
+        if (key.length == 0 || len < key.length) return false;
+        int last = len - key.length;
+        outer:
+        for (int i = 0; i <= last; i++) {
+            if (hay[i] != key[0]) continue;
+            for (int k = 1; k < key.length; k++) if (hay[i + k] != key[k]) continue outer;
+            return true;
+        }
+        return false;
+    }
+
+    private String meaningOfLine(byte[] line, int len) {
+        try { return meaningOf(new JSONObject(new String(line, 0, len, "UTF-8"))); }
+        catch (Throwable e) { return null; }
+    }
+
+    private void renderChineseHits(String key, ArrayList<Hit> hits, ArrayList<String> means) {
+        if (wSearchResults == null) return;
+        wSearchResults.removeAllViews();
+        if (hits.isEmpty()) { showSearchNote("本地词书里没有含「" + key + "」的词"); return; }
+        for (int i = 0; i < hits.size(); i++) {
+            Hit h = hits.get(i);
+            wSearchResults.addView(wordResultRow(h.word, means.get(i), h.bk.name, h.bk, h.line, null), wrapGap(4));
+        }
+    }
+
+    /** 大小写不敏感的前缀判断；low 已经是小写，逐字符比，别用正则。 */
+    private static boolean startsWithIgnoreCase(String w, String low) {
+        if (w == null || w.length() < low.length()) return false;
+        for (int i = 0; i < low.length(); i++) {
+            char a = w.charAt(i);
+            if (a >= 'A' && a <= 'Z') a = (char) (a + 32);
+            if (a != low.charAt(i)) return false;
+        }
+        return true;
+    }
+
+    /** 同一本书只开一次文件，20 条释义一次读完——每条都开关文件在手表上能感觉出来。 */
+    private void renderLocalHits(ArrayList<Hit> hits) {
+        if (wSearchResults == null) return;
+        wSearchResults.removeAllViews();
+        java.util.HashMap<String, java.io.RandomAccessFile> rafs =
+                new java.util.HashMap<String, java.io.RandomAccessFile>();
+        try {
+            for (int i = 0; i < hits.size(); i++) {
+                final Hit h = hits.get(i);
+                String mean = "";
+                try {
+                    java.io.RandomAccessFile rf = rafs.get(h.bk.id);
+                    if (rf == null) {
+                        rf = new java.io.RandomAccessFile(bookJson(h.bk.id), "r");
+                        rafs.put(h.bk.id, rf);
+                    }
+                    mean = meaningAt(rf, h.bk, h.line);
+                } catch (Throwable ignored) { }
+                wSearchResults.addView(wordResultRow(h.word, mean, h.bk.name, h.bk, h.line, null), wrapGap(4));
+            }
+        } finally {
+            for (java.io.RandomAccessFile rf : rafs.values()) {
+                try { rf.close(); } catch (Exception ignored) { }
+            }
+        }
+    }
+
+    private void showSearchNote(String text) {
+        if (wSearchResults == null) return;
+        wSearchResults.removeAllViews();
+        TextView none = new TextView(this);
+        none.setText(text);
+        none.setTextSize(m.subtitleSize - 1f);
+        none.setTextColor(C_SUB);
+        none.setPadding(dp(4), dp(10), dp(4), dp(10));
+        none.setGravity(Gravity.CENTER);
+        wSearchResults.addView(none, wrap());
+    }
+
+    private void updateSearchStatus() {
+        if (wSearchStatus == null) return;
+        if (searchIxBuilding) { wSearchStatus.setText("正在整理词库…"); return; }
+        int books = downloadedBooks().size();
+        if (netSearchUsable()) {
+            wSearchStatus.setText(books > 0
+                    ? "在线 · 有道词典（没网时搜本地 " + books + " 本词书）"
+                    : "在线 · 有道词典");
+        } else if (books > 0) {
+            wSearchStatus.setText("离线 · 本地 " + books + " 本词书，共 " + searchIxWords + " 词");
+        } else {
+            wSearchStatus.setText("离线，也没有已下载的词书");
+        }
+    }
+
+    // ---- 在线：有道词典（免 key、免登录） ----
+
+    private void searchOnline(final String key) {
+        ArrayList<String[]> cached = suggestCache.get(key.toLowerCase());
+        if (cached != null) { renderOnlineRows(cached); return; }
+
+        final int seq = wSearchSeq;
+        new Thread(new Runnable() {
+            public void run() {
+                String body = null;
+                try { body = httpGetText(SEARCH_SUGGEST + urlEnc(key), 4000, 6000); }
+                catch (Throwable ignored) { body = null; }
+                final String b = body;
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (seq != wSearchSeq || screen != S_WORD_SEARCH || wSearchResults == null) return;
+                        if (b == null) {
+                            // 连了网但没有外网（或接口不通）：退回本地，并把网络静默一分钟
+                            wNetSearchDead = System.currentTimeMillis() + 60000L;
+                            updateSearchStatus();
+                            toast("网络没响应，改搜本地词书");
+                            searchLocal(key);
+                            return;
+                        }
+                        ArrayList<String[]> entries = parseSuggest(b);
+                        if (entries.isEmpty()) { searchLocal(key); return; }
+                        if (suggestCache.size() > 40) suggestCache.clear();
+                        suggestCache.put(key.toLowerCase(), entries);
+                        renderOnlineRows(entries);
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private ArrayList<String[]> parseSuggest(String body) {
+        ArrayList<String[]> out = new ArrayList<String[]>();
+        try {
+            JSONObject o = new JSONObject(body);
+            JSONObject data = o.optJSONObject("data");
+            JSONArray arr = (data == null) ? null : data.optJSONArray("entries");
+            if (arr == null) return out;
+            for (int i = 0; i < arr.length() && out.size() < 8; i++) {
+                JSONObject e = arr.optJSONObject(i);
+                if (e == null) continue;
+                String w = e.optString("entry", "").trim();
+                if (w.length() == 0) continue;
+                String explain = stripHtml(e.optString("explain", ""));
+                out.add(new String[]{w, explain, englishFrom(explain, w)});
+            }
+        } catch (Throwable ignored) { }
+        return out;
+    }
+
+    private void renderOnlineRows(ArrayList<String[]> entries) {
+        if (wSearchResults == null) return;
+        wSearchResults.removeAllViews();
+        for (int i = 0; i < entries.size(); i++) {
+            String[] e = entries.get(i);
+            String query = (e.length > 2 && e[2] != null && e[2].length() > 0) ? e[2] : e[0];
+            wSearchResults.addView(wordResultRow(e[0], e[1], "有道", null, -1, query), wrapGap(4));
+        }
+    }
+
+    /** 中文词条点开要查对应的英文：explain 是「abandon; give up; waive」，取第一段。 */
+    private static String englishFrom(String explain, String word) {
+        if (!isChinese(word)) return word;
+        String s = explain == null ? "" : explain;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == ';' || c == '；' || c == ',') { s = s.substring(0, i); break; }
+        }
+        s = s.replace(" sth", "").replace(" sb", "").trim();
+        return s.length() > 0 ? s : word;
+    }
+
+    /** 点一条网络结果：本地词书里正好有这个词就直接开本地词条（释义、例句都更全），
+     *  没有再去查有道。搜索本身是联网的，点开走哪条路只看谁的信息更全。 */
+    private void openOnlineWord(final String word) {
+        Hit local = findLocalExact(word);
+        if (local != null) { showWordDetail(local.bk, local.line); return; }
+        toast("正在查 " + word + "…");
+        new Thread(new Runnable() {
+            public void run() {
+                JSONObject o = null;
+                try { o = new JSONObject(httpGetText(SEARCH_DICT + urlEnc(word), 4000, 8000)); }
+                catch (Throwable ignored) { o = null; }
+                final JSONObject r = o;
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (r == null) { toast("查询失败，检查网络"); return; }
+                        if (!showOnlineCard(r, word)) toast("有道也没查到这个词");
+                    }
+                });
+            }
+        }).start();
+    }
+
+    /** 在已建好的多书索引里找完全一样的词（大小写不敏感）。 */
+    private Hit findLocalExact(String word) {
+        String low = word.toLowerCase();
+        for (int bi = 0; bi < searchIx.size(); bi++) {
+            BookIx bk = searchIx.get(bi);
+            int[] srt = bk.sorted;
+            if (srt == null) continue;
+            int lo = 0, hi = srt.length;
+            while (lo < hi) {
+                int mid = (lo + hi) >>> 1;
+                if (bk.words.get(srt[mid]).compareToIgnoreCase(low) < 0) lo = mid + 1;
+                else hi = mid;
+            }
+            if (lo < srt.length && bk.words.get(srt[lo]).equalsIgnoreCase(word))
+                return new Hit(bk.words.get(srt[lo]), bk, srt[lo]);
+        }
+        return null;
+    }
+
+    /** 有道 jsonapi → 弹窗要的 词 / 音标 / 释义 / 例句。查不到返回 false。 */
+    private boolean showOnlineCard(JSONObject o, String word) {
+        String head = word;
+        String phone = "";
+        ArrayList<String> lines = new ArrayList<String>();
+        ArrayList<String[]> sents = new ArrayList<String[]>();
+
+        JSONObject simple = o.optJSONObject("simple");
+        JSONArray sw = (simple == null) ? null : simple.optJSONArray("word");
+        if (sw != null && sw.length() > 0) {
+            JSONObject w0 = sw.optJSONObject(0);
+            if (w0 != null) {
+                phone = w0.optString("usphone", "");
+                if (phone.length() == 0) phone = w0.optString("ukphone", "");
+                String h = w0.optString("return-phrase", "");
+                if (h.length() > 0) head = h;
+            }
+        }
+
+        JSONObject ec = o.optJSONObject("ec");
+        JSONArray ew = (ec == null) ? null : ec.optJSONArray("word");
+        if (ew != null && ew.length() > 0) {
+            JSONObject w0 = ew.optJSONObject(0);
+            if (w0 != null) {
+                if (phone.length() == 0) {
+                    phone = w0.optString("usphone", "");
+                    if (phone.length() == 0) phone = w0.optString("ukphone", "");
+                }
+                JSONArray trs = w0.optJSONArray("trs");
+                if (trs != null) {
+                    for (int i = 0; i < trs.length(); i++) {
+                        JSONObject t = trs.optJSONObject(i);
+                        if (t == null) continue;
+                        JSONArray tr = t.optJSONArray("tr");
+                        if (tr == null) continue;
+                        for (int k = 0; k < tr.length(); k++) {
+                            JSONObject trk = tr.optJSONObject(k);
+                            if (trk == null) continue;
+                            JSONObject l = trk.optJSONObject("l");
+                            JSONArray li = (l == null) ? null : l.optJSONArray("i");
+                            if (li == null) continue;
+                            for (int m = 0; m < li.length(); m++) {
+                                String line = li.optString(m, "");
+                                if (line != null && line.length() > 0) lines.add(line);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        JSONObject sp = o.optJSONObject("blng_sents_part");
+        JSONArray pair = (sp == null) ? null : sp.optJSONArray("sentence-pair");
+        if (pair != null) {
+            for (int i = 0; i < pair.length() && sents.size() < 2; i++) {
+                JSONObject p = pair.optJSONObject(i);
+                if (p == null) continue;
+                String en = stripHtml(p.optString("sentence", ""));
+                String cn = stripHtml(p.optString("sentence-translation", ""));
+                if (en.length() == 0) continue;
+                sents.add(new String[]{en, cn});
+            }
+        }
+
+        if (lines.isEmpty()) {
+            // 中文词条：有道只给 fanyi（对应英文），没有 ec
+            JSONObject fanyi = o.optJSONObject("fanyi");
+            String tran = (fanyi == null) ? "" : fanyi.optString("tran", "");
+            if (tran.length() > 0) lines.add(tran.replace("\n", "；"));
+        }
+        if (lines.isEmpty()) return false;
+        showDictCard(head, phone, lines, sents);
+        return true;
+    }
+
+    /** 联想的 explain 和例句里带 <b> 高亮，弹窗里不认标签，先去掉。 */
+    private static String stripHtml(String s) {
+        if (s == null) return "";
+        StringBuilder sb = new StringBuilder(s.length());
+        boolean tag = false;
+        for (int i = 0; i < s.length(); i++) {
+            char ch = s.charAt(i);
+            if (ch == '<') tag = true;
+            else if (ch == '>') tag = false;
+            else if (!tag) sb.append(ch);
+        }
+        return sb.toString().replace("&quot;", "\"").replace("&amp;", "&")
+                .replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " ");
+    }
+
+    private static String urlEnc(String s) {
+        try { return java.net.URLEncoder.encode(s, "UTF-8"); }
+        catch (Exception e) { return s; }
+    }
+
+    /** 一条结果行：词 + 来源（右侧小字）+ 释义。open 为空时点开走「联网查词」。 */
+    private View wordResultRow(final String word, String mean, String from,
+                               final BookIx bk, final int line, final String query) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(dp(12), dp(8), dp(12), dp(8));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(C_PILL);
+        bg.setCornerRadius(dp(10));
+        row.setBackgroundDrawable(bg);
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView t1 = new TextView(this);
+        t1.setText(word);
+        t1.setTextSize(m.backSize - 1f);
+        t1.setTextColor(C_PRIMARY);
+        t1.setSingleLine(true);
+        t1.setEllipsize(TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams t1lp = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        top.addView(t1, t1lp);
+
+        if (from != null && from.length() > 0) {
+            TextView t3 = new TextView(this);
+            t3.setText(from);
+            t3.setTextSize(m.subtitleSize - 3f);
+            t3.setTextColor(C_SUB);
+            t3.setSingleLine(true);
+            t3.setEllipsize(TextUtils.TruncateAt.END);
+            t3.setMaxWidth(dp(96));      // 书名字长，别把词头挤没了
+            t3.setPadding(dp(6), 0, 0, 0);
+            top.addView(t3);
+        }
+        row.addView(top, wrap());
+
+        if (mean != null && mean.length() > 0) {
+            TextView t2 = new TextView(this);
+            t2.setText(mean);
+            t2.setTextSize(m.subtitleSize - 2f);
+            t2.setTextColor(C_SUB);
+            t2.setSingleLine(true);
+            t2.setEllipsize(TextUtils.TruncateAt.END);
+            row.addView(t2);
+        }
+
+        row.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                if (bk != null) showWordDetail(bk, line);
+                else openOnlineWord(query == null || query.length() == 0 ? word : query);
+            }
+        });
+        return row;
+    }
+
+    /** 直接开一条已读出来的词条 JSON。 */
+    private String meaningAt(java.io.RandomAccessFile rf, BookIx bk, int line) {
+        try {
+            byte[] b = new byte[bk.len[line]];
+            rf.seek(bk.off[line]);
+            rf.readFully(b);
+            return meaningOf(new JSONObject(new String(b, "UTF-8").trim()));
+        } catch (Throwable e) {
+            return "";
+        }
+    }
+
+    /** 前两个词性的释义拼一行。 */
+    private String meaningOf(JSONObject o) {
+        JSONObject w = (o == null) ? null : o.optJSONObject("content");
+        JSONObject wd = (w == null) ? null : w.optJSONObject("word");
+        JSONObject cc = (wd == null) ? null : wd.optJSONObject("content");
+        JSONArray tr = (cc == null) ? null : cc.optJSONArray("trans");
+        if (tr == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < tr.length() && i < 2; i++) {
+            JSONObject t = tr.optJSONObject(i);
+            if (t == null) continue;
+            if (sb.length() > 0) sb.append("；");
+            String pos = t.optString("pos", "");
+            if (pos.length() > 0) sb.append(pos).append(" ");
+            sb.append(t.optString("tranCn", ""));
+        }
+        return sb.toString();
+    }
+
+    /** 读指定词书第 i 个词的完整 JSON（按偏移 seek 一行）。 */
+    private JSONObject readWordLine(BookIx bk, int i) {
+        try {
+            java.io.RandomAccessFile rf = new java.io.RandomAccessFile(bookJson(bk.id), "r");
+            try {
+                byte[] b = new byte[bk.len[i]];
+                rf.seek(bk.off[i]);
+                rf.readFully(b);
+                return new JSONObject(new String(b, "UTF-8").trim());
+            } finally {
+                rf.close();
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 点结果看完整释义（弹窗，不跳页，保留搜索词）。 */
+    /** 词条详情。和「选单词书」「词书操作」同一套弹窗：
+     *  以前这里直接 new AlertDialog().setPositiveButton("关闭")，出来的是系统默认样式，
+     *  圆角、边框、按钮位置全跟 App 不一样，看着很突兀。 */
+    private void showWordDetail(int idx) {
+        JSONObject o = readWordLine(idx);
+        if (o == null) { toast("读取失败"); return; }
+        JSONObject w = o.optJSONObject("content");
+        if (w != null) w = w.optJSONObject("word");
+        if (w == null) { toast("词条格式不对"); return; }
+        showWordDetail(w);
+    }
+
+    /** 指定词书 + 行号的词条：搜词结果可能来自别的书，不能走当前书的 wOff / wLen。 */
+    private void showWordDetail(BookIx bk, int line) {
+        JSONObject o = readWordLine(bk, line);
+        if (o == null) { toast("读取失败"); return; }
+        JSONObject w = o.optJSONObject("content");
+        if (w != null) w = w.optJSONObject("word");
+        if (w == null) { toast("词条格式不对"); return; }
+        showWordDetail(w);
+    }
+
+    /** 把一本书里的一条词条 JSON 拆成弹窗要的三样东西，再交给 showDictCard。 */
+    private void showWordDetail(JSONObject w) {
+        final JSONObject cc = w.optJSONObject("content");
+        final String head = w.optString("wordHead", "");
+        String phone = (cc == null) ? "" : cc.optString("usphone", "");
+        if (phone.length() == 0 && cc != null) phone = cc.optString("ukphone", "");
+
+        ArrayList<String> lines = new ArrayList<String>();
+        JSONArray tr = (cc == null) ? null : cc.optJSONArray("trans");
+        if (tr != null) {
+            for (int i = 0; i < tr.length(); i++) {
+                JSONObject t = tr.optJSONObject(i);
+                if (t == null) continue;
+                String pos = t.optString("pos", "");
+                lines.add((pos.length() > 0 ? pos + "  " : "") + t.optString("tranCn", ""));
+            }
+        }
+        ArrayList<String[]> sents = new ArrayList<String[]>();
+        JSONObject sen = (cc == null) ? null : cc.optJSONObject("sentence");
+        JSONArray ss = (sen == null) ? null : sen.optJSONArray("sentences");
+        if (ss != null) {
+            for (int i = 0; i < ss.length() && i < 2; i++) {
+                JSONObject s0 = ss.optJSONObject(i);
+                if (s0 == null) continue;
+                String en = s0.optString("sContent", "");
+                if (en.length() == 0) continue;
+                sents.add(new String[]{en, s0.optString("sCn", "")});
+            }
+        }
+        showDictCard(head, phone, lines, sents);
+    }
+
+    /** 词条弹窗：本地词书和联网查词共用这一套版式（不另写一份）。
+     *  lines 每行一条释义（已带词性前缀），sents 是 {英文, 中文} 对，最多两条。 */
+    private void showDictCard(String head, String phone, List<String> lines, List<String[]> sents) {
+        LinearLayout outer = new LinearLayout(this);
+        outer.setOrientation(LinearLayout.VERTICAL);
+        outer.setPadding(dp(12), dp(10), dp(12), dp(8));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xFF151515);
+        bg.setCornerRadius(dp(16));
+        outer.setBackgroundDrawable(bg);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(2), 0, dp(2), 0);
+
+        // 词 + 音标 + 发音
+        TextView tvHead = new TextView(this);
+        tvHead.setText(head);
+        tvHead.setTextSize(m.backSize);
+        tvHead.setTypeface(Typeface.DEFAULT_BOLD);
+        tvHead.setTextColor(Color.WHITE);
+        content.addView(tvHead, wrap());
+
+        LinearLayout phRow = new LinearLayout(this);
+        phRow.setOrientation(LinearLayout.HORIZONTAL);
+        phRow.setGravity(Gravity.CENTER_VERTICAL);
+        if (phone != null && phone.length() > 0) {
+            TextView ph = new TextView(this);
+            ph.setText("/" + phone + "/");
+            ph.setTextSize(m.subtitleSize - 1f);
+            ph.setTextColor(C_SUB);
+            ph.setPadding(0, dp(1), dp(8), 0);
+            phRow.addView(ph);
+        }
+        if (!muteOn()) {
+            TextView spk = new TextView(this);
+            spk.setPadding(dp(8), dp(6), dp(8), dp(6));
+            spk.setBackground(clickBg(0xFF14384A));
+            applyIconOnly(spk, "ic_volume", C_PRIMARY, 14);
+            spk.setContentDescription("播放发音");
+            spk.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    vibrate();
+                    speakWord(head);
+                }
+            });
+            phRow.addView(spk);
+        }
+        if (phRow.getChildCount() > 0) {
+            LinearLayout.LayoutParams plp = wrap();
+            plp.topMargin = dp(2);
+            content.addView(phRow, plp);
+        }
+
+        // 释义
+        if (lines != null) {
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i);
+                if (line == null || line.length() == 0) continue;
+                TextView tv = new TextView(this);
+                tv.setText(line);
+                tv.setTextSize(m.subtitleSize - 1f);
+                tv.setTextColor(C_TEXT);
+                tv.setPadding(0, dp(5), 0, 0);
+                content.addView(tv, wrap());
+            }
+        }
+
+        // 例句（最多两条，多了弹窗太长）
+        if (sents != null) {
+            for (int i = 0; i < sents.size() && i < 2; i++) {
+                String[] p = sents.get(i);
+                if (p == null || p[0] == null || p[0].length() == 0) continue;
+                TextView e1 = new TextView(this);
+                e1.setText(p[0]);
+                e1.setTextSize(m.subtitleSize - 2f);
+                e1.setTextColor(0xFFB0BEC5);
+                e1.setPadding(0, dp(8), 0, 0);
+                content.addView(e1, wrap());
+                if (p.length > 1 && p[1] != null && p[1].length() > 0) {
+                    TextView e2 = new TextView(this);
+                    e2.setText(p[1]);
+                    e2.setTextSize(m.subtitleSize - 3f);
+                    e2.setTextColor(C_SUB);
+                    content.addView(e2, wrap());
+                }
+            }
+        }
+
+        final ScrollView sv = new OverScrollScrollView(this);
+        sv.setVerticalScrollBarEnabled(false);
+        sv.addView(content, wrap());
+        tuneDialogScroll(sv, content);       // 滚动时整块重绘，否则会留残影
+
+        final int maxH = m.round ? dp(210) : dp(300);
+        final LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, maxH);
+        outer.addView(sv, slp);
+
+        TextView close = new TextView(this);
+        close.setText("关闭");
+        close.setTextSize(m.subtitleSize - 1f);
+        close.setGravity(Gravity.CENTER);
+        close.setTextColor(C_SUB);
+        close.setPadding(dp(8), dp(9), dp(8), dp(4));
+        outer.addView(close, wrap());
+
+        final AlertDialog d = new AlertDialog.Builder(this).setView(outer).create();
+        close.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                try { d.dismiss(); } catch (Throwable ignored) { }
+            }
+        });
+
+        // 词条短的时候按内容收高，别留一大片空
+        d.setOnShowListener(new DialogInterface.OnShowListener() {
+            public void onShow(DialogInterface dlg) {
+                content.post(new Runnable() {
+                    public void run() {
+                        int h = content.getHeight();
+                        if (h > 0 && h < maxH) {
+                            slp.height = h + dp(2);
+                            sv.setLayoutParams(slp);
+                        }
+                    }
+                });
+            }
+        });
+
+        tuneDialogWindow(d);   // 必须 show() 之前
+        d.show();
+        sizeDialog(d, 0.9f);
+    }
+
     private void renderOrder() {
         int keepY = (orderInner.getChildCount() > 0) ? orderScroll.getScrollY() : -1;
         orderInner.removeAllViews();
@@ -11817,6 +15478,19 @@ public class MainActivity extends Activity {
         changelogScroll.addView(changelogInner);
         changelogScreen.addView(changelogScroll, lw());
 
+        // 滑到底自动续一页，省得每 5 个版本点一次；changelogBusy 挡住同一帧的重复触发
+        changelogScroll.setOnScrollChangeListener(new android.view.View.OnScrollChangeListener() {
+            public void onScrollChange(View v, int sx, int sy, int ox, int oy) {
+                if (changelogBusy || changelogArr == null) return;
+                if (changelogShown >= changelogArr.length()) return;
+                View child = changelogScroll.getChildAt(0);
+                if (child == null) return;
+                if (sy + changelogScroll.getHeight() >= child.getHeight() - dp(120)) {
+                    appendChangelog();
+                }
+            }
+        });
+
         changelogInner.addView(makeBack("‹ 返回", new View.OnClickListener() {
             public void onClick(View v) { goBack(backTarget()); }
         }), wrapM());
@@ -11842,10 +15516,22 @@ public class MainActivity extends Activity {
         padInner(changelogInner);
     }
 
-    /** 读取 assets/changelog.json，按版本倒序渲染；当前版本高亮。 */
+    private JSONArray changelogArr;
+    private int changelogShown;
+    private boolean changelogBusy;
+    private TextView changelogMore;
+    /** 一次只渲染这么多版。184 个版本一次性建 View，打开就是几秒的卡。 */
+    private static final int CHANGELOG_PAGE = 5;
+
+    /** 读取 assets/changelog.json，按版本倒序渲染；先出最近几版，其余滑到底或点按钮再加载。 */
     private void fillChangelog() {
         changelogFilled = true;
         changelogList.removeAllViews();
+        // 改字号会整树重建再填一次，旧的「查看更多」得先摘掉，否则会叠出两三个
+        if (changelogMore != null && changelogMore.getParent() == changelogInner) {
+            changelogInner.removeView(changelogMore);
+        }
+        changelogMore = null;
         String cur = appVersion();
         JSONArray arr = null;
         try {
@@ -11862,9 +15548,38 @@ public class MainActivity extends Activity {
             changelogList.addView(empty, wrap());
             return;
         }
+        changelogArr = arr;
+        changelogShown = 0;
         changelogSub.setText("当前 v" + cur + " · 共记录 " + arr.length() + " 个版本");
-        for (int i = 0; i < arr.length(); i++) {
-            JSONObject o = arr.optJSONObject(i);
+
+        // 「查看更多」放在列表后面，appendChangelog 只往 changelogList 里加卡片
+        changelogMore = new TextView(this);
+        changelogMore.setTextSize(m.subtitleSize - 2f);
+        changelogMore.setTextColor(C_PRIMARY);
+        changelogMore.setGravity(Gravity.CENTER);
+        changelogMore.setPadding(dp(8), dp(10), dp(8), dp(10));
+        changelogMore.setBackgroundDrawable(clickBg(C_PILL));
+        changelogMore.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                appendChangelog();
+            }
+        });
+        changelogInner.addView(changelogMore, wrap());
+
+        appendChangelog();
+    }
+
+    /** 追加一页。滚动监听可能连发多次，changelogBusy 挡住同一帧里的重复请求。 */
+    private void appendChangelog() {
+        if (changelogArr == null || changelogBusy) return;
+        if (changelogShown >= changelogArr.length()) return;
+        changelogBusy = true;
+
+        String cur = appVersion();
+        int end = Math.min(changelogShown + CHANGELOG_PAGE, changelogArr.length());
+        for (int i = changelogShown; i < end; i++) {
+            JSONObject o = changelogArr.optJSONObject(i);
             if (o == null) continue;
             String v = o.optString("v", "");
             String d = o.optString("d", "");
@@ -11914,6 +15629,20 @@ public class MainActivity extends Activity {
             clp.bottomMargin = dp(6);
             changelogList.addView(card, clp);
         }
+        changelogShown = end;
+
+        if (changelogMore != null) {
+            int left = changelogArr.length() - changelogShown;
+            if (left <= 0) {
+                changelogMore.setVisibility(View.GONE);
+            } else {
+                changelogMore.setText("查看更多旧版本（还有 " + left + " 个）");
+                changelogMore.setVisibility(View.VISIBLE);
+            }
+        }
+        changelogList.post(new Runnable() {
+            public void run() { changelogBusy = false; }
+        });
     }
 
     private void buildFeedbackScreen() {

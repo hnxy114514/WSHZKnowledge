@@ -2,14 +2,14 @@
  "books": [
   {
    "id": "CET4luan_1",
-   "name": "四级真题核心词（图片记忆）",
+   "name": "四级真题核心词",
    "words": 1162,
    "size": 812023,
    "file": "1523620217431_CET4luan_1.zip"
   },
   {
    "id": "CET6luan_1",
-   "name": "六级真题核心词（图片记忆）",
+   "name": "六级真题核心词",
    "words": 1228,
    "size": 591417,
    "file": "1521164660466_CET6luan_1.zip"
@@ -233,7 +233,7 @@
   },
   {
    "id": "GaoZhongluan_2",
-   "name": "高考必备词汇（图片记忆）",
+   "name": "高考必备词汇",
    "words": 3668,
    "size": 2120036,
    "file": "1521164673602_GaoZhongluan_2.zip"

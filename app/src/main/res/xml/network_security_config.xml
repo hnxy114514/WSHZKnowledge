@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 全局仍然只允许 https。唯一例外是网易的助记图 CDN：
+     它只监听 http，https 握手直接失败（实测 exit 35），不开这次例外就永远取不到图。
+     例外只对这个域名生效，其他请求不受影响。 -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">ydschool-online.nos.netease.com</domain>
+    </domain-config>
+</network-security-config>

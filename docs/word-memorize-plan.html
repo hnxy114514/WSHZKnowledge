@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>背单词功能 · 方案</title>
+<style>
+  :root{
+    --bg:#0b0b0b; --card:#161616; --card2:#1c1c1c; --line:#2a2a2a;
+    --text:#e8e8e8; --sub:#8a8a8a; --primary:#4fc3f7; --warn:#ffb74d; --bad:#ef5350; --ok:#66bb6a;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:15px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+       padding:48px 24px 96px}
+  main{max-width:860px;margin:0 auto}
+  h1{font-size:30px;line-height:1.3;margin:0 0 10px;letter-spacing:.5px}
+  h2{font-size:19px;margin:44px 0 14px;padding-left:12px;border-left:3px solid var(--primary)}
+  h3{font-size:15px;margin:24px 0 8px;color:var(--primary);font-weight:600}
+  p{margin:10px 0}
+  .lead{color:var(--sub);font-size:14px;margin-bottom:28px}
+  .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:4px;background:#1f2a30;color:var(--primary);margin-right:6px;vertical-align:2px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:14px 0}
+  .card.flat{background:transparent}
+  .concl{border-left:3px solid var(--primary);background:#101b21}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+  th,td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left}
+  th{color:var(--sub);font-weight:500;font-size:12px;letter-spacing:.5px}
+  td.num{font-family:var(--mono);text-align:right;white-space:nowrap}
+  tr:last-child td{border-bottom:none}
+  code{font-family:var(--mono);font-size:13px;background:#1f1f1f;padding:1px 6px;border-radius:4px;color:#b3e5fc}
+  pre{background:#111;border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow:auto;font-size:12.5px;line-height:1.6}
+  pre code{background:none;padding:0;color:#cfd8dc}
+  ul,ol{margin:10px 0;padding-left:22px}
+  li{margin:6px 0}
+  .warn{border-left:3px solid var(--warn);background:#1f1a10}
+  .bad{border-left:3px solid var(--bad);background:#1f1212}
+  .ok{border-left:3px solid var(--ok);background:#101a12}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:680px){.grid{grid-template-columns:1fr}}
+  .kv{font-size:13px;color:var(--sub)}
+  .kv b{color:var(--text);font-weight:600}
+  .phases{counter-reset:p}
+  .phase{position:relative;padding-left:44px;margin:18px 0}
+  .phase:before{counter-increment:p;content:counter(p);position:absolute;left:0;top:2px;
+    width:28px;height:28px;border-radius:50%;background:#10222b;color:var(--primary);
+    font-family:var(--mono);font-size:13px;display:flex;align-items:center;justify-content:center;
+    border:1px solid #24414d}
+  .watch{display:flex;gap:22px;flex-wrap:wrap;justify-content:center;margin:20px 0}
+  .watch figure{margin:0;text-align:center}
+  .watch figcaption{font-size:12px;color:var(--sub);margin-top:10px}
+  .q{border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:10px 0;background:var(--card2)}
+  .q b{color:var(--primary)}
+  hr{border:none;border-top:1px solid var(--line);margin:36px 0}
+  .foot{color:var(--sub);font-size:12.5px;margin-top:40px}
+</style>
+</head>
+<body>
+<main>
+
+<h1>背单词 + 单词搜索 · 方案</h1>
+<div class="lead">
+  针对「腕上知识汇总」Wear OS 端 ｜ 词库来源 kajweb/dict ｜ 2026-11-26
+</div>
+
+<div class="card concl">
+  <p style="margin:0"><b>结论</b>：可以做，而且不会像上次优化知识库那样踩坑。</p>
+  <p style="margin:8px 0 0;color:var(--sub)">
+    三张主力词表（四级 + 六级 + 考研）去重后 <b style="color:var(--text)">4441 词</b>，精简到<b style="color:var(--text)"> 0.66 MB</b>。
+    启动时只读一份 60 KB 的索引，查词时按位置读几百字节——
+    <b style="color:var(--text)">不是"启动解析全部"，而是"用到才读一条"</b>，
+    所以对启动速度没有影响。
+  </p>
+</div>
+
+<h2>一、词库实测</h2>
+
+<p>下载了四份代表性词表，按行解析后统计（词库是 JSON Lines，一行一个词，字段极其冗余）：</p>
+
+<table>
+  <thead><tr><th>词表</th><th class="num">词数</th><th class="num">原始 JSON</th><th class="num">精简后</th></tr></thead>
+  <tbody>
+    <tr><td>CET4_1（四级核心）</td><td class="num">1,162</td><td class="num">2.84 MB</td><td class="num">0.15 MB</td></tr>
+    <tr><td>CET4_3（四级全）</td><td class="num">2,607</td><td class="num">6.13 MB</td><td class="num">0.39 MB</td></tr>
+    <tr><td>CET6_3（六级）</td><td class="num">2,345</td><td class="num">5.20 MB</td><td class="num">0.37 MB</td></tr>
+    <tr><td>KaoYan_3（考研）</td><td class="num">3,728</td><td class="num">6.47 MB</td><td class="num">0.53 MB</td></tr>
+    <tr><td><b>三表去重</b></td><td class="num"><b>4,441</b></td><td class="num">17.8 MB</td><td class="num"><b>0.66 MB</b></td></tr>
+  </tbody>
+</table>
+
+<p class="kv">
+  精简口径：词 + 音标 + 最多 3 条词性释义 + 1 条例句（中英）。原始字段里的
+  <code>syno</code>（近义词）、<code>relWord</code>（同根词）、<code>phrase</code>（短语）、
+  <code>realExamSentence</code>（真题例句）、音频字段全部丢弃——它们占了 90% 的体积，
+  手表上根本看不完。
+</p>
+
+<div class="card flat">
+  <h3>全量（81 个词表）是什么量级</h3>
+  <p class="kv" style="margin:0">
+    含雅思、托福、GRE、SAT、GMAT、BEC、人教中小学系列。按单表平均 2500 词、去重后估约
+    <b style="color:var(--text)">2.2～2.8 万词</b>，按同样的口径精简后约 3.5～4 MB。
+    这个体量不建议塞进 APK，也没必要——一个人不会同时背四级和 GRE。
+  </p>
+</div>
+
+<h2>二、数据怎么存</h2>
+
+<p>三段时间布局，一个文件 <code>words.bin</code>：</p>
+
+<pre><code>┌─────────── 头部 32 B ───────────┐
+│ magic "HZW1" · 版本 · 词数 · 各段偏移 │
+├─────────── 索引区（常驻，60 KB）───────────┤
+│ 按字母序排列，每词 12 字节：                │
+│   wordOff(4)  recOff(4)  recLen(2)  flags(2) │
+├─────────── 正文区（按需 seek，1.2 MB）───────────┤
+│ 变长记录，字段以 \u0000 分隔：                │
+│   词 \0 音标 \0 释义 \0 例句英 \0 例句中      │
+├─────────── 中文倒排（可选，0.4 MB）───────────┤
+│ 释义二元组 → 词 ID 列表（查中文用）           │
+└──────────────────────────────┘</code></pre>
+
+<div class="grid">
+  <div class="card">
+    <h3 style="margin-top:0">启动时</h3>
+    <p class="kv" style="margin:0">
+      只读头部 + 索引区，60 KB 顺序读，建一个 <code>String[]</code> 加两个 <code>int[]</code>，
+      约 5～10 ms。不解析任何释义，不建任何对象树。
+    </p>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0">查一个词</h3>
+    <p class="kv" style="margin:0">
+      二分找到下标 → 按 <code>recOff/recLen</code> 定位 → 读几百字节 → 拆成 4 个字符串。
+      一次 <code>RandomAccessFile.seek</code>，1～3 ms。
+    </p>
+  </div>
+</div>
+
+<div class="card ok">
+  <p style="margin:0"><b>和知识库缓存的区别</b>：知识库那 1914 个节点是"列表要显示全部、搜索要扫全文"，必须全量建对象；
+  单词页一次只看一个词，所以只需要索引。
+  <b>这次是真正的"用到才读"，不是把延迟藏起来。</b></p>
+</div>
+
+<h2>三、背单词怎么算</h2>
+
+<p>用 <b>SM-2</b>（SuperMemo 2，Anki 的老算法）。不选 FSRS 是因为它参数多、要调，收益在手表这个体量上看不出来。</p>
+
+<div class="card">
+  <h3 style="margin-top:0">每个词记 8 字节</h3>
+  <pre style="margin:8px 0"><code>ease:     uint8   // 易度 ×100，默认 250（即 2.5），下限 130
+interval: uint16  // 当前间隔（天），0 表示还没学过
+due:      uint16  // 到期日，相对打包日的天数（够用 180 年）
+reps:     uint8   // 连续答对次数
+flags:    uint8   // bit0=已收藏  bit1=已在错词本</code></pre>
+  <p class="kv" style="margin:0">
+    5000 词 × 8 字节 = <b style="color:var(--text)">40 KB</b>，整块读写，保存一次几毫秒。
+    不需要数据库。
+  </p>
+</div>
+
+<h3>三档评分（手表上就三个按钮，多一个都嫌挤）</h3>
+<table>
+  <thead><tr><th>按钮</th><th>q 值</th><th>效果</th></tr></thead>
+  <tbody>
+    <tr><td>认识</td><td class="num">5</td><td>间隔按 1 → 6 → interval×ease 递增</td></tr>
+    <tr><td>模糊</td><td class="num">3</td><td>间隔不涨，ease 略降，明天再来</td></tr>
+    <tr><td>不认识</td><td class="num">1</td><td>reps 归零，间隔回到 1 天，本轮内再出现一次</td></tr>
+  </tbody>
+</table>
+
+<p class="kv">
+  每日节奏：新词 10 个（可调 5/10/20）+ 到期复习，总数上限 60。
+  一天没背，第二天不惩罚，到期词顺延——手表上不要制造焦虑。
+</p>
+
+<h2>四、搜索怎么做</h2>
+
+<h3>英文：前缀 + 精确</h3>
+<p>索引本身就是按字母序的，二分定位前缀起点，向后扫到前缀结束，取前 20 条。5000 词的二分是 13 次比较，可以忽略。</p>
+
+<h3>中文：倒排（二期）</h3>
+<p>释义里出现的每个中文二元组建倒排，如「取消」→ [cancel, abolish]。约 0.4 MB，查"取消"能出对应英文。</p>
+
+<div class="card warn">
+  <h3 style="margin-top:0">手表输入是真正的难点，不是搜索算法</h3>
+  <p style="margin:0">
+    Wear OS 上的输入法：语音（最实用）、手写、全键盘（极小）。方案是
+    <b>EditText 唤起系统输入法</b>，默认走语音；同时提供"按首字母浏览"作为降级——
+    从 A 到 Z 选一个字母，列出该字母开头的词，适合"想看看这词怎么拼"的场景。
+    不自己做键盘，投入产出比太低。
+  </p>
+</div>
+
+<h2>五、界面与入口</h2>
+
+<div class="watch">
+  <figure>
+    <svg width="180" height="180" viewBox="0 0 180 180">
+      <circle cx="90" cy="90" r="88" fill="#0b0b0b" stroke="#2a2a2a"/>
+      <text x="90" y="52" fill="#8a8a8a" font-size="10" text-anchor="middle">今日</text>
+      <text x="90" y="82" fill="#4fc3f7" font-size="26" text-anchor="middle" font-family="monospace">7 / 20</text>
+      <text x="90" y="100" fill="#8a8a8a" font-size="9" text-anchor="middle">新词 3 · 复习 4</text>
+      <rect x="42" y="112" width="96" height="26" rx="13" fill="#14384a"/>
+      <text x="90" y="129" fill="#4fc3f7" font-size="11" text-anchor="middle">开始</text>
+      <text x="90" y="156" fill="#666" font-size="9" text-anchor="middle">搜索 · 词表</text>
+    </svg>
+    <figcaption>首页：进度 + 开始</figcaption>
+  </figure>
+
+  <figure>
+    <svg width="180" height="180" viewBox="0 0 180 180">
+      <circle cx="90" cy="90" r="88" fill="#0b0b0b" stroke="#2a2a2a"/>
+      <text x="90" y="64" fill="#e8e8e8" font-size="22" text-anchor="middle">cancel</text>
+      <text x="90" y="84" fill="#8a8a8a" font-size="10" text-anchor="middle">'kænsl</text>
+      <text x="90" y="106" fill="#4fc3f7" font-size="9" text-anchor="middle">轻点看释义</text>
+      <rect x="26" y="126" width="40" height="22" rx="11" fill="#1c1c1c"/>
+      <text x="46" y="141" fill="#ef5350" font-size="10" text-anchor="middle">不认识</text>
+      <rect x="70" y="126" width="40" height="22" rx="11" fill="#1c1c1c"/>
+      <text x="90" y="141" fill="#ffb74d" font-size="10" text-anchor="middle">模糊</text>
+      <rect x="114" y="126" width="40" height="22" rx="11" fill="#14384a"/>
+      <text x="134" y="141" fill="#4fc3f7" font-size="10" text-anchor="middle">认识</text>
+    </svg>
+    <figcaption>卡片：正面 → 点开释义</figcaption>
+  </figure>
+
+  <figure>
+    <svg width="180" height="180" viewBox="0 0 180 180">
+      <circle cx="90" cy="90" r="88" fill="#0b0b0b" stroke="#2a2a2a"/>
+      <rect x="34" y="46" width="112" height="24" rx="12" fill="#1c1c1c"/>
+      <text x="46" y="62" fill="#4fc3f7" font-size="11" font-family="monospace">can</text>
+      <text x="72" y="62" fill="#666" font-size="10">|</text>
+      <text x="46" y="90" fill="#e8e8e8" font-size="12">cancel</text>
+      <text x="46" y="106" fill="#8a8a8a" font-size="9">v. 取消</text>
+      <text x="46" y="126" fill="#e8e8e8" font-size="12">cancer</text>
+      <text x="46" y="142" fill="#8a8a8a" font-size="9">n. 癌症</text>
+    </svg>
+    <figcaption>搜索：前缀即时结果</figcaption>
+  </figure>
+</div>
+
+<p class="kv">
+  新增四个屏：<code>S_WORD_HOME</code> / <code>S_WORD_STUDY</code> / <code>S_WORD_DETAIL</code> / <code>S_WORD_SEARCH</code>。
+  沿用现有的页面懒建机制（首次进入才建），圆屏底部内容调 <code>padInner()</code>，
+  卡片宽度按圆的弦长收窄——和问 AI 底部按钮用的是同一套几何。
+</p>
+
+<h3>入口放哪</h3>
+<ul>
+  <li><b>设置页加一行</b>「背单词」——最省事，但藏得深。</li>
+  <li><b>主页加一张卡</b>——醒目，但主页现在是"九个科目"的知识库入口，混进一个工具会破坏定位。</li>
+  <li>折中：主页底部一行小字入口（像现在的「按科目 / 按收藏」切换），不占卡片位。</li>
+</ul>
+
+<h2>六、分期</h2>
+
+<div class="phases">
+  <div class="phase">
+    <h3 style="margin-top:0">MVP（一轮做完，可测）</h3>
+    <p class="kv" style="margin:0">
+      预处理脚本 <code>tools/build_words.py</code>（zip → 精简 → words.bin）·
+      四个屏 · SM-2 · 英文前缀搜索 · 进内测包。<br>
+      <b>验收</b>：能背 20 个词、能搜 can→cancel、杀掉进程重开后进度还在、启动时间不掉。
+    </p>
+  </div>
+  <div class="phase">
+    <h3 style="margin-top:0">二期</h3>
+    <p class="kv" style="margin:0">
+      多词表切换（词表放云端，用户按需下载，APK 不膨胀）· 中文释义倒排搜索 ·
+      错词本 · 学习统计（连续天数、完成率）。
+    </p>
+  </div>
+  <div class="phase">
+    <h3 style="margin-top:0">三期（可选）</h3>
+    <p class="kv" style="margin:0">
+      例句发音（依赖有道音频接口，可用性未知，先不做）· 每日提醒（需要手表通知权限）·
+      导入自定义词表（背课文里的生词）。
+    </p>
+  </div>
+</div>
+
+<h2>七、必须说清的风险</h2>
+
+<div class="card bad">
+  <h3 style="margin-top:0">版权：这个仓库没有 LICENSE</h3>
+  <p style="margin:0">
+    <code>kajweb/dict</code> 的 README 写明「Crawl from X 道背单词」，仓库里没有 LICENSE 文件。
+    自己背、自己用，风险很低；但如果这个 App 要分发给别人，词库内容属于第三方版权，
+    严格说需要授权。
+  </p>
+  <p style="margin:8px 0 0;color:var(--sub)">
+    可替代：<code>skywind3000/ECDICT</code>（MIT 许可，约 340 万词条，含音标、释义、词频、柯林斯星级），
+    体积大但可裁剪到同样规模。缺点是例句和释义措辞不如有道那套自然。
+    我的建议是<b style="color:var(--text)">把词库做成可替换的输入</b>：预处理脚本吃哪个源都行，
+    MVP 先用 kajweb 把功能跑通，分发前再切 ECDICT。
+  </p>
+</div>
+
+<div class="card warn">
+  <h3 style="margin-top:0">体积与定位</h3>
+  <p style="margin:0">
+    APK 从 3.2 MB 涨到约 <b style="color:var(--text)">4.1 MB</b>（词库 0.66 MB + 索引 0.05 MB + 中文倒排约 0.25 MB）。
+    如果改成"首次使用时下载词表"，APK 只增 0.05 MB，但要考虑下载失败的兜底。
+  </p>
+</div>
+
+<h2>八、需要你定的四件事</h2>
+
+<div class="q"><b>1. 词表范围</b>　只做四级+六级+考研（4441 词 / 0.66 MB），还是把雅思托福也打包（约 1.5 万词 / 2.3 MB）？</div>
+<div class="q"><b>2. 数据放哪</b>　打进 APK（离线可用、免下载），还是首次进入时从云端下载（APK 不变）？</div>
+<div class="q"><b>3. 入口位置</b>　设置页里一行，还是主页底部加个小入口？</div>
+<div class="q"><b>4. 版权取舍</b>　先用 kajweb 把功能做出来（个人用），还是从一开始就用 ECDICT（可分发）？</div>
+
+<hr>
+<p class="foot">
+  实测数据来自本轮下载的 4 个词表（CET4_1 / CET4_3 / CET6_3 / KaoYan_3），
+  按「词 + 音标 + 3 条释义 + 1 例句」的口径统计。
+  词数、体积都是实数，不是估算；只有「全量 81 表去重后 2.2～2.8 万词」是按单表均值推算的。
+</p>
+
+</main>
+</body>
+</html>

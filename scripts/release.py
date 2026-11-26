@@ -63,6 +63,34 @@ def http(url, method="GET", data=None, headers=None):
     return code, out[:idx]
 
 
+CHANGELOG = os.path.join("app", "src", "main", "assets", "changelog.json")
+
+
+def changelog_body(ver):
+    """取 changelog 里 v == ver 的条目，拼成「· 一条一行」的 Release 正文。
+
+    正文必须和 App 内更新日志一致（工作要求 E2）。另外 --promote 递归发版时没有 note，
+    以前正文只写了个 tag，结果更新弹窗显示「没有任何更新内容」——而 App 里的更新日志
+    又有内容，两边对不上（v4.0.1 踩过）。
+    """
+    # 预发布也取「去掉 pre 后缀」的那条：测试版的改动本来就记在下一个正式版名下，
+    # 这样 pre 和正式版的推送正文逐字相同（工作要求 E6）。
+    base = re.sub(r'[-. _]?pre\d*$', '', ver, flags=re.I)
+    try:
+        with open(CHANGELOG, encoding="utf-8") as f:
+            d = json.load(f)
+        entries = d.get("log", [])
+        for target in (ver, base):
+            for e in entries:
+                if e.get("v") == target:
+                    items = e.get("items") or []
+                    if items:
+                        return "\n".join("· " + x for x in items)
+    except Exception:
+        pass
+    return ""
+
+
 def bump_pre(ver):
     """推到下一个测试版号：3.12.5 → 3.12.5pre1，3.12.5pre1 → 3.12.5pre2。
 
@@ -132,7 +160,7 @@ def main():
     print("== 2. 创建 Release %s%s ==" % (tag, "（预发布）" if pre else ""))
     payload = json.dumps({
         "tag_name": tag, "target_commitish": "main", "name": tag,
-        "body": "%s - %s" % (tag, note) if note else tag,
+        "body": changelog_body(ver) or (("%s - %s" % (tag, note)) if note else tag),
         "draft": False, "prerelease": pre,
     }).encode("utf-8")
     st, data = http(API + "/releases", "POST", payload, {"Content-Type": "application/json"})
@@ -184,9 +212,47 @@ def main():
         push_version(token, tag)
         print("   提交推送完成，累计 %s" % elapsed())
 
+        cleanup_prereleases()
+
     print("== 完成（总耗时 %s）==" % elapsed())
     print("下载直链:", up.get("browser_download_url"))
     print("Release 页: https://github.com/%s/releases/tag/%s" % (REPO, tag))
+
+
+def cleanup_prereleases():
+    """正式版发布后把所有预发布删掉（用户 2026-11-26 定）。
+    测试版没有保留价值，留着只会让 Release 列表越滚越长，翻起来也乱。"""
+    print("== 7. 清理 Release ==")
+    # 预发布全删；正式版只留最近 KEEP_STABLE 个，其余删掉（tag 保留，git 历史不受影响）
+    KEEP_STABLE = 20
+    allrel = []
+    page = 1
+    while page <= 10:
+        st, data = http("%s/releases?per_page=100&page=%d" % (API, page))
+        if st >= 400:
+            print("   列表取不到，跳过（可以稍后手动补）")
+            return
+        try:
+            arr = json.loads(data)
+        except Exception:
+            print("   列表解析失败，跳过")
+            return
+        if not arr:
+            break
+        allrel += arr
+        page += 1
+
+    stable = [r for r in allrel if not r.get("prerelease", False)]
+    drop = [r for r in allrel if r.get("prerelease", False)] + stable[KEEP_STABLE:]
+
+    removed = 0
+    for r in drop:
+        st2, _ = http("%s/releases/%d" % (API, r["id"]), "DELETE")
+        if st2 < 300:
+            removed += 1
+        else:
+            print("   删除 %s 失败（%s）" % (r.get("tag_name", "?"), st2))
+    print("   删除 %d 条（预发布 + 超过 %d 个的旧正式版）" % (removed, KEEP_STABLE))
 
 
 def delete_release(token, tag):
