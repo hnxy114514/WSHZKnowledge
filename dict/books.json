@@ -1,60 +1,571 @@
 {
  "books": [
   {
-   "id": "cet4_core",
-   "name": "四级核心词",
+   "id": "CET4_1",
+   "name": "四级 第1册",
    "words": 1162,
    "size": 764018,
-   "file": "cet4_core.zip"
+   "file": "CET4_1.zip"
   },
   {
-   "id": "cet4",
-   "name": "四级词汇",
+   "id": "CET4_2",
+   "name": "四级 第2册",
+   "words": 3739,
+   "size": 2542778,
+   "file": "CET4_2.zip"
+  },
+  {
+   "id": "CET4_3",
+   "name": "四级 第3册",
    "words": 2607,
    "size": 1719305,
-   "file": "cet4.zip"
+   "file": "CET4_3.zip"
   },
   {
-   "id": "cet6",
-   "name": "六级词汇",
+   "id": "CET4luan_1",
+   "name": "四级（乱序） 第1册",
+   "words": 1162,
+   "size": 812023,
+   "file": "CET4luan_1.zip"
+  },
+  {
+   "id": "CET4luan_2",
+   "name": "四级（乱序） 第2册",
+   "words": 3739,
+   "size": 2723074,
+   "file": "CET4luan_2.zip"
+  },
+  {
+   "id": "CET6_1",
+   "name": "六级 第1册",
+   "words": 1228,
+   "size": 753196,
+   "file": "CET6_1.zip"
+  },
+  {
+   "id": "CET6_2",
+   "name": "六级 第2册",
+   "words": 2078,
+   "size": 1111633,
+   "file": "CET6_2.zip"
+  },
+  {
+   "id": "CET6_3",
+   "name": "六级 第3册",
    "words": 2345,
    "size": 1452645,
-   "file": "cet6.zip"
+   "file": "CET6_3.zip"
   },
   {
-   "id": "kaoyan",
-   "name": "考研词汇",
+   "id": "CET6luan_1",
+   "name": "六级（乱序） 第1册",
+   "words": 1228,
+   "size": 591417,
+   "file": "CET6luan_1.zip"
+  },
+  {
+   "id": "KaoYan_1",
+   "name": "考研 第1册",
+   "words": 1341,
+   "size": 685507,
+   "file": "KaoYan_1.zip"
+  },
+  {
+   "id": "KaoYan_2",
+   "name": "考研 第2册",
+   "words": 4533,
+   "size": 2431155,
+   "file": "KaoYan_2.zip"
+  },
+  {
+   "id": "KaoYan_3",
+   "name": "考研 第3册",
    "words": 3728,
    "size": 1838572,
-   "file": "kaoyan.zip"
+   "file": "KaoYan_3.zip"
   },
   {
-   "id": "ielts",
-   "name": "雅思词汇",
-   "words": 3575,
-   "size": 1729987,
-   "file": "ielts.zip"
+   "id": "KaoYanluan_1",
+   "name": "考研（乱序） 第1册",
+   "words": 1341,
+   "size": 771889,
+   "file": "KaoYanluan_1.zip"
   },
   {
-   "id": "toefl",
-   "name": "托福词汇",
-   "words": 4264,
-   "size": 2015157,
-   "file": "toefl.zip"
+   "id": "Level4_1",
+   "name": "专四 第1册",
+   "words": 595,
+   "size": 267335,
+   "file": "Level4_1.zip"
   },
   {
-   "id": "gre",
-   "name": "GRE / 专八词汇",
+   "id": "Level4_2",
+   "name": "专四 第2册",
+   "words": 4025,
+   "size": 1706442,
+   "file": "Level4_2.zip"
+  },
+  {
+   "id": "Level4luan_1",
+   "name": "专四（乱序） 第1册",
+   "words": 595,
+   "size": 269844,
+   "file": "Level4luan_1.zip"
+  },
+  {
+   "id": "Level4luan_2",
+   "name": "专四（乱序） 第2册",
+   "words": 4025,
+   "size": 1783295,
+   "file": "Level4luan_2.zip"
+  },
+  {
+   "id": "Level8_1",
+   "name": "专八 第1册",
+   "words": 684,
+   "size": 242255,
+   "file": "Level8_1.zip"
+  },
+  {
+   "id": "Level8_2",
+   "name": "专八 第2册",
    "words": 12197,
    "size": 4763514,
-   "file": "gre.zip"
+   "file": "Level8_2.zip"
   },
   {
-   "id": "gaozhong",
-   "name": "高中词汇",
+   "id": "Level8luan_2",
+   "name": "专八（乱序） 第2册",
+   "words": 12197,
+   "size": 5320395,
+   "file": "Level8luan_2.zip"
+  },
+  {
+   "id": "IELTS_2",
+   "name": "雅思 第2册",
+   "words": 3427,
+   "size": 1525677,
+   "file": "IELTS_2.zip"
+  },
+  {
+   "id": "IELTS_3",
+   "name": "雅思 第3册",
+   "words": 3575,
+   "size": 1729987,
+   "file": "IELTS_3.zip"
+  },
+  {
+   "id": "IELTSluan_2",
+   "name": "雅思（乱序） 第2册",
+   "words": 3427,
+   "size": 1597545,
+   "file": "IELTSluan_2.zip"
+  },
+  {
+   "id": "TOEFL_2",
+   "name": "托福 第2册",
+   "words": 9213,
+   "size": 4327321,
+   "file": "TOEFL_2.zip"
+  },
+  {
+   "id": "TOEFL_3",
+   "name": "托福 第3册",
+   "words": 4264,
+   "size": 2015157,
+   "file": "TOEFL_3.zip"
+  },
+  {
+   "id": "GRE_2",
+   "name": "GRE 第2册",
+   "words": 7199,
+   "size": 2470882,
+   "file": "GRE_2.zip"
+  },
+  {
+   "id": "GRE_3",
+   "name": "GRE 第3册",
+   "words": 6515,
+   "size": 2319121,
+   "file": "GRE_3.zip"
+  },
+  {
+   "id": "GMAT_2",
+   "name": "GMAT 第2册",
+   "words": 3254,
+   "size": 1422468,
+   "file": "GMAT_2.zip"
+  },
+  {
+   "id": "GMAT_3",
+   "name": "GMAT 第3册",
+   "words": 3047,
+   "size": 1365145,
+   "file": "GMAT_3.zip"
+  },
+  {
+   "id": "GMATluan_2",
+   "name": "GMAT（乱序） 第2册",
+   "words": 3254,
+   "size": 1509190,
+   "file": "GMATluan_2.zip"
+  },
+  {
+   "id": "SAT_2",
+   "name": "SAT 第2册",
+   "words": 4423,
+   "size": 1784650,
+   "file": "SAT_2.zip"
+  },
+  {
+   "id": "SAT_3",
+   "name": "SAT 第3册",
+   "words": 4464,
+   "size": 1759354,
+   "file": "SAT_3.zip"
+  },
+  {
+   "id": "BEC_2",
+   "name": "BEC 商务 第2册",
+   "words": 2753,
+   "size": 1494016,
+   "file": "BEC_2.zip"
+  },
+  {
+   "id": "BEC_3",
+   "name": "BEC 商务 第3册",
+   "words": 2825,
+   "size": 1502966,
+   "file": "BEC_3.zip"
+  },
+  {
+   "id": "PEPGaoZhong_1",
+   "name": "高中 第1册",
+   "words": 311,
+   "size": 145874,
+   "file": "PEPGaoZhong_1.zip"
+  },
+  {
+   "id": "GaoZhong_2",
+   "name": "高中 第2册",
+   "words": 3668,
+   "size": 1999328,
+   "file": "GaoZhong_2.zip"
+  },
+  {
+   "id": "PEPGaoZhong_2",
+   "name": "高中 第2册",
+   "words": 319,
+   "size": 148700,
+   "file": "PEPGaoZhong_2.zip"
+  },
+  {
+   "id": "GaoZhong_3",
+   "name": "高中 第3册",
+   "words": 2340,
+   "size": 1346745,
+   "file": "GaoZhong_3.zip"
+  },
+  {
+   "id": "PEPGaoZhong_3",
+   "name": "高中 第3册",
+   "words": 366,
+   "size": 162383,
+   "file": "PEPGaoZhong_3.zip"
+  },
+  {
+   "id": "PEPGaoZhong_4",
+   "name": "高中 第4册",
+   "words": 307,
+   "size": 129777,
+   "file": "PEPGaoZhong_4.zip"
+  },
+  {
+   "id": "PEPGaoZhong_5",
+   "name": "高中 第5册",
+   "words": 357,
+   "size": 162923,
+   "file": "PEPGaoZhong_5.zip"
+  },
+  {
+   "id": "PEPGaoZhong_6",
+   "name": "高中 第6册",
    "words": 391,
    "size": 172125,
-   "file": "gaozhong.zip"
+   "file": "PEPGaoZhong_6.zip"
+  },
+  {
+   "id": "PEPGaoZhong_7",
+   "name": "高中 第7册",
+   "words": 384,
+   "size": 174623,
+   "file": "PEPGaoZhong_7.zip"
+  },
+  {
+   "id": "PEPGaoZhong_8",
+   "name": "高中 第8册",
+   "words": 420,
+   "size": 187484,
+   "file": "PEPGaoZhong_8.zip"
+  },
+  {
+   "id": "PEPGaoZhong_9",
+   "name": "高中 第9册",
+   "words": 352,
+   "size": 145854,
+   "file": "PEPGaoZhong_9.zip"
+  },
+  {
+   "id": "PEPGaoZhong_10",
+   "name": "高中 第10册",
+   "words": 361,
+   "size": 140211,
+   "file": "PEPGaoZhong_10.zip"
+  },
+  {
+   "id": "PEPGaoZhong_11",
+   "name": "高中 第11册",
+   "words": 309,
+   "size": 120512,
+   "file": "PEPGaoZhong_11.zip"
+  },
+  {
+   "id": "GaoZhongluan_2",
+   "name": "高中（乱序） 第2册",
+   "words": 3668,
+   "size": 2120036,
+   "file": "GaoZhongluan_2.zip"
+  },
+  {
+   "id": "BeiShiGaoZhong_1",
+   "name": "高中（北师大） 第1册",
+   "words": 226,
+   "size": 111762,
+   "file": "BeiShiGaoZhong_1.zip"
+  },
+  {
+   "id": "BeiShiGaoZhong_2",
+   "name": "高中（北师大） 第2册",
+   "words": 244,
+   "size": 128789,
+   "file": "BeiShiGaoZhong_2.zip"
+  },
+  {
+   "id": "BeiShiGaoZhong_3",
+   "name": "高中（北师大） 第3册",
+   "words": 295,
+   "size": 150496,
+   "file": "BeiShiGaoZhong_3.zip"
+  },
+  {
+   "id": "BeiShiGaoZhong_4",
+   "name": "高中（北师大） 第4册",
+   "words": 336,
+   "size": 163541,
+   "file": "BeiShiGaoZhong_4.zip"
+  },
+  {
+   "id": "BeiShiGaoZhong_5",
+   "name": "高中（北师大） 第5册",
+   "words": 327,
+   "size": 166181,
+   "file": "BeiShiGaoZhong_5.zip"
+  },
+  {
+   "id": "BeiShiGaoZhong_6",
+   "name": "高中（北师大） 第6册",
+   "words": 271,
+   "size": 121058,
+   "file": "BeiShiGaoZhong_6.zip"
+  },
+  {
+   "id": "BeiShiGaoZhong_7",
+   "name": "高中（北师大） 第7册",
+   "words": 334,
+   "size": 166699,
+   "file": "BeiShiGaoZhong_7.zip"
+  },
+  {
+   "id": "BeiShiGaoZhong_8",
+   "name": "高中（北师大） 第8册",
+   "words": 364,
+   "size": 171446,
+   "file": "BeiShiGaoZhong_8.zip"
+  },
+  {
+   "id": "BeiShiGaoZhong_9",
+   "name": "高中（北师大） 第9册",
+   "words": 299,
+   "size": 122391,
+   "file": "BeiShiGaoZhong_9.zip"
+  },
+  {
+   "id": "BeiShiGaoZhong_10",
+   "name": "高中（北师大） 第10册",
+   "words": 267,
+   "size": 108057,
+   "file": "BeiShiGaoZhong_10.zip"
+  },
+  {
+   "id": "BeiShiGaoZhong_11",
+   "name": "高中（北师大） 第11册",
+   "words": 330,
+   "size": 139130,
+   "file": "BeiShiGaoZhong_11.zip"
+  },
+  {
+   "id": "PEPChuZhong7_1",
+   "name": "初中 第1册",
+   "words": 392,
+   "size": 203341,
+   "file": "PEPChuZhong7_1.zip"
+  },
+  {
+   "id": "PEPChuZhong8_1",
+   "name": "初中 第1册",
+   "words": 419,
+   "size": 222704,
+   "file": "PEPChuZhong8_1.zip"
+  },
+  {
+   "id": "PEPChuZhong9_1",
+   "name": "初中 第1册",
+   "words": 551,
+   "size": 278981,
+   "file": "PEPChuZhong9_1.zip"
+  },
+  {
+   "id": "ChuZhong_2",
+   "name": "初中 第2册",
+   "words": 1420,
+   "size": 912718,
+   "file": "ChuZhong_2.zip"
+  },
+  {
+   "id": "PEPChuZhong7_2",
+   "name": "初中 第2册",
+   "words": 492,
+   "size": 266712,
+   "file": "PEPChuZhong7_2.zip"
+  },
+  {
+   "id": "PEPChuZhong8_2",
+   "name": "初中 第2册",
+   "words": 466,
+   "size": 244325,
+   "file": "PEPChuZhong8_2.zip"
+  },
+  {
+   "id": "ChuZhong_3",
+   "name": "初中 第3册",
+   "words": 1803,
+   "size": 1149674,
+   "file": "ChuZhong_3.zip"
+  },
+  {
+   "id": "ChuZhongluan_2",
+   "name": "初中（乱序） 第2册",
+   "words": 1420,
+   "size": 940509,
+   "file": "ChuZhongluan_2.zip"
+  },
+  {
+   "id": "PEPXiaoXue3_1",
+   "name": "小学 第1册",
+   "words": 64,
+   "size": 42478,
+   "file": "PEPXiaoXue3_1.zip"
+  },
+  {
+   "id": "PEPXiaoXue4_1",
+   "name": "小学 第1册",
+   "words": 84,
+   "size": 47587,
+   "file": "PEPXiaoXue4_1.zip"
+  },
+  {
+   "id": "PEPXiaoXue5_1",
+   "name": "小学 第1册",
+   "words": 131,
+   "size": 71424,
+   "file": "PEPXiaoXue5_1.zip"
+  },
+  {
+   "id": "PEPXiaoXue6_1",
+   "name": "小学 第1册",
+   "words": 130,
+   "size": 76633,
+   "file": "PEPXiaoXue6_1.zip"
+  },
+  {
+   "id": "PEPXiaoXue3_2",
+   "name": "小学 第2册",
+   "words": 72,
+   "size": 40675,
+   "file": "PEPXiaoXue3_2.zip"
+  },
+  {
+   "id": "PEPXiaoXue4_2",
+   "name": "小学 第2册",
+   "words": 104,
+   "size": 53505,
+   "file": "PEPXiaoXue4_2.zip"
+  },
+  {
+   "id": "PEPXiaoXue5_2",
+   "name": "小学 第2册",
+   "words": 156,
+   "size": 87211,
+   "file": "PEPXiaoXue5_2.zip"
+  },
+  {
+   "id": "PEPXiaoXue6_2",
+   "name": "小学 第2册",
+   "words": 108,
+   "size": 64879,
+   "file": "PEPXiaoXue6_2.zip"
+  },
+  {
+   "id": "1545032533243_WaiYanSheChuZhong_1",
+   "name": "1545032533243_WaiYanSheChuZhong 第1册",
+   "words": 629,
+   "size": 351737,
+   "file": "1545032533243_WaiYanSheChuZhong_1.zip"
+  },
+  {
+   "id": "1545032493536_WaiYanSheChuZhong_2",
+   "name": "1545032493536_WaiYanSheChuZhong 第2册",
+   "words": 438,
+   "size": 247606,
+   "file": "1545032493536_WaiYanSheChuZhong_2.zip"
+  },
+  {
+   "id": "1545032532744_WaiYanSheChuZhong_3",
+   "name": "1545032532744_WaiYanSheChuZhong 第3册",
+   "words": 320,
+   "size": 184306,
+   "file": "1545032532744_WaiYanSheChuZhong_3.zip"
+  },
+  {
+   "id": "1545032533455_WaiYanSheChuZhong_4",
+   "name": "1545032533455_WaiYanSheChuZhong 第4册",
+   "words": 266,
+   "size": 147166,
+   "file": "1545032533455_WaiYanSheChuZhong_4.zip"
+  },
+  {
+   "id": "1545032533808_WaiYanSheChuZhong_5",
+   "name": "1545032533808_WaiYanSheChuZhong 第5册",
+   "words": 381,
+   "size": 196315,
+   "file": "1545032533808_WaiYanSheChuZhong_5.zip"
+  },
+  {
+   "id": "1545032534071_WaiYanSheChuZhong_6",
+   "name": "1545032534071_WaiYanSheChuZhong 第6册",
+   "words": 128,
+   "size": 72801,
+   "file": "1545032534071_WaiYanSheChuZhong_6.zip"
   }
  ]
 }
