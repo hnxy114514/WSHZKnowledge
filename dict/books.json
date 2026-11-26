@@ -1,0 +1,60 @@
+{
+ "books": [
+  {
+   "id": "cet4_core",
+   "name": "四级核心词",
+   "words": 1162,
+   "size": 764018,
+   "file": "cet4_core.zip"
+  },
+  {
+   "id": "cet4",
+   "name": "四级词汇",
+   "words": 2607,
+   "size": 1719305,
+   "file": "cet4.zip"
+  },
+  {
+   "id": "cet6",
+   "name": "六级词汇",
+   "words": 2345,
+   "size": 1452645,
+   "file": "cet6.zip"
+  },
+  {
+   "id": "kaoyan",
+   "name": "考研词汇",
+   "words": 3728,
+   "size": 1838572,
+   "file": "kaoyan.zip"
+  },
+  {
+   "id": "ielts",
+   "name": "雅思词汇",
+   "words": 3575,
+   "size": 1729987,
+   "file": "ielts.zip"
+  },
+  {
+   "id": "toefl",
+   "name": "托福词汇",
+   "words": 4264,
+   "size": 2015157,
+   "file": "toefl.zip"
+  },
+  {
+   "id": "gre",
+   "name": "GRE / 专八词汇",
+   "words": 12197,
+   "size": 4763514,
+   "file": "gre.zip"
+  },
+  {
+   "id": "gaozhong",
+   "name": "高中词汇",
+   "words": 391,
+   "size": 172125,
+   "file": "gaozhong.zip"
+  }
+ ]
+}
