@@ -12,6 +12,8 @@
 > 右滑返回不再误触长按；知识库数据未变）
 > 复核时间：2026-11-26 22:45（v4.1.6：搜单词新增「最近搜索」，本地存储补 `word_search_hist`；
 > MainActivity.java 17612 行，知识库数据未变）
+> 复核时间：2026-11-27 02:35（v4.1.7：背单词改按本地日历日跨天，「开始背单词」与到期词在午夜后即刷新；
+> MainActivity.java 17636 行，知识库数据未变）
 > 这两个时间只用来**辅助**判断本文档是否可能过时；内容是否仍成立、某段是否适用于眼前问题，请以当前代码与实际运行为准，自己判断。
 
 面向手表（腕上穿戴设备）的高中九科知识点汇总 App。内置语文、数学、英语、物理、化学、生物、政治、历史、地理九门科目的知识清单与配图，支持行内数学公式排版（分数、根号、上下角标、向量可嵌套）与人工标注的重点高亮，并具备基于 GitHub Release 的 APK 覆盖更新。
@@ -27,7 +29,7 @@ WSHZKnowledge/
 ├── app/                              Android 工程
 │   ├── src/main/
 │   │   ├── java/com/lizard/hsknowledge/
-│   │   │   ├── MainActivity.java        UI + 数学排版引擎 + 更新 + 反馈（单文件，17612 行）
+│   │   │   ├── MainActivity.java        UI + 数学排版引擎 + 更新 + 反馈（单文件，17636 行）
 │   │   │   ├── OverScrollScrollView.java 圆屏内容过滚滚动容器（列表与正文共用，方屏过滚为 0）
 │   │   │   └── ApkFileProvider.java     APK 覆盖安装用的 ContentProvider
 │   │   ├── assets/
@@ -599,7 +601,7 @@ App 查的 `/releases/latest` 由 GitHub 服务端排除预发布，所以普通
 ## App 端实现地图（不读代码先看这一节）
 
 Android 端只有 **一个 Activity、三个 Java 文件**：
-`MainActivity.java`（17612 行，界面、排版引擎、联网、更新、背单词与搜词、本地存储全在里面）、
+`MainActivity.java`（17636 行，界面、排版引擎、联网、更新、背单词与搜词、本地存储全在里面）、
 `OverScrollScrollView.java`（圆屏内容过滚的滚动容器，列表和正文共用；方屏过滚距离为 0）、
 `ApkFileProvider.java`（把下载好的安装包以 content:// 交给系统安装器）。
 没有第三方 UI 库，**没有 XML 布局**，除主题与开屏底图外的所有界面都是代码里 new 出来的 View。
@@ -807,8 +809,8 @@ Node {
 | `word_book` | 当前选用的词书 id | 对应 `filesDir/dict/<id>.json` |
 | `word_daily_new` | 每天新词数（1～200） | 背完转灰，长按可超额 |
 | `word_accent` / `word_auto_speak` / `word_mute` / `word_show_pic` | 发音口音、自动朗读、静音、显示助记图 | 静音与自动发音互斥 |
-| `word_new_day` / `word_new_cnt` | 今天已学的新词数（按天重置） | 和 `word_daily_new` 一起决定按钮灰不灰 |
-| `word_ci_last` / `word_ci_streak` / `word_ci_hist` | 打卡：上次日期 / 连续天数 / 最近 30 天 | 格子只表示「打过几天」，不标日期 |
+| `word_new_day` / `word_new_cnt` | 今天已学的新词数（按天重置） | 和 `word_daily_new` 一起决定按钮灰不灰；存的日期是**本地日历日序号**（见下节），本地 00:00 翻页即归零 |
+| `word_ci_last` / `word_ci_streak` / `word_ci_hist` | 打卡：上次日期 / 连续天数 / 最近 30 天 | 格子只表示「打过几天」，不标日期；`last == today - 1` 才算续签，所以日期序号必须保证 +1/-1 是相邻日 |
 | `word_quiz` | 当前是不是四选一模式 | 复习出四选一，新词仍用卡片自评 |
 | `word_search_hist` | 最近点开过的搜词结果（JSON 数组） | 最多 20 条、最新在前、忽略大小写去重；只存词，不存释义 |
 
@@ -830,6 +832,21 @@ Node {
 **复习算法**：档位 1 / 2 / 4 / 7 / 15 / 30 / 60 天。「认识」升一档，「模糊」取 `max(当前, 下一档 / 2)`（不推进也不倒退），
 「不认识」进重来池（本次最多 3 轮）并 `lapse + 1`；`interval >= 7` 算「已掌握」。
 连着忘两次的词进生词本（`S_WORD_VOCAB`），刷会了自动移出。
+
+**换天口径（v4.1.7）**：`todayDay()` 返回「设备本地日历日的天数序号」
+（`(now + TimeZone.getDefault().getOffset(now)) / 86400000`），本地 00:00 翻页，
+**不是**「距上次背满 24 小时」。以前写的是 `System.currentTimeMillis() / 86400000`，
+那是 UTC 整天数、换日点等于北京时间早上 8 点，所以日历上已经第二天了，配额没归零、
+「开始背单词」还是灰的、到期复习词也出不来。这一处口径同时管着：今日新词配额归零
+（`wordNewToday()`）、组队列的到期判断、`countDue()`、完成页「明天要复习 N 个」
+（`todayDay() + 1`）、打卡连续天数（`last == today - 1`），以及 SM-2 写进每个词 `.prog` 的 `due`。
+**不要**改成 `yyyyMMdd` 整数：跨月时「今天 - 1」是个不存在的日期，连续打卡和复习间隔都会断；
+每日一句的 `todayTag()`（`yyMMdd`）只管自己的跨天判重，两套口径别混着用。
+旧数据不迁移：本地 08:00 之后写入的 UTC 日号与新口径完全一致，只有凌晨 00:00～08:00
+写入的差 1 天（最多让那批词提前一天到期），批量改 `.prog` 反而容易把到期日改错。
+`wordHomeDayTag` 记首页上次重绘的本地日历日，`onResume()` 发现日期变了、且当前还停在
+`S_WORD_HOME` 就重画一次（runnable 里再判一次，避免同一天重复重绘），
+所以过了午夜不切页也能看到按钮变亮、当天新词和到期复习一起回来。
 
 **搜单词两条路**：
 - 有网：有道 `dict.youdao.com/suggest`（前缀联想，中英文都行，返回中文或英文候选）+ `jsonapi`（完整词条：音标、多词性释义、双语例句）。

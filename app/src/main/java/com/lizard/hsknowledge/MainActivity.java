@@ -459,6 +459,8 @@ public class MainActivity extends Activity {
     private long dailySeq = 0;              // 每次刷新 +1，用来丢弃「已经取消掉」的在途结果
     /** 最近一次做过「每日一句」跨天检查的日期（回到前台时判重用）。 */
     private String dailyCheckedTag = "";
+    /** 单词首页上次重绘时的本地日历日；跨天要重算配额 / 到期数 / 按钮颜色。 */
+    private String wordHomeDayTag = "";
     private final List<Node> shownNodes = new ArrayList<Node>();
     private int detailBack = S_NODE;
     /** 当前详情页的附加内容块（例题、译文…）：有几块就画几个按钮，为空则都不画。 */
@@ -2524,6 +2526,16 @@ public class MainActivity extends Activity {
             dailyCheckedTag = todayTag();
             root.post(new Runnable() {
                 public void run() { checkDailyForToday(); }
+            });
+        }
+        // 背单词按本地日历日翻页：过了午夜 00:00 就是第二天，回到前台立刻重画首页，
+        // 别让「开始背单词」还按昨天的配额灰着、到期词也不出现。
+        // 判断放在 runnable 里再判一次，避免同一天多次 onResume 重复重绘。
+        if (root != null && !todayTag().equals(wordHomeDayTag)) {
+            root.post(new Runnable() {
+                public void run() {
+                    if (screen == S_WORD_HOME && !todayTag().equals(wordHomeDayTag)) renderWordHome();
+                }
             });
         }
         if (aiWebView != null) {
@@ -12373,8 +12385,19 @@ public class MainActivity extends Activity {
         wProg[i * 8 + k] = (byte) ((v >> 8) & 0xFF);
         wProg[i * 8 + k + 1] = (byte) (v & 0xFF);
     }
+    /** 「今天」＝设备本地日历日的天数序号（本地 00:00 翻页）。
+     *  以前是 System.currentTimeMillis()/86400000，那是 UTC 整天数，换日点为 UTC 0 点
+     *  ＝北京时间早上 8 点，日历上明明已经是第二天，配额却没归零、按钮还是灰的。
+     *  先加本地时区偏移（含夏令时）再整除，既按「几月几日」翻页，又保持 +1 / -1
+     *  仍表示明天 / 昨天——复习间隔、到期判断和打卡连续天数都靠这个算，
+     *  不能改成 yyyyMMdd 整数（跨月时「今天 - 1」会是个不存在的日期）。
+     *  旧数据里存的是 UTC 日号：本地 08:00 之后写入的与新口径完全一致，
+     *  只有凌晨 00:00～08:00 写入的会差 1 天（最多让那批词提前一天到期），
+     *  不做破坏性迁移，免得把已学词的到期日改错。 */
     private int todayDay() {
-        return (int) (System.currentTimeMillis() / 86400000L);
+        long now = System.currentTimeMillis();
+        int offset = java.util.TimeZone.getDefault().getOffset(now);
+        return (int) ((now + offset) / 86400000L);
     }
 
 
@@ -13093,6 +13116,7 @@ public class MainActivity extends Activity {
     }
 
     private void renderWordHome() {
+        wordHomeDayTag = todayTag();     // 记下这次是按哪个本地日历日算的配额 / 到期数
         loadWordBooks();
         wordHomeInner.removeAllViews();
         wordHomeInner.addView(makeBack("‹ 返回", new View.OnClickListener() {
