@@ -1536,20 +1536,14 @@ public class MainActivity extends Activity {
         head.setPadding(dp(2), 0, dp(2), dp(2));
         box.addView(head, wrap());
 
-        ScrollView sc = new ScrollView(this);
-        sc.setBackgroundColor(C_CARD);
+        // 正文直接放进 box，整个弹窗一起滚——不再嵌内层滚动容器
         TextView body = new TextView(this);
         body.setText(desc);
         body.setTextSize(m.subtitleSize - 1f);
         body.setTextColor(C_TEXT);
         body.setLineSpacing(dp(2), 1.16f);
         body.setPadding(dp(2), 0, dp(2), dp(1));
-        sc.addView(body);
-        int maxH = Math.min(dp(190), (int) (getResources().getDisplayMetrics().heightPixels * 0.45f));
-        box.addView(sc, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, maxH));
-
-        // 滚动时整块重绘，卡片区域每帧都完整刷新，避免留下上一帧的文字。
-        tuneDialogScroll(sc, box);
+        box.addView(body, wrap());
 
         TextView go = new TextView(this);
         go.setText("立即更新");
@@ -1602,33 +1596,18 @@ public class MainActivity extends Activity {
         });
         box.addView(more, wrap());
 
-        updateDialog = new AlertDialog.Builder(this).setView(box).create();
+        // 整个弹窗包进滚动容器：内容全显示，超屏就上下滑
+        ScrollView sc = new ScrollView(this);
+        sc.setVerticalScrollBarEnabled(false);
+        sc.addView(box, wrap());
+        tuneDialogScroll(sc, box);
+
+        updateDialog = new AlertDialog.Builder(this).setView(sc).create();
         updateDialog.setCancelable(true);
         // 窗口背景透明：弹窗以外完全不遮内容；像素格式也要带透明，否则滚动会留残影。
         tuneDialogWindow(updateDialog);
+        sizeDialogScroll(updateDialog, box);
         updateDialog.show();
-        try {
-            Window w = updateDialog.getWindow();
-            int sw = getResources().getDisplayMetrics().widthPixels;
-            w.setLayout((int) (sw * (m.round ? 0.74f : 0.86f)), WindowManager.LayoutParams.WRAP_CONTENT);
-        } catch (Exception ignored) { }
-
-        // 正文区高度贴合实际字数：内容短就刚好放下（不滚动、下面也不空一大块），
-        // 内容长才封顶到 maxH 再滚动。等弹窗真正布局完在量 body 的真实高度（此时宽度是真实的）。
-        final android.view.ViewTreeObserver dlgVto = box.getViewTreeObserver();
-        dlgVto.addOnGlobalLayoutListener(
-                new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
-                    public void onGlobalLayout() {
-                        int want = body.getMeasuredHeight() + dp(6);   // 多 6dp，避免行距/标点的误差裁掉末行
-                        int h = Math.min(want, maxH);
-                        if (sc.getLayoutParams() != null && sc.getLayoutParams().height != h) {
-                            sc.getLayoutParams().height = h;
-                            sc.requestLayout();
-                        }
-                        // 只量一次：正文高度不会变了，量完就撤监听，免得改高度触发重布局又回调
-                        try { dlgVto.removeOnGlobalLayoutListener(this); } catch (Throwable ignored) { }
-                    }
-                });
     }
 
     private void dismissUpdateDialog() {
@@ -14930,7 +14909,7 @@ public class MainActivity extends Activity {
     }
 
     /** 中文搜词命中多个英文：先弹这个让用户挑一个，点完再查那个词。
-     *  版式和「选单词书」弹窗同一套，不自造样式。 */
+     *  内容全部展开，超屏就整个弹窗上下滚——不嵌内层滚动容器。 */
     private void showWordPickDialog(final List<String> cands) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -14940,7 +14919,7 @@ public class MainActivity extends Activity {
         bg.setCornerRadius(dp(16));
         box.setBackgroundDrawable(bg);
 
-        final AlertDialog d = new AlertDialog.Builder(this).setView(box).create();
+        final AlertDialog[] dh = new AlertDialog[1];
 
         TextView t = new TextView(this);
         t.setText("选一个单词看释义");
@@ -14950,8 +14929,6 @@ public class MainActivity extends Activity {
         t.setGravity(Gravity.CENTER);
         box.addView(t, wrap());
 
-        LinearLayout list = new LinearLayout(this);
-        list.setOrientation(LinearLayout.VERTICAL);
         for (int i = 0; i < cands.size(); i++) {
             final String w = cands.get(i);
             TextView row = new TextView(this);
@@ -14961,42 +14938,19 @@ public class MainActivity extends Activity {
             row.setGravity(Gravity.CENTER);
             row.setSingleLine(true);
             row.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-            row.setPadding(dp(8), dp(9), dp(8), dp(9));
+            row.setPadding(dp(8), dp(7), dp(8), dp(7));
             row.setBackgroundDrawable(pill(C_PILL));
             row.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     vibrate();
-                    try { d.dismiss(); } catch (Throwable ignored) { }
+                    if (dh[0] != null) { try { dh[0].dismiss(); } catch (Throwable ignored) { } }
                     openOnlineWord(w);
                 }
             });
             LinearLayout.LayoutParams lp = wrap();
-            lp.bottomMargin = dp(4);
-            list.addView(row, lp);
+            lp.bottomMargin = dp(3);
+            box.addView(row, lp);
         }
-
-        ScrollView sv = new OverScrollScrollView(this);
-        sv.setVerticalScrollBarEnabled(false);
-        sv.addView(list, wrap());
-        tuneDialogScroll(sv, list);
-        final int pickMaxH = m.round ? dp(150) : dp(240);
-        final LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, pickMaxH);
-        slp.topMargin = dp(4);
-        box.addView(sv, slp);
-        d.setOnShowListener(new DialogInterface.OnShowListener() {
-            public void onShow(DialogInterface dlg) {
-                list.post(new Runnable() {
-                    public void run() {
-                        int h = list.getHeight();
-                        if (h > 0 && h < pickMaxH) {
-                            slp.height = h + dp(2);
-                            sv.setLayoutParams(slp);
-                        }
-                    }
-                });
-            }
-        });
 
         TextView no = new TextView(this);
         no.setText("取消");
@@ -15007,14 +14961,51 @@ public class MainActivity extends Activity {
         no.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 vibrate();
-                try { d.dismiss(); } catch (Throwable ignored) { }
+                if (dh[0] != null) { try { dh[0].dismiss(); } catch (Throwable ignored) { } }
             }
         });
         box.addView(no, wrap());
 
+        // 内容全部展开，外面套一层滚动容器：超屏就整个弹窗上下滑
+        ScrollView sc = new ScrollView(this);
+        sc.setVerticalScrollBarEnabled(false);
+        sc.addView(box, wrap());
+        tuneDialogScroll(sc, box);
+
+        AlertDialog d = new AlertDialog.Builder(this).setView(sc).create();
+        dh[0] = d;
         tuneDialogWindow(d);   // 必须 show() 之前：否则窗口按不透明格式建，滚动会留残影
+        sizeDialogScroll(d, box);   // 注册 onShow、收尺寸（window 在 create 后已存在）
         d.show();
-        sizeDialog(d, 0.9f);
+    }
+
+    /** 有滚动容器的弹窗收尺寸：内容自适应，超屏限到屏高 8 成，超出部分靠外层 ScrollView 滚。
+     *  要在 show 之前调（注册 onShow），onShow 里等 box 布局完再量高度。 */
+    private void sizeDialogScroll(final AlertDialog d, final LinearLayout box) {
+        try {
+            Window w = d.getWindow();
+            if (w == null) return;
+            w.setFormat(android.graphics.PixelFormat.TRANSLUCENT);
+            w.setBackgroundDrawable(new ColorDrawable(0x00000000));
+        } catch (Exception ignored) { }
+        d.setOnShowListener(new DialogInterface.OnShowListener() {
+            public void onShow(DialogInterface dlg) {
+                box.post(new Runnable() {
+                    public void run() {
+                        try {
+                            Window w = d.getWindow();
+                            if (w == null) return;
+                            int sw = getResources().getDisplayMetrics().widthPixels;
+                            int sh = getResources().getDisplayMetrics().heightPixels;
+                            int h = box.getHeight();
+                            int want = (h > 0) ? Math.min(h + dp(4), (int) (sh * 0.82f))
+                                    : (int) (sh * 0.82f);
+                            w.setLayout((int) (sw * (m.round ? 0.78f : 0.9f)), want);
+                        } catch (Exception ignored) { }
+                    }
+                });
+            }
+        });
     }
 
     /** 直接开一条已读出来的词条 JSON。 */
