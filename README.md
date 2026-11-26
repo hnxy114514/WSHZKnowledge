@@ -7,9 +7,14 @@
 > 数据仍是 342 分组 / 1572 叶子 / 1914 编号，注释 728 组 1406 条）
 > 日志加启动打点并落盘、测试通道三候选取高、清掉 ViewTreeObserver 崩溃隐患、修正数学「根式与分数指数幂」的公式写法；
 > 数据仍是 342 分组 / 1572 叶子 / 1914 编号，注释 728 组 1406 条）
+> 复核时间：2026-11-26 20:10（v4.1.0：新增背单词五个页面（主页 / 学习 / 搜词 / 词书设置 / 生词本），
+> 屏幕数 29，搜词在线走有道、离线搜全部已下载词书；设置页按用途重新分组并加「清理缓存」，
+> 右滑返回不再误触长按；知识库数据未变）
 > 这两个时间只用来**辅助**判断本文档是否可能过时；内容是否仍成立、某段是否适用于眼前问题，请以当前代码与实际运行为准，自己判断。
 
 面向手表（腕上穿戴设备）的高中九科知识点汇总 App。内置语文、数学、英语、物理、化学、生物、政治、历史、地理九门科目的知识清单与配图，支持行内数学公式排版（分数、根号、上下角标、向量可嵌套）与人工标注的重点高亮，并具备基于 GitHub Release 的 APK 覆盖更新。
+
+v4.1.0 起英语科目里多了「背单词」：词书按需下载（81 本、15.3 万词条），三档评分 + 间隔复习、生词本、打卡、发音与助记图；「搜单词」有网查有道（中英文都行），没网就在所有已下载词书里按前缀（英文）或释义（中文）搜。
 
 ---
 
@@ -20,11 +25,15 @@ WSHZKnowledge/
 ├── app/                              Android 工程
 │   ├── src/main/
 │   │   ├── java/com/lizard/hsknowledge/
-│   │   │   ├── MainActivity.java        UI + 数学排版引擎 + 更新 + 反馈（单文件，13036 行）
+│   │   │   ├── MainActivity.java        UI + 数学排版引擎 + 更新 + 反馈（单文件，17385 行）
 │   │   │   ├── OverScrollScrollView.java 圆屏内容过滚滚动容器（列表与正文共用，方屏过滚为 0）
 │   │   │   └── ApkFileProvider.java     APK 覆盖安装用的 ContentProvider
 │   │   ├── assets/
 │   │   │   ├── data/                    九科知识库 JSON（构建时自动生成，勿手改）
+│   │   │   ├── kb_cache.bin             九科知识库的预编译缓存（gen_cache.py 生成，启动优先读它）
+│   │   │   ├── dict_books.json          81 本词书的清单（id / 名称 / 词数 / 大小 / 文件名）
+│   │   │   ├── word_pics.txt            助记图索引（词头 → 图床相对路径，1162 条）
+│   │   │   ├── changelog.json           更新日志（App 内更新日志页 + Release 正文都取它）
 │   │   │   └── img/                     配图 PNG（tools/legacy/img_gen 生成，勿手改）
 │   │   ├── res/                         资源（图标、样式、字符串）
 │   │   └── AndroidManifest.xml          版本号、权限、Provider 声明
@@ -36,6 +45,10 @@ WSHZKnowledge/
 │   │   ├── politics.py / history.py / geography.py
 │   │   └── （语文的必背 60 篇、作文素材已整块内联在 chinese.py；旧的 ext_*.py 归档在 tools/legacy/）
 │   ├── build_authored.py               构建数据：递归 TREE → assets/data/nodes（含去重、分数化、定稿、编号 v3）
+│   ├── gen_cache.py                    把 assets/data/*.json 预编译成 assets/kb_cache.bin（每次构建必跑）
+│   ├── gen_books.py                    由词书清单生成 assets/dict_books.json（书名 / 词数 / 大小）
+│   ├── merge_books.py                  合并 / 重命名词书 zip，统一成 `<id>.zip`
+│   ├── gen_pics.py                     由助记图源数据生成 assets/word_pics.txt（词头 → 相对路径）
 │   ├── check_data.py                   数据体检：编号/标题/正文/加粗/LaTeX/附加块（只读，构建后跑一次）
 │   ├── check_notes.py                  注释体检：「译文」块里 ①②③ 的编号体系、词条落点、先后顺序（只读）
 │   ├── bei60_more_q.py                 必背 60 篇的手录例题题库（题干 / 答案 / 出处），纯数据
@@ -58,6 +71,9 @@ WSHZKnowledge/
 │   ├── version.json                    更新兜底用的版本号（App 拉不到 GitHub API 时读它）
 │   ├── update.json                     云端更新包（构建时生成，App 侧兜底数据）
 │   └── thanks.json                     感谢名单的静态备份（API 全不通时 App 读它）
+├── dict/                              81 本词书 zip（`<id>.zip`，App 里按需下载）+ books.json 原始清单
+├── docs/
+│   └── word-memorize-plan.html         背单词功能方案（设计阶段文档；实现细节以代码与本文为准）
 ├── local/                             本地私密文件（凭据、keystore、备忘），已被 .gitignore 排除
 ├── scripts/build.sh                   无 Gradle 构建脚本（aapt2 + javac + d8 + apksigner）
 ├── scripts/release.py                 一键发布：构建 + 创建 Release + 上传 APK + 写 cloud/version.json + 刷新 cloud/thanks.json（`--pre` 预发布 / `--promote` 转正）
@@ -88,6 +104,16 @@ app/src/main/assets/data/*.json  （每科一份 nodes 递归树，构建时生�
         │  打包进 APK
         ▼
 App 启动时在子线程用 parseSubject 递归解析，主线程先显示开屏；主界面用「导航栈 + 通用列表页」渲染
+```
+
+词书是另一条链路（v4.1.0）：
+
+```
+仓库 dict/<id>.zip ──App 里按需下载──▶ filesDir/dict/<id>.json（JSON Lines）
+                                        ├ <id>.idx   （词头 + 行偏移，下载时建一次）
+                                        └ <id>.prog  （每词 8 字节进度）
+                                             ▼
+                                    背单词（S_WORD_STUDY）/ 搜单词（S_WORD_SEARCH）
 ```
 
 改完 `subjects/*.py` 或 `build_authored.py`，跑 `python tools/check_data.py` 做一次体检：
@@ -391,6 +417,9 @@ App 查的 `/releases/latest` 由 GitHub 服务端排除预发布，所以普通
 同时把带 pre 的那条 Release 删掉；版本号不带后缀时则只改 `prerelease` 标记、不重打包。
 预发布期间源码改动尚未提交，正式发版时会一起 `git add -A` 提交并在 `main` 上推送。
 
+**发正式版会自动清理 Release**（用户 2026-11-26 定）：预发布全删——测试包没有保留价值，留着只会让列表越滚越长；
+正式版只留最近 20 个。tag 保留，git 历史不受影响。清理在发版脚本第 7 步，失败只打印提示，不影响已发出的包。
+
 ---
 
 ## 版本号规范（语义化）
@@ -521,7 +550,10 @@ App 查的 `/releases/latest` 由 GitHub 服务端排除预发布，所以普通
 - 数据源：`app/src/main/assets/changelog.json`（随 APK 打包，离线可看），结构 `{"version":1,"log":[{"v":"2.0.0","d":"10-28","items":["…"]}]}`，按版本倒序排列。
 - 入口：设置 → 关于 → 「更新日志」；当前版本那一栏用高亮底色并标注「当前」。
 - **发版纪律**：每次出包前先在 `changelog.json` 的 `log` 数组**最前面**插入本版条目（版本号与 `versionName` 一致），否则新版本在更新日志里查不到。只写用户能感知的变化，一条一句话，不写内部实现。
-- Release 正文（`release.py` 的参数）与 changelog 条目分开维护：前者给「更新说明弹窗」用，后者给「更新日志」用；两边说法要一致。
+- 条目控制在 **15～17 条**：写到二十几条，用户在手表上翻不完，也没人看。
+- Release 正文**直接取** `changelog.json` 里同名版本的条目（`release.py` 的 `changelog_body()`），所以两边天然一致；
+  预发布取的是去掉 `pre` 后缀的那条——测试版的改动本来就记在下一个正式版名下，`pre` 与正式版正文逐字相同。
+- 正式版发布前把「【测试版专用】…」这类条目删掉：正式用户看到的应该是他们要用的功能，而不是我们自测留下的东西。
 
 ---
 
@@ -559,7 +591,7 @@ App 查的 `/releases/latest` 由 GitHub 服务端排除预发布，所以普通
 ## App 端实现地图（不读代码先看这一节）
 
 Android 端只有 **一个 Activity、三个 Java 文件**：
-`MainActivity.java`（13036 行，界面、排版引擎、联网、更新、本地存储全在里面）、
+`MainActivity.java`（17385 行，界面、排版引擎、联网、更新、背单词与搜词、本地存储全在里面）、
 `OverScrollScrollView.java`（圆屏内容过滚的滚动容器，列表和正文共用；方屏过滚距离为 0）、
 `ApkFileProvider.java`（把下载好的安装包以 content:// 交给系统安装器）。
 没有第三方 UI 库，**没有 XML 布局**，除主题与开屏底图外的所有界面都是代码里 new 出来的 View。
@@ -606,9 +638,9 @@ enterApp()：buildUi() 建主界面（setContentView 换掉开屏）→ 定首�
   它是 `setContentView` 的第一份内容，主界面建好后被 `setContentView(root)` 顶掉。
 - 窗口底色全程是 `C_BG`（纯黑），换内容不会白闪。
 
-### 界面骨架：24 个「屏幕」叠在一个 FrameLayout 里
+### 界面骨架：29 个「屏幕」叠在一个 FrameLayout 里
 
-`buildUi()` 建一个 `root`（FrameLayout），往里 add 24 个 `newScreen()`（LinearLayout，位置 `fp()` 铺满），
+`buildUi()` 建一个 `root`（FrameLayout），往里 add 29 个 `newScreen()`（LinearLayout，位置 `fp()` 铺满），
 同一时刻只有一个 `VISIBLE`。切页不是跳 Activity，而是在 `showScreen()` 里把目标页先隐藏、渲染 + 定位完成后
 再淡入显示（见「打开 / 返回页面的过程」），这样中间不会露出空页面或黑底。
 
@@ -640,8 +672,13 @@ enterApp()：buildUi() 建主界面（setContentView 换掉开屏）→ 定首�
 | 21 | S_AI_WEB_CFG | DeepSeek 网页版设置 | `buildAiWebCfgScreen()` → `renderAiWebCfg()` |
 | 22 | S_AI_CHAT | API AI 对话 | `buildAiChatScreen()` → `renderAiChat()` |
 | 23 | S_ORDER | 首页科目排序（设置页的子页） | `buildOrderScreen()` → `renderOrder()` |
+| 24 | S_WORD_HOME | 背单词主页（今日任务 + 打卡） | `buildWordHomeScreen()` → `renderWordHome()` |
+| 25 | S_WORD_STUDY | 背单词（卡片 / 四选一） | `buildWordStudyScreen()` → `renderWordStudy(finished)` |
+| 26 | S_WORD_SEARCH | 搜单词（在线有道 / 离线多书） | `buildWordSearchScreen()` → `renderWordSearch()` |
+| 27 | S_WORD_SETTINGS | 背单词设置（我的词书 / 下载） | `buildWordSettingsScreen()` → `renderWordSettings()` |
+| 28 | S_WORD_VOCAB | 生词本 | `buildWordVocabScreen()` → `renderWordVocab()` |
 
-`SCREEN_COUNT = 24`。六处必须同步改，漏一处就会错位或崩：
+`SCREEN_COUNT = 29`。六处必须同步改，漏一处就会错位或崩：
 ① 常量与 `SCREEN_COUNT`；② `showScreen()` 里**两个** `View[]` 数组——右滑分支的 `ss` 和正常分支的 `screens`
 （**下标即常量值**，只改一个的话，右滑返回会取到错页甚至越界）；
 ③ `screenView(s)` 的 switch；④ `currentScreenView(s)` 的 switch（右滑预览用）；
@@ -652,7 +689,8 @@ enterApp()：buildUi() 建主界面（setContentView 换掉开屏）→ 定首�
 ### 页面内容是懒建的（v3.12.6 起）
 
 `buildUi()` 只建首屏链路要用的那几个页面（主页、节点列表、正文、附加内容、设置），
-其余 12 个页面（WebView、AI 对话/设置、显示调节、关于、更新日志、反馈、个人主页、今日新增、科目排序）
+其余 17 个页面（WebView、AI 对话与三个设置页、显示调节、关于、更新日志、反馈、个人主页、今日新增、
+科目排序、背单词主页 / 学习 / 搜词 / 词书设置 / 生词本）
 **首次进入时才建内容**，由 `ensureScreenBuilt(s)` 在 `showScreen()` 开头补上。
 
 - 只延后「内容」，屏幕 View 本身仍在 `buildUi()` 里 `newScreen()` + `addView()`，
@@ -664,7 +702,7 @@ enterApp()：buildUi() 建主界面（setContentView 换掉开屏）→ 定首�
 
 ### 加一屏的完整步骤
 
-1. 在常量后面加 `S_XXX = 24`，`SCREEN_COUNT` 改 25；
+1. 在常量后面加 `S_XXX = 29`，`SCREEN_COUNT` 改 30；
 2. `buildUi()` 里 `xxxScreen = newScreen(); ... root.addView(xxxScreen, fp());`；
 3. **两个** `View[]` 数组末尾都加 `xxxScreen`（`showScreen()` 的右滑分支 `ss` 与正常分支 `screens`，顺序必须和常量值一致）；
 4. `screenView()` / `currentScreenView()` 各加一个 `case S_XXX:`；`svOf()` 只有列表页才需要加；`scrollOf()` 凡是有滚动容器的都要加；
@@ -758,9 +796,43 @@ Node {
 | `subject_order` | 主页科目顺序 | |
 | `font_size` / `list_size` / `title_size` / `sub_size` / `ui_scale` | 显示设置 | 改完必须重建界面 |
 | `display_tuned` | 是否已完成首次显示调节 | false 时启动进 S_DISPLAY |
+| `word_book` | 当前选用的词书 id | 对应 `filesDir/dict/<id>.json` |
+| `word_daily_new` | 每天新词数（1～200） | 背完转灰，长按可超额 |
+| `word_accent` / `word_auto_speak` / `word_mute` / `word_show_pic` | 发音口音、自动朗读、静音、显示助记图 | 静音与自动发音互斥 |
+| `word_new_day` / `word_new_cnt` | 今天已学的新词数（按天重置） | 和 `word_daily_new` 一起决定按钮灰不灰 |
+| `word_ci_last` / `word_ci_streak` / `word_ci_hist` | 打卡：上次日期 / 连续天数 / 最近 30 天 | 格子只表示「打过几天」，不标日期 |
+| `word_quiz` | 当前是不是四选一模式 | 复习出四选一，新词仍用卡片自评 |
 
 收藏页两级：`S_FAV` 只列「有收藏的科目 + 每日一句」，点科目进 `S_FAV_SUB` 倒序平铺，每行带短路径小字。
 所有节点行右侧都有收藏星（每日一句入口行例外，句子在页面里收藏）。
+
+### 背单词与搜单词（v4.1.0）
+
+**词库文件**（都在 `filesDir/dict/`，词书按需下载，仓库 `dict/` 里是 `<id>.zip` 源包）：
+
+| 文件 | 内容 | 注意 |
+|---|---|---|
+| `<id>.json` | 解压后的 JSON Lines，一行一个词条 | 原库格式，正文与例句都在里面 |
+| `<id>.idx` | `HWZ1`：词头 + 每行字节偏移 + 长度 | 下载时顺序流式扫一遍生成；**不能用 `RandomAccessFile.readLine()`**，它每次只读一个字节，19 MB 的词书要几十秒 |
+| `<id>.prog` | 进度，每词 8 字节（0 ease / 1-2 interval / 3-4 due / 5 reps / 6 lapse / 7 空） | 首次全 0，长度对不上就当新书 |
+| `voice/` | 发音 mp3 缓存 | 上限 5 MB，`trimCache()` 按最久未用删 |
+| `pic/` | 助记图缓存 | 上限 20 MB；设置页「清理缓存」清的就是 `voice/` + `pic/`，词书与 `.prog` 一概不碰 |
+
+**复习算法**：档位 1 / 2 / 4 / 7 / 15 / 30 / 60 天。「认识」升一档，「模糊」取 `max(当前, 下一档 / 2)`（不推进也不倒退），
+「不认识」进重来池（本次最多 3 轮）并 `lapse + 1`；`interval >= 7` 算「已掌握」。
+连着忘两次的词进生词本（`S_WORD_VOCAB`），刷会了自动移出。
+
+**搜单词两条路**：
+- 有网：有道 `dict.youdao.com/suggest`（前缀联想，中英文都行，返回中文或英文候选）+ `jsonapi`（完整词条：音标、多词性释义、双语例句）。
+  免 key、免登录，但没有对外承诺，所以**请求失败就退回本地搜索**，并静默 60 秒不再试网络。
+- 没网：**所有已下载词书**一起搜。英文按前缀（每本书内二分，再汇总去重，右侧标书名）；
+  中文按释义反查（逐行字节预筛 → 命中行才解析 JSON 确认，扫到 20 条或 8 秒即停）。
+- 多书索引在后台线程建一次（词头 + 行号 + 偏移），指纹 = 书 id + 词书大小 + 索引大小，变了才重建；
+  点开只按偏移读命中的那一行，不整本解析。
+- 详情弹窗本地与联网**共用** `showDictCard(head, phone, lines, sents)`，不要再写第二套版式。
+
+**测试包的预置词**：`seedTestReviewWords()` 只在 `versionName` 带 `pre` 时种 6 个复习词（方便试四选一与生词本），
+正式版启动会把它们清零——所以更新日志里不要向正式用户提这件事。
 
 ### 每日一句（联网取句 + 本地文本收藏）
 
@@ -777,6 +849,16 @@ Node {
 - 收藏与历史存「本地号 + 原文」：`ensureDailyNo()` 找同文本的号、没有就取当前最小空号；
   取消收藏或历史被挤出后 `dropDailyIfUnused()` 在无人引用时把文本从 `daily_pool` 删掉，号随之空出复用。
 - 界面：句子卡片和加载块都是**固定 head**，翻页只改文字，不重建列表 —— 否则页面会跳回顶部。
+
+### 设置页：按用途分组 + 清理缓存
+
+- 分组顺序：**显示 / 学习 / 问 AI / 账号与反馈 / 更新与维护 / 关于**。加新设置前先想「用户会在哪一组下面找它」，
+  别顺手往「其他」里塞——v4.1.0 之前「背单词设置」挂在「问 AI」标题下面、「个人主页」和「首页科目排序」混在「其他」里。
+- 入口行统一走 `settingsEntry(text, icon, color, bold, listener)`，说明行统一走 `settingsHint(text, afterToggle)`。
+  以前每个入口各写一遍 TextView 样式，加一行就多一套，字号与内边距很容易走样。
+- 「清理缓存」只删 `dict/voice/` 和 `dict/pic/`（发音与助记图，都能重新下），
+  词书正文、`.idx`、`.prog`、收藏一概不碰；点击先弹确认并写明当前占用，清完 `renderSettings()` 刷新那行小字。
+- 删之前先 `stopVoice()`：正在播放时文件被占用，删不掉。
 
 ### 在线更新与安装
 
