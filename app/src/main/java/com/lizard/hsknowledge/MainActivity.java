@@ -14898,11 +14898,123 @@ public class MainActivity extends Activity {
         row.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 vibrate();
-                if (bk != null) showWordDetail(bk, line);
-                else openOnlineWord(query == null || query.length() == 0 ? word : query);
+                if (bk != null) { showWordDetail(bk, line); return; }
+                if (isChinese(word)) {
+                    // 中文词条：一个中文往往对应好几个英文，先让用户挑，再查那个词
+                    ArrayList<String> cands = parseCandidates(mean, word);
+                    if (cands.size() <= 1) {
+                        openOnlineWord(cands.isEmpty() ? word : cands.get(0));
+                    } else {
+                        showWordPickDialog(cands);
+                    }
+                } else {
+                    openOnlineWord(query == null || query.length() == 0 ? word : query);
+                }
             }
         });
         return row;
+    }
+
+    /** 中文词条的 explain 是一串英文对应（abandon; give up; waive），拆成候选；只留英文。 */
+    private static ArrayList<String> parseCandidates(String explain, String word) {
+        ArrayList<String> out = new ArrayList<String>();
+        String s = explain == null ? "" : explain;
+        for (String part : s.split("[;；,，]")) {
+            String c = part.trim();
+            if (c.length() == 0 || isChinese(c)) continue;
+            c = c.replace(" sth", "").replace(" sb", "").trim();
+            if (c.length() > 0 && !out.contains(c)) out.add(c);
+        }
+        if (out.isEmpty() && word != null && word.length() > 0 && !isChinese(word)) out.add(word);
+        return out;
+    }
+
+    /** 中文搜词命中多个英文：先弹这个让用户挑一个，点完再查那个词。
+     *  版式和「选单词书」弹窗同一套，不自造样式。 */
+    private void showWordPickDialog(final List<String> cands) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(12), dp(10), dp(12), dp(8));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xFF151515);
+        bg.setCornerRadius(dp(16));
+        box.setBackgroundDrawable(bg);
+
+        final AlertDialog d = new AlertDialog.Builder(this).setView(box).create();
+
+        TextView t = new TextView(this);
+        t.setText("选一个单词看释义");
+        t.setTextSize(m.subtitleSize);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setTextColor(Color.WHITE);
+        t.setGravity(Gravity.CENTER);
+        box.addView(t, wrap());
+
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        for (int i = 0; i < cands.size(); i++) {
+            final String w = cands.get(i);
+            TextView row = new TextView(this);
+            row.setText(w);
+            row.setTextSize(m.subtitleSize - 1f);
+            row.setTextColor(C_TEXT);
+            row.setGravity(Gravity.CENTER);
+            row.setSingleLine(true);
+            row.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+            row.setPadding(dp(8), dp(9), dp(8), dp(9));
+            row.setBackgroundDrawable(pill(C_PILL));
+            row.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    vibrate();
+                    try { d.dismiss(); } catch (Throwable ignored) { }
+                    openOnlineWord(w);
+                }
+            });
+            LinearLayout.LayoutParams lp = wrap();
+            lp.bottomMargin = dp(4);
+            list.addView(row, lp);
+        }
+
+        ScrollView sv = new OverScrollScrollView(this);
+        sv.setVerticalScrollBarEnabled(false);
+        sv.addView(list, wrap());
+        tuneDialogScroll(sv, list);
+        final int pickMaxH = m.round ? dp(150) : dp(240);
+        final LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, pickMaxH);
+        slp.topMargin = dp(4);
+        box.addView(sv, slp);
+        d.setOnShowListener(new DialogInterface.OnShowListener() {
+            public void onShow(DialogInterface dlg) {
+                list.post(new Runnable() {
+                    public void run() {
+                        int h = list.getHeight();
+                        if (h > 0 && h < pickMaxH) {
+                            slp.height = h + dp(2);
+                            sv.setLayoutParams(slp);
+                        }
+                    }
+                });
+            }
+        });
+
+        TextView no = new TextView(this);
+        no.setText("取消");
+        no.setTextSize(m.subtitleSize - 1f);
+        no.setGravity(Gravity.CENTER);
+        no.setTextColor(C_SUB);
+        no.setPadding(dp(8), dp(9), dp(8), dp(4));
+        no.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                vibrate();
+                try { d.dismiss(); } catch (Throwable ignored) { }
+            }
+        });
+        box.addView(no, wrap());
+
+        tuneDialogWindow(d);   // 必须 show() 之前：否则窗口按不透明格式建，滚动会留残影
+        d.show();
+        sizeDialog(d, 0.9f);
     }
 
     /** 直接开一条已读出来的词条 JSON。 */
